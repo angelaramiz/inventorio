@@ -154,16 +154,6 @@ export default function ConsultaDashboard() {
             </div>
             <span>INVENTORIO <span className="text-amber-400 font-normal">| CONSULTA</span></span>
           </div>
-
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => window.location.href = "/"}
-            className="rounded-xl gap-2 bg-neutral-800 text-white border-neutral-700 hover:bg-white hover:text-black font-semibold h-9 px-4 transition-all"
-          >
-            <ArrowLeftRight size={14} />
-            Modo Administrador
-          </Button>
         </div>
       </header>
 
@@ -184,27 +174,36 @@ export default function ConsultaDashboard() {
             <CardContent className="p-5 space-y-4">
               
               {/* Scanner Container */}
-              <div className="relative">
-                {isScannerActive ? (
-                  <div className="rounded-2xl overflow-hidden border bg-black aspect-[4/3] w-full flex flex-col relative shadow-inner">
-                    <div id="dashboard-reader" className="w-full h-full object-cover" />
-                    <Button 
-                      onClick={stopScanner}
-                      variant="destructive"
-                      size="sm"
-                      className="absolute bottom-3 right-3 rounded-xl text-xs"
-                    >
-                      Apagar Cámara
+              <div className="relative rounded-2xl overflow-hidden border bg-neutral-900 aspect-[4/3] w-full flex flex-col relative shadow-inner justify-center items-center">
+                {/* HTML5 QR Code Container (Always in DOM) */}
+                <div 
+                  id="dashboard-reader" 
+                  className={`w-full h-full object-cover ${isScannerActive ? "block" : "hidden"}`} 
+                />
+                
+                {/* Fallback Overlay when not active */}
+                {!isScannerActive && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400 space-y-4 p-4 text-center">
+                    <Scan size={36} strokeWidth={1.5} className="text-neutral-500" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-white">Escáner Desactivado</p>
+                      <p className="text-[11px] text-neutral-400 max-w-[200px]">Usa la cámara trasera para escanear el código de barra de la caja</p>
+                    </div>
+                    <Button onClick={startScanner} variant="outline" size="sm" className="rounded-full bg-white text-black hover:bg-neutral-100 font-semibold border-none">
+                      Activar Cámara
                     </Button>
                   </div>
-                ) : (
-                  <Button
-                    onClick={startScanner}
-                    variant="outline"
-                    className="w-full h-24 rounded-2xl border-2 border-dashed border-neutral-300 hover:border-neutral-800 hover:bg-neutral-50 flex flex-col gap-2 transition-all group"
+                )}
+
+                {/* Stop button overlay when active */}
+                {isScannerActive && (
+                  <Button 
+                    onClick={stopScanner}
+                    variant="destructive"
+                    size="sm"
+                    className="absolute bottom-3 right-3 rounded-xl text-xs font-bold"
                   >
-                    <Scan size={28} className="text-neutral-400 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-bold text-neutral-600">Iniciar Escáner de Caja</span>
+                    Apagar Cámara
                   </Button>
                 )}
               </div>
