@@ -11,6 +11,7 @@ export interface Producto {
   tipo: TipoProducto;
   marca_sub: string;
   foto?: string;
+  has_foto?: boolean;
   activo: boolean;
   created_at: string;
 }

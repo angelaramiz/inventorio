@@ -83,19 +83,15 @@ export default function InventoryView() {
                 >
                   <div className="flex items-center gap-4">
                     <div className="relative">
-                      {p.id_producto ? (
+                      {p.has_foto ? (
                         <img 
                           src={`/api/productos/${p.id_producto}/image`}
                           alt={p.sku} 
                           loading="lazy"
                           className="w-20 h-20 sm:w-20 sm:h-20 object-cover rounded-2xl shadow-md border-2 border-white group-hover:scale-105 transition-transform" 
-                          onError={(e) => {
-                            // Fallback to placeholder if image fails to load
-                            (e.target as HTMLImageElement).src = 'https://placehold.co/100x100?text=No+Img';
-                          }}
                         />
                       ) : (
-                        <div className="w-20 h-20 sm:w-20 sm:h-20 bg-neutral-100 rounded-2xl flex items-center justify-center text-neutral-300">
+                        <div className="w-20 h-20 sm:w-20 sm:h-20 bg-neutral-100 rounded-2xl flex items-center justify-center text-neutral-300 border">
                           <ImageIcon size={32} strokeWidth={1} />
                         </div>
                       )}

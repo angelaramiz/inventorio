@@ -15,6 +15,7 @@ CREATE TABLE productos (
     tipo tipo_producto_enum DEFAULT 'otro',
     marca_sub VARCHAR(255),
     foto BYTEA, -- Almacenamiento binario optimizado
+    has_foto BOOLEAN DEFAULT false, -- Indicador rápido para evitar peticiones 404
     activo BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -61,7 +62,7 @@ FROM cajas c
 LEFT JOIN caja_productos cp ON c.id_caja = cp.id_caja
 GROUP BY c.id_caja, c.numero_caja, c.sku, c.estado, c.fecha_creacion;
 
--- 6. Funcion para actualizar updated_at
+-- 6. Funcion para actualizar updated_at y has_foto
 CREATE OR REPLACE FUNCTION trigger_set_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -70,7 +71,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION trigger_set_has_foto()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.has_foto = (NEW.foto IS NOT NULL);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- 7. Triggers
+CREATE TRIGGER set_has_foto_productos
+BEFORE INSERT OR UPDATE ON productos
+FOR EACH ROW
+EXECUTE PROCEDURE trigger_set_has_foto();
 CREATE TRIGGER set_timestamp_productos
 BEFORE UPDATE ON productos
 FOR EACH ROW
@@ -135,5 +148,25 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 -- FROM cajas c
 -- LEFT JOIN caja_productos cp ON c.id_caja = cp.id_caja
 -- GROUP BY c.id_caja, c.numero_caja, c.sku, c.estado, c.fecha_creacion;
+
+-- MIGRACIÓN 2: AGREGAR HAS_FOTO E INSTALAR TRIGGER AUTOMÁTICO EN PRODUCTOS
+-- Si ya tienes la base de datos creada, ejecuta esto en el SQL Editor de Supabase:
+--
+-- ALTER TABLE productos ADD COLUMN has_foto BOOLEAN DEFAULT false;
+-- UPDATE productos SET has_foto = true WHERE foto IS NOT NULL;
+--
+-- CREATE OR REPLACE FUNCTION trigger_set_has_foto()
+-- RETURNS TRIGGER AS $$
+-- BEGIN
+--   NEW.has_foto = (NEW.foto IS NOT NULL);
+--   RETURN NEW;
+-- END;
+-- $$ LANGUAGE plpgsql;
+--
+-- CREATE OR REPLACE TRIGGER set_has_foto_productos
+-- BEFORE INSERT OR UPDATE ON productos
+-- FOR EACH ROW
+-- EXECUTE PROCEDURE trigger_set_has_foto();
+
 
 

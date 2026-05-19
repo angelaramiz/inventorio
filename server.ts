@@ -73,7 +73,7 @@ app.get("/api/productos", async (req, res) => {
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from("productos")
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, activo, created_at")
+      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at")
       .order("created_at", { ascending: false });
     
     if (error) throw error;
@@ -96,7 +96,7 @@ app.post("/api/productos", upload.single('foto'), async (req, res) => {
     const { data, error } = await supabase
       .from("productos")
       .insert([{ sku, ean_13, talla, temporada, tipo, marca_sub, foto }])
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, activo, created_at");
+      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at");
     
     if (error) throw error;
     res.json(data[0]);
@@ -205,7 +205,7 @@ app.get("/api/verificar/:ean", async (req, res) => {
     // 1. Buscar producto por EAN o SKU
     const { data: product, error: pError } = await supabase
       .from("productos")
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, activo, created_at")
+      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at")
       .or(`ean_13.eq.${ean},sku.eq.${ean}`)
       .single();
     

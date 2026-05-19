@@ -218,15 +218,18 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                     {productos.map((item) => (
                       <TableRow key={item.id_producto} className="group hover:bg-neutral-50/50">
                         <TableCell>
-                          <img 
-                            src={`/api/productos/${item.id_producto}/image`}
-                            alt="Producto" 
-                            loading="lazy"
-                            className="w-12 h-12 object-cover rounded-lg shadow-sm border" 
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
+                          {item.productos.has_foto ? (
+                            <img 
+                              src={`/api/productos/${item.id_producto}/image`}
+                              alt="Producto" 
+                              loading="lazy"
+                              className="w-12 h-12 object-cover rounded-lg shadow-sm border" 
+                            />
+                          ) : (
+                            <div className="w-12 h-12 bg-neutral-100 flex items-center justify-center rounded-lg border text-neutral-400">
+                              <ImageIcon size={18} />
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col">

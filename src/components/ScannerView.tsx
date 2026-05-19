@@ -308,12 +308,18 @@ export default function ScannerView() {
                   <div className="space-y-4">
                     {verificationResult?.exists && (
                       <div className="flex justify-center mb-4">
-                        <img 
-                          src={`/api/productos/${verificationResult.product.id_producto}/image`}
-                          alt="Encontrado"
-                          className="w-32 h-32 object-cover rounded-2xl shadow-lg border-2 border-white"
-                          loading="lazy"
-                        />
+                        {verificationResult.product.has_foto ? (
+                          <img 
+                            src={`/api/productos/${verificationResult.product.id_producto}/image`}
+                            alt="Encontrado"
+                            className="w-32 h-32 object-cover rounded-2xl shadow-lg border-2 border-white"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-32 h-32 bg-neutral-100 flex items-center justify-center rounded-2xl border-2 border-white shadow-lg text-neutral-400">
+                            <Package size={48} strokeWidth={1} />
+                          </div>
+                        )}
                       </div>
                     )}
                     <div className="bg-neutral-900 text-white p-4 rounded-xl font-mono text-xl tracking-widest text-center shadow-inner">
