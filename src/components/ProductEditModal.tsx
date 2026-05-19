@@ -197,15 +197,7 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
           {/* SECCIÓN FOTO */}
           <div className="flex flex-col items-center gap-3">
             <div className="relative group">
-              {photo ? (
-                <img src={photo} alt="Preview" className="w-36 h-36 object-cover rounded-2xl shadow-md border-2 border-white" />
-              ) : !deleteFoto && product.has_foto ? (
-                <img 
-                  src={`/api/productos/${product.id_producto}/image?t=${new Date().getTime()}`} 
-                  alt="Actual" 
-                  className="w-36 h-36 object-cover rounded-2xl shadow-md border-2 border-white" 
-                />
-              ) : showCamera ? (
+              {showCamera ? (
                 <div className="relative w-36 h-36 bg-black rounded-2xl overflow-hidden">
                   <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
                   <div className="absolute bottom-2 left-0 right-0 flex justify-center">
@@ -214,6 +206,14 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
                     </Button>
                   </div>
                 </div>
+              ) : photo ? (
+                <img src={photo} alt="Preview" className="w-36 h-36 object-cover rounded-2xl shadow-md border-2 border-white" />
+              ) : !deleteFoto && product.has_foto ? (
+                <img 
+                  src={`/api/productos/${product.id_producto}/image?t=${new Date().getTime()}`} 
+                  alt="Actual" 
+                  className="w-36 h-36 object-cover rounded-2xl shadow-md border-2 border-white" 
+                />
               ) : (
                 <div className="w-36 h-36 bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-2xl flex flex-col items-center justify-center text-neutral-400">
                   <ImageIcon size={32} />

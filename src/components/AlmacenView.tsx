@@ -130,6 +130,7 @@ export default function AlmacenView() {
   const [reportData, setReportData] = useState<any[]>([]);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [downloadingPDF, setDownloadingPDF] = useState(false);
 
   // Loading states
   const [loadingZones, setLoadingZones] = useState(false);
@@ -264,6 +265,47 @@ export default function AlmacenView() {
     }
 
     return result;
+  };
+
+  const handleDownloadPDF = async () => {
+    setDownloadingPDF(true);
+    toast.info("Generando archivo PDF para descarga...");
+    try {
+      const html2pdf = await new Promise<any>((resolve, reject) => {
+        if ((window as any).html2pdf) {
+          resolve((window as any).html2pdf);
+          return;
+        }
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+        script.onload = () => resolve((window as any).html2pdf);
+        script.onerror = () => reject(new Error("No se pudo cargar el motor de PDF"));
+        document.head.appendChild(script);
+      });
+
+      const element = document.getElementById("report-print-area");
+      if (!element) throw new Error("Elemento de reporte no encontrado");
+
+      // Temporarily add a class to force light styling during html2pdf snapshotting
+      element.classList.add("html2pdf-mode");
+
+      const opt = {
+        margin:       10,
+        filename:     `reporte-inventario-${new Date().toISOString().slice(0,10)}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true, logging: false },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      await html2pdf().set(opt).from(element).save();
+      element.classList.remove("html2pdf-mode");
+      toast.success("Descarga iniciada");
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Error al generar PDF: " + err.message);
+    } finally {
+      setDownloadingPDF(false);
+    }
   };
 
   const fetchZones = async () => {
@@ -617,13 +659,27 @@ export default function AlmacenView() {
                   <CardTitle className="text-lg font-bold">Vista Previa del Reporte</CardTitle>
                   <CardDescription>Confirma la estructura del reporte antes de exportar</CardDescription>
                 </div>
-                <Button
-                  onClick={() => window.print()}
-                  className="rounded-xl h-10 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5"
-                >
-                  <Printer size={14} />
-                  Confirmar preview de reporte
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleDownloadPDF}
+                    disabled={downloadingPDF}
+                    className="rounded-xl h-10 bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-xs flex items-center gap-1.5"
+                  >
+                    {downloadingPDF ? (
+                      <Loader2 className="animate-spin" size={14} />
+                    ) : (
+                      <FileText size={14} />
+                    )}
+                    Descargar PDF
+                  </Button>
+                  <Button
+                    onClick={() => window.print()}
+                    className="rounded-xl h-10 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5"
+                  >
+                    <Printer size={14} />
+                    Imprimir / Guardar
+                  </Button>
+                </div>
               </CardHeader>
               
               <style>{`
@@ -639,18 +695,81 @@ export default function AlmacenView() {
                     left: 0;
                     top: 0;
                     width: 100%;
-                    background-color: white !important;
-                    color: black !important;
                     padding: 0 !important;
                     margin: 0 !important;
                   }
-                  .page-break {
-                    page-break-before: always;
-                    break-before: page;
+                }
+
+                /* Styles for print output and direct pdf generation */
+                @media print {
+                  #report-print-area {
+                    background-color: white !important;
+                    color: black !important;
                   }
-                  .no-print {
-                    display: none !important;
+                  /* Force light theme variables and overrides */
+                  :root, .dark, body {
+                    --background: oklch(1 0 0) !important;
+                    --foreground: oklch(0.145 0 0) !important;
+                    --card: oklch(1 0 0) !important;
+                    --card-foreground: oklch(0.145 0 0) !important;
+                    --muted: oklch(0.97 0 0) !important;
+                    --muted-foreground: oklch(0.556 0 0) !important;
+                    --border: oklch(0.922 0 0) !important;
                   }
+                  #report-print-area .bg-white,
+                  #report-print-area .bg-neutral-50\/30,
+                  #report-print-area .bg-neutral-50\/50,
+                  #report-print-area table,
+                  #report-print-area tr,
+                  #report-print-area td {
+                    background-color: white !important;
+                    color: black !important;
+                    border-color: #e5e7eb !important;
+                  }
+                  #report-print-area svg g,
+                  #report-print-area svg rect {
+                    fill: black !important;
+                  }
+                  #report-print-area svg text {
+                    fill: black !important;
+                  }
+                }
+
+                .html2pdf-mode {
+                  background-color: white !important;
+                  color: black !important;
+                  --background: oklch(1 0 0) !important;
+                  --foreground: oklch(0.145 0 0) !important;
+                  --card: oklch(1 0 0) !important;
+                  --card-foreground: oklch(0.145 0 0) !important;
+                  --muted: oklch(0.97 0 0) !important;
+                  --muted-foreground: oklch(0.556 0 0) !important;
+                  --border: oklch(0.922 0 0) !important;
+                }
+                .html2pdf-mode .bg-white,
+                .html2pdf-mode .bg-neutral-50\/30,
+                .html2pdf-mode .bg-neutral-50\/50,
+                .html2pdf-mode table,
+                .html2pdf-mode tr,
+                .html2pdf-mode td {
+                  background-color: white !important;
+                  color: black !important;
+                  border-color: #e5e7eb !important;
+                }
+                .html2pdf-mode svg g,
+                .html2pdf-mode svg rect {
+                  fill: black !important;
+                }
+                .html2pdf-mode svg text {
+                  fill: black !important;
+                }
+
+                .page-break {
+                  page-break-inside: avoid;
+                  break-inside: avoid;
+                }
+                .no-print {
+                  display: none !important;
                 }
               `}</style>
 
