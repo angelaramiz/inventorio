@@ -2,7 +2,7 @@ import { useState, useEffect, FormEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Box, Package, Image as ImageIcon, Loader2, Plus } from "lucide-react";
+import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode } from "lucide-react";
 import { Caja, CajaProducto } from "../types";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,33 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [skuInput, setSkuInput] = useState("");
   const [isAdding, setIsAdding] = useState(false);
+  const [boxSku, setBoxSku] = useState(caja.sku || "");
+  const [isEditingSku, setIsEditingSku] = useState(!caja.sku);
+  const [isSavingSku, setIsSavingSku] = useState(false);
+
+  const handleSaveBoxSku = async (e: FormEvent) => {
+    e.preventDefault();
+    setIsSavingSku(true);
+    try {
+      const resp = await fetch(`/api/cajas/${caja.id_caja}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku: boxSku })
+      });
+      if (resp.ok) {
+        toast.success("SKU de la caja actualizado");
+        caja.sku = boxSku.trim() === "" ? undefined : boxSku.trim();
+        setIsEditingSku(false);
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al actualizar SKU de la caja");
+      }
+    } catch (err) {
+      toast.error("Error al actualizar SKU");
+    } finally {
+      setIsSavingSku(false);
+    }
+  };
 
   useEffect(() => {
     fetchProductos();
@@ -114,26 +141,54 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
         </DialogHeader>
 
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
-          {/* Formulario de Asociación Manual */}
+          {/* Formulario de SKU de la Caja Contenedora (al tope de la modal) */}
           <div className="p-6 pb-4 border-b bg-neutral-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
             <div>
               <h3 className="font-bold text-neutral-900 flex items-center gap-2 text-sm">
-                <Plus size={16} /> Asociar Producto Existente
+                <Barcode size={16} className="text-neutral-500" /> Código SKU de la Caja
               </h3>
-              <p className="text-[11px] text-neutral-500">Ingresa el SKU o EAN-13 para agregarlo a esta caja</p>
+              <p className="text-[11px] text-neutral-500">Asocia el código de barras físico del contenedor</p>
             </div>
-            <form onSubmit={handleAddProductBySku} className="flex gap-2 w-full sm:w-auto">
-              <Input 
-                placeholder="SKU o EAN-13" 
-                value={skuInput}
-                onChange={(e) => setSkuInput(e.target.value)}
-                className="bg-white rounded-xl text-sm h-10 w-full sm:w-60"
-                disabled={isAdding}
-              />
-              <Button type="submit" disabled={isAdding || !skuInput.trim()} className="rounded-xl h-10 bg-neutral-900 text-sm whitespace-nowrap px-4">
-                {isAdding ? <Loader2 className="animate-spin" size={16} /> : "Agregar"}
-              </Button>
-            </form>
+            
+            {isEditingSku ? (
+              <form onSubmit={handleSaveBoxSku} className="flex gap-2 w-full sm:w-auto">
+                <Input 
+                  placeholder="Escanea o escribe SKU de la caja" 
+                  value={boxSku}
+                  onChange={(e) => setBoxSku(e.target.value)}
+                  className="bg-white rounded-xl text-sm h-10 w-full sm:w-60 focus-visible:ring-neutral-400"
+                  disabled={isSavingSku}
+                />
+                <Button type="submit" disabled={isSavingSku} className="rounded-xl h-10 bg-neutral-900 text-sm whitespace-nowrap px-4 text-white font-semibold">
+                  {isSavingSku ? <Loader2 className="animate-spin" size={16} /> : "Guardar"}
+                </Button>
+                {caja.sku && (
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={() => {
+                      setBoxSku(caja.sku || "");
+                      setIsEditingSku(false);
+                    }}
+                    className="rounded-xl h-10 text-sm"
+                  >
+                    Cancelar
+                  </Button>
+                )}
+              </form>
+            ) : (
+              <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end bg-white px-4 py-1.5 rounded-xl border">
+                <span className="font-mono text-sm font-bold text-neutral-900">{boxSku}</span>
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  onClick={() => setIsEditingSku(true)}
+                  className="h-8 w-8 rounded-lg hover:bg-neutral-100"
+                >
+                  <Edit2 size={14} className="text-neutral-600" />
+                </Button>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 overflow-auto p-6">
@@ -195,6 +250,28 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                 </Table>
               </div>
             )}
+          </div>
+
+          {/* Formulario de Asociación Manual de Productos (al fondo de la modal) */}
+          <div className="p-6 pt-4 pb-6 border-t bg-neutral-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
+            <div>
+              <h3 className="font-bold text-neutral-900 flex items-center gap-2 text-sm">
+                <Plus size={16} /> Asociar Producto Existente
+              </h3>
+              <p className="text-[11px] text-neutral-500">Ingresa el SKU o EAN-13 para agregarlo a esta caja</p>
+            </div>
+            <form onSubmit={handleAddProductBySku} className="flex gap-2 w-full sm:w-auto">
+              <Input 
+                placeholder="SKU o EAN-13" 
+                value={skuInput}
+                onChange={(e) => setSkuInput(e.target.value)}
+                className="bg-white rounded-xl text-sm h-10 w-full sm:w-60 focus-visible:ring-neutral-400"
+                disabled={isAdding}
+              />
+              <Button type="submit" disabled={isAdding || !skuInput.trim()} className="rounded-xl h-10 bg-neutral-900 text-sm whitespace-nowrap px-4 text-white font-semibold">
+                {isAdding ? <Loader2 className="animate-spin" size={16} /> : "Agregar"}
+              </Button>
+            </form>
           </div>
         </div>
       </DialogContent>

@@ -156,6 +156,9 @@ export default function CajasView() {
                 </Badge>
               </div>
               <CardTitle className="text-2xl pt-4 font-black tracking-tight">{caja.numero_caja}</CardTitle>
+              {caja.sku && (
+                <span className="text-xs text-neutral-400 font-mono mt-1 block">SKU: {caja.sku}</span>
+              )}
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-4 py-3 border-y border-neutral-50 mb-4">

@@ -18,6 +18,7 @@ export interface Producto {
 export interface Caja {
   id_caja: number;
   numero_caja: string;
+  sku?: string;
   estado: EstadoCaja;
   fecha_creacion: string;
   total_productos_unicos?: number;

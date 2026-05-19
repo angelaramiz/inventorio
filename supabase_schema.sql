@@ -28,6 +28,7 @@ CREATE INDEX idx_productos_activo ON productos(activo);
 CREATE TABLE cajas (
     id_caja SERIAL PRIMARY KEY,
     numero_caja VARCHAR(50) UNIQUE NOT NULL,
+    sku VARCHAR(255) UNIQUE, -- SKU/Código de barras de la caja física
     estado estado_caja_enum NOT NULL DEFAULT 'vacia',
     fecha_creacion TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -51,13 +52,14 @@ CREATE OR REPLACE VIEW vista_total_cajas AS
 SELECT 
     c.id_caja,
     c.numero_caja,
+    c.sku,
     c.estado,
     c.fecha_creacion,
     COUNT(DISTINCT cp.id_producto) as total_productos_unicos,
     COALESCE(SUM(cp.cantidad), 0) as total_unidades
 FROM cajas c
 LEFT JOIN caja_productos cp ON c.id_caja = cp.id_caja
-GROUP BY c.id_caja, c.numero_caja, c.estado, c.fecha_creacion;
+GROUP BY c.id_caja, c.numero_caja, c.sku, c.estado, c.fecha_creacion;
 
 -- 6. Funcion para actualizar updated_at
 CREATE OR REPLACE FUNCTION trigger_set_timestamp()
@@ -111,4 +113,27 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 -- En el panel de Render, cambia el valor de la variable de entorno `SUPABASE_KEY` 
 -- por la clave secreta `service_role` (que se encuentra en Supabase -> API Settings).
 -- La clave `service_role` tiene permisos de administrador y salta las reglas de RLS automáticamente.
+
+-- =========================================================================
+-- 9. MIGRACIÓN PARA BASE DE DATOS EXISTENTE (Si ya la creaste antes)
+-- =========================================================================
+-- Ejecuta este bloque de comandos SQL en tu editor de Supabase para agregar
+-- la columna 'sku' a tus cajas y actualizar la vista correspondiente:
+--
+-- ALTER TABLE cajas ADD COLUMN sku VARCHAR(255) UNIQUE;
+--
+-- DROP VIEW IF EXISTS vista_total_cajas;
+-- CREATE VIEW vista_total_cajas AS
+-- SELECT 
+--     c.id_caja,
+--     c.numero_caja,
+--     c.sku,
+--     c.estado,
+--     c.fecha_creacion,
+--     COUNT(DISTINCT cp.id_producto) as total_productos_unicos,
+--     COALESCE(SUM(cp.cantidad), 0) as total_unidades
+-- FROM cajas c
+-- LEFT JOIN caja_productos cp ON c.id_caja = cp.id_caja
+-- GROUP BY c.id_caja, c.numero_caja, c.sku, c.estado, c.fecha_creacion;
+
 

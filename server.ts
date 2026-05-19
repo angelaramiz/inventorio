@@ -174,11 +174,18 @@ app.put("/api/cajas/:id", async (req, res) => {
   try {
     const supabase = getSupabase();
     const { id } = req.params;
-    const { estado } = req.body;
+    const { estado, sku } = req.body;
+    
+    const updateData: any = {};
+    if (estado !== undefined) updateData.estado = estado;
+    if (sku !== undefined) {
+      // Allow empty string to clear the SKU, or convert to trimmed string
+      updateData.sku = sku.trim() === "" ? null : sku.trim();
+    }
     
     const { data, error } = await supabase
       .from("cajas")
-      .update({ estado })
+      .update(updateData)
       .eq("id_caja", id)
       .select();
     
