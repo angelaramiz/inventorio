@@ -366,20 +366,40 @@ app.delete("/api/productos/:id", async (req, res) => {
   }
 });
 
-// GET /api/conceptos/temporadas - Get dynamic seasons
+// GET /api/conceptos/temporadas - Get dynamic seasons with usage counts
 app.get("/api/conceptos/temporadas", async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { data, error } = await supabase
+    const { data: seasons, error: sErr } = await supabase
       .from("temporadas")
       .select("nombre")
       .order("nombre", { ascending: true });
       
-    if (error) throw error;
-    res.json(data.map((d: any) => d.nombre));
+    if (sErr) throw sErr;
+
+    // Get count of products using each season
+    const { data: counts, error: cErr } = await supabase
+      .from("productos")
+      .select("temporada");
+      
+    const countMap: Record<string, number> = {};
+    if (!cErr && counts) {
+      counts.forEach((p: any) => {
+        const val = p.temporada || 'todouso';
+        countMap[val] = (countMap[val] || 0) + 1;
+      });
+    }
+
+    const result = seasons.map((s: any) => ({
+      nombre: s.nombre,
+      productos_count: countMap[s.nombre] || 0
+    }));
+      
+    res.json(result);
   } catch (error: any) {
     // Fallback if table doesn't exist yet
-    res.json(['verano', 'invierno', 'entretiempo', 'todouso']);
+    const defaults = ['verano', 'invierno', 'entretiempo', 'todouso'];
+    res.json(defaults.map(d => ({ nombre: d, productos_count: 0 })));
   }
 });
 
@@ -423,20 +443,40 @@ app.delete("/api/conceptos/temporadas/:nombre", async (req, res) => {
   }
 });
 
-// GET /api/conceptos/tipos - Get dynamic product types
+// GET /api/conceptos/tipos - Get dynamic product types with usage counts
 app.get("/api/conceptos/tipos", async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { data, error } = await supabase
+    const { data: types, error: tErr } = await supabase
       .from("tipos_producto")
       .select("nombre")
       .order("nombre", { ascending: true });
       
-    if (error) throw error;
-    res.json(data.map((d: any) => d.nombre));
+    if (tErr) throw tErr;
+
+    // Get count of products using each type
+    const { data: counts, error: cErr } = await supabase
+      .from("productos")
+      .select("tipo");
+      
+    const countMap: Record<string, number> = {};
+    if (!cErr && counts) {
+      counts.forEach((p: any) => {
+        const val = p.tipo || 'otro';
+        countMap[val] = (countMap[val] || 0) + 1;
+      });
+    }
+
+    const result = types.map((t: any) => ({
+      nombre: t.nombre,
+      productos_count: countMap[t.nombre] || 0
+    }));
+      
+    res.json(result);
   } catch (error: any) {
     // Fallback if table doesn't exist yet
-    res.json(['pantalon', 'accesorio', 'camisa', 'calzado', 'chaqueta', 'otro']);
+    const defaults = ['pantalon', 'accesorio', 'camisa', 'calzado', 'chaqueta', 'otro'];
+    res.json(defaults.map(d => ({ nombre: d, productos_count: 0 })));
   }
 });
 
@@ -475,6 +515,45 @@ app.delete("/api/conceptos/tipos/:nombre", async (req, res) => {
       
     if (error) throw error;
     res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/consultar-caja/:query - Fetch box inventory by box SKU or number
+app.get("/api/consultar-caja/:query", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { query } = req.params;
+    
+    // Find the box in the cajas table
+    const { data: caja, error: cErr } = await supabase
+      .from("cajas")
+      .select("*")
+      .or(`sku.eq.${query},numero_caja.eq.${query}`)
+      .maybeSingle();
+      
+    if (cErr) throw cErr;
+    if (!caja) {
+      return res.status(404).json({ error: "Caja no encontrada" });
+    }
+    
+    // Fetch products inside the box
+    const { data: productos, error: pErr } = await supabase
+      .from("caja_productos")
+      .select(`
+        id_producto,
+        cantidad,
+        productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at)
+      `)
+      .eq("id_caja", caja.id_caja);
+      
+    if (pErr) throw pErr;
+    
+    res.json({
+      ...caja,
+      productos: productos || []
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

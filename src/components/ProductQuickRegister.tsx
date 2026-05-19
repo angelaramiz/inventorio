@@ -40,13 +40,16 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
         ]);
         const tempVals = await respTemp.json();
         const tipoVals = await respTipos.json();
-        setTemporadas(tempVals);
-        setTipos(tipoVals);
+        const tempNames = tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v);
+        const tipoNames = tipoVals.map((v: any) => typeof v === 'object' ? v.nombre : v);
+        
+        setTemporadas(tempNames);
+        setTipos(tipoNames);
         
         setFormData(prev => ({
           ...prev,
-          temporada: tempVals.includes("todouso") ? "todouso" : (tempVals[0] || ""),
-          tipo: tipoVals.includes("otro") ? "otro" : (tipoVals[0] || "")
+          temporada: tempNames.includes("todouso") ? "todouso" : (tempNames[0] || ""),
+          tipo: tipoNames.includes("otro") ? "otro" : (tipoNames[0] || "")
         }));
       } catch (err) {
         console.error("Error loading dynamic concepts", err);

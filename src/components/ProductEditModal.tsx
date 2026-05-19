@@ -42,8 +42,8 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
         ]);
         const tempVals = await respTemp.json();
         const tipoVals = await respTipos.json();
-        setTemporadas(tempVals);
-        setTipos(tipoVals);
+        setTemporadas(tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
+        setTipos(tipoVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
       } catch (err) {
         console.error("Error loading concepts", err);
       }

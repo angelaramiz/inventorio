@@ -11,10 +11,28 @@ import InventoryView from "./components/InventoryView";
 import CajasView from "./components/CajasView";
 import ScannerView from "./components/ScannerView";
 import ConceptosView from "./components/ConceptosView";
+import ConsultaDashboard from "./components/ConsultaDashboard";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("scanner");
+  const [isDashboard, setIsDashboard] = useState(false);
+
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path === "/dashboard" || path === "/consulta") {
+      setIsDashboard(true);
+    }
+  }, []);
+
+  if (isDashboard) {
+    return (
+      <>
+        <ConsultaDashboard />
+        <Toaster position="top-center" expand={true} richColors />
+      </>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans">

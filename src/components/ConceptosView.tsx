@@ -2,13 +2,19 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Trash2, Plus, Tag, Calendar, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 
+interface Concepto {
+  nombre: string;
+  productos_count: number;
+}
+
 export default function ConceptosView() {
-  const [temporadas, setTemporadas] = useState<string[]>([]);
-  const [tipos, setTipos] = useState<string[]>([]);
+  const [temporadas, setTemporadas] = useState<Concepto[]>([]);
+  const [tipos, setTipos] = useState<Concepto[]>([]);
   const [loadingTemp, setLoadingTemp] = useState(true);
   const [loadingTipos, setLoadingTipos] = useState(true);
   
@@ -151,7 +157,7 @@ export default function ConceptosView() {
         <p className="text-neutral-500 font-medium">Administra las opciones dinámicas del catálogo de productos</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* PANEL DE TEMPORADAS */}
         <Card className="border border-neutral-100 shadow-lg rounded-[2rem] overflow-hidden bg-white flex flex-col">
           <CardHeader className="bg-neutral-50 border-b pb-4">
@@ -177,7 +183,7 @@ export default function ConceptosView() {
               </Button>
             </form>
 
-            <div className="flex-1 min-h-[250px] border border-neutral-100 rounded-2xl overflow-y-auto max-h-[400px] p-2 bg-neutral-50/50">
+            <div className="flex-1 min-h-[250px] border border-neutral-100 rounded-2xl overflow-y-auto max-h-[400px] bg-neutral-50/50 overflow-hidden">
               {loadingTemp ? (
                 <div className="flex flex-col items-center justify-center py-16 text-neutral-400">
                   <Loader2 className="animate-spin mb-2" size={24} />
@@ -188,29 +194,40 @@ export default function ConceptosView() {
                   No hay temporadas registradas.
                 </div>
               ) : (
-                <div className="space-y-1.5">
-                  <AnimatePresence>
-                    {temporadas.map(temp => (
-                      <motion.div
-                        layout
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        key={temp}
-                        className="flex items-center justify-between bg-white px-4 py-3 rounded-xl border border-neutral-100 shadow-sm group hover:border-neutral-300 transition-colors"
-                      >
-                        <span className="capitalize font-bold text-neutral-800 text-sm">{temp}</span>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => handleDeleteTemporada(temp)}
-                          className="h-8 w-8 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Trash2 size={15} />
-                        </Button>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
+                <div className="overflow-x-auto w-full">
+                  <Table>
+                    <TableHeader className="bg-white">
+                      <TableRow>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="text-center">Productos</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {temporadas.map(temp => (
+                        <TableRow key={temp.nombre} className="bg-white hover:bg-neutral-50/30 group/row">
+                          <TableCell className="capitalize font-bold text-neutral-800 text-sm">
+                            {temp.nombre}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <span className="inline-flex items-center justify-center px-2.5 py-0.5 text-xs font-black bg-neutral-100 text-neutral-600 rounded-full border">
+                              {temp.productos_count}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => handleDeleteTemporada(temp.nombre)}
+                              className="h-8 w-8 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg md:opacity-0 md:group-hover/row:opacity-100 transition-opacity"
+                            >
+                              <Trash2 size={15} />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </div>
@@ -242,7 +259,7 @@ export default function ConceptosView() {
               </Button>
             </form>
 
-            <div className="flex-1 min-h-[250px] border border-neutral-100 rounded-2xl overflow-y-auto max-h-[400px] p-2 bg-neutral-50/50">
+            <div className="flex-1 min-h-[250px] border border-neutral-100 rounded-2xl overflow-y-auto max-h-[400px] bg-neutral-50/50 overflow-hidden">
               {loadingTipos ? (
                 <div className="flex flex-col items-center justify-center py-16 text-neutral-400">
                   <Loader2 className="animate-spin mb-2" size={24} />
@@ -253,29 +270,40 @@ export default function ConceptosView() {
                   No hay tipos registrados.
                 </div>
               ) : (
-                <div className="space-y-1.5">
-                  <AnimatePresence>
-                    {tipos.map(t => (
-                      <motion.div
-                        layout
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        key={t}
-                        className="flex items-center justify-between bg-white px-4 py-3 rounded-xl border border-neutral-100 shadow-sm group hover:border-neutral-300 transition-colors"
-                      >
-                        <span className="capitalize font-bold text-neutral-800 text-sm">{t}</span>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => handleDeleteTipo(t)}
-                          className="h-8 w-8 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Trash2 size={15} />
-                        </Button>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
+                <div className="overflow-x-auto w-full">
+                  <Table>
+                    <TableHeader className="bg-white">
+                      <TableRow>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="text-center">Productos</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {tipos.map(t => (
+                        <TableRow key={t.nombre} className="bg-white hover:bg-neutral-50/30 group/row">
+                          <TableCell className="capitalize font-bold text-neutral-800 text-sm">
+                            {t.nombre}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <span className="inline-flex items-center justify-center px-2.5 py-0.5 text-xs font-black bg-neutral-100 text-neutral-600 rounded-full border">
+                              {t.productos_count}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => handleDeleteTipo(t.nombre)}
+                              className="h-8 w-8 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg md:opacity-0 md:group-hover/row:opacity-100 transition-opacity"
+                            >
+                              <Trash2 size={15} />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </div>
