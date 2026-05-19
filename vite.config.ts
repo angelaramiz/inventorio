@@ -14,7 +14,7 @@ export default defineConfig(() => {
     build: {
       // Optimize for production
       target: 'ES2020',
-      minify: 'terser',
+      minify: 'esbuild',
       sourcemap: false,
       rollupOptions: {
         output: {
