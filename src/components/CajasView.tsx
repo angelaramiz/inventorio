@@ -194,7 +194,7 @@ export default function CajasView() {
               activeCajaId === caja.id_caja ? "border-blue-500 shadow-blue-100 shadow-lg" : "border-neutral-100"
             }`}
           >
-            <div className={`absolute top-0 right-0 p-3 flex gap-1 items-center transition-opacity ${activeCajaId === caja.id_caja ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+            <div className={`absolute top-0 right-0 p-3 flex gap-1 items-center z-10 transition-opacity ${activeCajaId === caja.id_caja ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"}`}>
                <Button 
                 variant="ghost" 
                 size="icon" 

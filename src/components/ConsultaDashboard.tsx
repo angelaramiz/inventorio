@@ -664,7 +664,7 @@ export default function ConsultaDashboard() {
                                     {b.cajas.sku || "N/A"}
                                   </TableCell>
                                   <TableCell className="font-extrabold text-[10px] text-neutral-600 uppercase">
-                                    {b.cajas.seccion_nombre ? `${b.cajas.almacen_nombre} | ${b.cajas.seccion_nombre}` : "Sin Ubicación"}
+                                    {b.cajas.seccion_nombre ? `${b.cajas.almacen_nombre} | ${b.cajas.seccion_nombre}` : (b.cajas.almacen_nombre || "Sin Ubicación")}
                                   </TableCell>
                                   <TableCell>
                                     <Badge className={`rounded-full px-2 py-0.5 text-[10px] uppercase font-bold border ${

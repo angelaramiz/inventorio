@@ -21,6 +21,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   const [boxSku, setBoxSku] = useState(caja.sku || "");
   const [isEditingSku, setIsEditingSku] = useState(!caja.sku);
   const [isSavingSku, setIsSavingSku] = useState(false);
+  const [qtyInput, setQtyInput] = useState(1);
 
   // Locations states
   const [zones, setZones] = useState<any[]>([]);
@@ -233,12 +234,13 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       const assignResp = await fetch(`/api/cajas/${caja.id_caja}/asignar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id_producto, force })
+        body: JSON.stringify({ id_producto, force, cantidad: qtyInput })
       });
 
       if (assignResp.ok) {
         toast.success("Producto asociado con éxito");
         setSkuInput("");
+        setQtyInput(1);
         fetchProductos(); // Recargar la lista
       } else {
         const errData = await assignResp.json();
@@ -436,13 +438,22 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
               </h3>
               <p className="text-[11px] text-neutral-500">Ingresa el SKU o EAN-13 para agregarlo a esta caja</p>
             </div>
-            <form onSubmit={handleAddProductBySku} className="flex gap-2 w-full sm:w-auto">
+            <form onSubmit={handleAddProductBySku} className="flex gap-2 w-full sm:w-auto items-center">
               <Input 
                 placeholder="SKU o EAN-13" 
                 value={skuInput}
                 onChange={(e) => setSkuInput(e.target.value)}
-                className="bg-white rounded-xl text-sm h-10 w-full sm:w-60 focus-visible:ring-neutral-400"
+                className="bg-white rounded-xl text-sm h-10 w-full sm:w-48 focus-visible:ring-neutral-400"
                 disabled={isAdding}
+              />
+              <Input 
+                type="number"
+                min={1}
+                value={qtyInput}
+                onChange={(e) => setQtyInput(parseInt(e.target.value) || 1)}
+                className="bg-white rounded-xl text-sm h-10 w-16 text-center font-bold focus-visible:ring-neutral-400"
+                disabled={isAdding}
+                title="Cantidad a asociar"
               />
               <Button type="submit" disabled={isAdding || !skuInput.trim()} className="rounded-xl h-10 bg-neutral-900 text-sm whitespace-nowrap px-4 text-white font-semibold">
                 {isAdding ? <Loader2 className="animate-spin" size={16} /> : "Agregar"}

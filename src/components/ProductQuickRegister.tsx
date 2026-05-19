@@ -9,14 +9,16 @@ import { Producto, Temporada, TipoProducto } from "../types";
 
 interface Props {
   ean: string;
+  defaultQty?: number;
   onClose: () => void;
-  onSuccess: (product: Producto) => void;
+  onSuccess: (product: Producto, qty: number) => void;
 }
 
-export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props) {
+export default function ProductQuickRegister({ ean, defaultQty = 1, onClose, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
+  const [cantidad, setCantidad] = useState(defaultQty);
   const videoRef = useRef<HTMLVideoElement>(null);
   
   const [formData, setFormData] = useState({
@@ -153,7 +155,7 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
       if (resp.ok) {
         const product = await resp.json();
         toast.success("Articulo registrado y sincronizado");
-        onSuccess(product);
+        onSuccess(product, cantidad);
       } else {
         const error = await resp.json();
         toast.error(error.error || "Fallo en registro");
@@ -218,6 +220,18 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
                 value={formData.sku} 
                 onChange={e => setFormData({...formData, sku: e.target.value})}
                 placeholder="Código de barras"
+                className="rounded-xl bg-neutral-50"
+              />
+            </div>
+            
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Cantidad Inicial</label>
+              <Input 
+                type="number"
+                min={1}
+                value={cantidad} 
+                onChange={e => setCantidad(parseInt(e.target.value) || 1)}
+                placeholder="1"
                 className="rounded-xl bg-neutral-50"
               />
             </div>

@@ -110,6 +110,10 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 --   ALTER TABLE cajas DISABLE ROW LEVEL SECURITY;
 --   ALTER TABLE productos DISABLE ROW LEVEL SECURITY;
 --   ALTER TABLE caja_productos DISABLE ROW LEVEL SECURITY;
+--   ALTER TABLE temporadas DISABLE ROW LEVEL SECURITY;
+--   ALTER TABLE tipos_producto DISABLE ROW LEVEL SECURITY;
+--   ALTER TABLE zonas_almacen DISABLE ROW LEVEL SECURITY;
+--   ALTER TABLE zonas_seccion DISABLE ROW LEVEL SECURITY;
 --
 -- OPCIÓN B (Habilitar RLS y permitir acceso público completo):
 -- Ejecuta esto en el SQL Editor de Supabase:
@@ -117,10 +121,18 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 --   ALTER TABLE cajas ENABLE ROW LEVEL SECURITY;
 --   ALTER TABLE productos ENABLE ROW LEVEL SECURITY;
 --   ALTER TABLE caja_productos ENABLE ROW LEVEL SECURITY;
+--   ALTER TABLE temporadas ENABLE ROW LEVEL SECURITY;
+--   ALTER TABLE tipos_producto ENABLE ROW LEVEL SECURITY;
+--   ALTER TABLE zonas_almacen ENABLE ROW LEVEL SECURITY;
+--   ALTER TABLE zonas_seccion ENABLE ROW LEVEL SECURITY;
 --
 --   CREATE POLICY "Permitir todo a anon en cajas" ON cajas FOR ALL TO anon USING (true) WITH CHECK (true);
 --   CREATE POLICY "Permitir todo a anon en productos" ON productos FOR ALL TO anon USING (true) WITH CHECK (true);
 --   CREATE POLICY "Permitir todo a anon en caja_productos" ON caja_productos FOR ALL TO anon USING (true) WITH CHECK (true);
+--   CREATE POLICY "Permitir todo a anon en temporadas" ON temporadas FOR ALL TO anon USING (true) WITH CHECK (true);
+--   CREATE POLICY "Permitir todo a anon en tipos_producto" ON tipos_producto FOR ALL TO anon USING (true) WITH CHECK (true);
+--   CREATE POLICY "Permitir todo a anon en zonas_almacen" ON zonas_almacen FOR ALL TO anon USING (true) WITH CHECK (true);
+--   CREATE POLICY "Permitir todo a anon en zonas_seccion" ON zonas_seccion FOR ALL TO anon USING (true) WITH CHECK (true);
 --
 -- OPCIÓN C (Mejor práctica para servidores backend):
 -- En el panel de Render, cambia el valor de la variable de entorno `SUPABASE_KEY` 
@@ -238,3 +250,7 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 -- LEFT JOIN zonas_almacen za_sec ON zs.id_zona_almacen = za_sec.id_zona_almacen
 -- LEFT JOIN zonas_almacen za_direct ON c.id_zona_almacen = za_direct.id_zona_almacen
 -- GROUP BY c.id_caja, c.numero_caja, c.sku, c.estado, c.fecha_creacion, c.id_zona_seccion, zs.nombre, c.id_zona_almacen, zs.id_zona_almacen, za_direct.nombre, za_sec.nombre;
+--
+-- -- IMPORTANTE: Desactivar RLS si estás usando la API anon pública sin políticas restrictivas
+-- ALTER TABLE zonas_almacen DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE zonas_seccion DISABLE ROW LEVEL SECURITY;

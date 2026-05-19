@@ -19,6 +19,8 @@ export default function ScannerView() {
   const [showQuickRegister, setShowQuickRegister] = useState(false);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [manualInput, setManualInput] = useState("");
+  const [manualQty, setManualQty] = useState(1);
+  const [pendingQty, setPendingQty] = useState(1);
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
   const handleManualSubmit = (e: FormEvent) => {
@@ -27,8 +29,9 @@ export default function ScannerView() {
     
     const query = manualInput.trim();
     setScannedResult(query);
-    verifyProduct(query);
+    verifyProduct(query, manualQty);
     setManualInput("");
+    setManualQty(1);
   };
 
   useEffect(() => {
@@ -140,13 +143,14 @@ export default function ScannerView() {
     // console.warn(errorMessage);
   };
 
-  const verifyProduct = async (ean: string) => {
+  const verifyProduct = async (ean: string, qty = 1) => {
     if (!activeCaja) {
       toast.error("Selecciona una caja activa primero en la pestaña de Cajas");
       return;
     }
 
     setIsChecking(true);
+    setPendingQty(qty);
     try {
       const resp = await fetch(`/api/verificar/${ean}`);
       const data = await resp.json();
@@ -161,7 +165,7 @@ export default function ScannerView() {
         setShowConflictDialog(true);
       } else {
         // Producto existe y no tiene conflicto o ya está en esta caja
-        asignarProducto(data.product.id_producto);
+        asignarProducto(data.product.id_producto, false, qty);
       }
     } catch (error) {
       toast.error("Error al verificar producto");
@@ -170,14 +174,14 @@ export default function ScannerView() {
     }
   };
 
-  const asignarProducto = async (id_producto: number, force = false) => {
+  const asignarProducto = async (id_producto: number, force = false, qty = 1) => {
     if (!activeCaja) return;
 
     try {
       const resp = await fetch(`/api/cajas/${activeCaja.id_caja}/asignar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id_producto, force })
+        body: JSON.stringify({ id_producto, force, cantidad: qty })
       });
       
       if (resp.ok) {
@@ -281,17 +285,30 @@ export default function ScannerView() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-4">
-                <form onSubmit={handleManualSubmit} className="flex gap-2">
-                  <Input 
-                    type="text" 
-                    placeholder="Escribe el SKU o EAN-13 (ej: SKU-PANT-01)" 
-                    value={manualInput}
-                    onChange={(e) => setManualInput(e.target.value)}
-                    className="rounded-2xl h-11 border-neutral-200 focus-visible:ring-neutral-400"
-                    disabled={isChecking}
-                  />
+                <form onSubmit={handleManualSubmit} className="flex gap-2 items-center">
+                  <div className="flex-1">
+                    <Input 
+                      type="text" 
+                      placeholder="Escribe el SKU o EAN-13 (ej: SKU-PANT-01)" 
+                      value={manualInput}
+                      onChange={(e) => setManualInput(e.target.value)}
+                      className="rounded-2xl h-11 border-neutral-200 focus-visible:ring-neutral-400"
+                      disabled={isChecking}
+                    />
+                  </div>
+                  <div className="w-20">
+                    <Input 
+                      type="number"
+                      min={1}
+                      value={manualQty}
+                      onChange={(e) => setManualQty(parseInt(e.target.value) || 1)}
+                      className="rounded-2xl h-11 border-neutral-200 focus-visible:ring-neutral-400 text-center font-bold"
+                      disabled={isChecking}
+                      title="Cantidad a asociar"
+                    />
+                  </div>
                   <Button type="submit" disabled={isChecking || !manualInput.trim()} className="rounded-2xl h-11 px-5 bg-neutral-900 hover:bg-neutral-800 text-white shrink-0 font-semibold transition-all">
-                    Buscar / Asociar
+                    Asociar
                   </Button>
                 </form>
               </CardContent>
@@ -376,9 +393,10 @@ export default function ScannerView() {
       {showQuickRegister && (
         <ProductQuickRegister 
           ean={scannedResult || ""} 
+          defaultQty={pendingQty}
           onClose={() => setShowQuickRegister(false)}
-          onSuccess={(product) => {
-            asignarProducto(product.id_producto);
+          onSuccess={(product, qty) => {
+            asignarProducto(product.id_producto, false, qty);
             setShowQuickRegister(false);
           }}
         />
@@ -411,7 +429,7 @@ export default function ScannerView() {
             </Button>
             <Button 
               className="rounded-full flex-1 bg-neutral-900"
-              onClick={() => asignarProducto(verificationResult.product.id_producto, true)}
+              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty)}
             >
               Mover a esta caja
             </Button>
