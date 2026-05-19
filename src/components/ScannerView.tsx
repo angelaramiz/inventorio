@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Html5QrcodeScanner, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +17,7 @@ export default function ScannerView() {
   const [activeCaja, setActiveCaja] = useState<Caja | null>(null);
   const [showQuickRegister, setShowQuickRegister] = useState(false);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
 
   useEffect(() => {
     // Cargar la caja seleccionada del localStorage si existe
@@ -28,40 +28,83 @@ export default function ScannerView() {
 
     return () => {
       if (scannerRef.current) {
-        scannerRef.current.clear().catch(console.error);
+        const cleanupScanner = async () => {
+          try {
+            if (scannerRef.current?.isScanning) {
+              await scannerRef.current.stop();
+            }
+            scannerRef.current?.clear();
+          } catch (e) {
+            console.error("Error en cleanup del scanner:", e);
+          }
+        };
+        cleanupScanner();
       }
     };
   }, []);
 
-  const startScanner = () => {
-    setIsScannerActive(true);
-    const scanner = new Html5QrcodeScanner(
-      "reader",
-      { 
-        fps: 10, 
-        qrbox: { width: 250, height: 150 },
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.CODE_128
-        ]
-      },
-      false
-    );
+  const startScanner = async () => {
+    try {
+      let html5QrCode = scannerRef.current;
+      if (!html5QrCode) {
+        html5QrCode = new Html5Qrcode("reader");
+        scannerRef.current = html5QrCode;
+      }
 
-    scanner.render(onScanSuccess, onScanError);
-    scannerRef.current = scanner;
+      if (html5QrCode.isScanning) {
+        await html5QrCode.stop();
+      }
+
+      setIsScannerActive(true);
+
+      await html5QrCode.start(
+        { facingMode: "environment" },
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 150 },
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.CODE_128
+          ]
+        },
+        onScanSuccess,
+        (errorMessage) => {
+          // Omitimos loggear warnings constantes de no detección por frame
+        }
+      );
+      toast.success("Cámara iniciada correctamente");
+    } catch (err: any) {
+      console.error("Error al iniciar el escáner:", err);
+      toast.error(`No se pudo acceder a la cámara: ${err.name || "Error"} - ${err.message || err}`);
+      setIsScannerActive(false);
+      if (scannerRef.current) {
+        try {
+          scannerRef.current.clear();
+        } catch (e) {}
+        scannerRef.current = null;
+      }
+    }
   };
 
-  const stopScanner = () => {
+  const stopScanner = async () => {
     if (scannerRef.current) {
-      scannerRef.current.clear().then(() => {
+      try {
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
+        }
+        scannerRef.current.clear();
         setIsScannerActive(false);
         scannerRef.current = null;
-      }).catch(err => {
-        console.error("Failed to clear scanner", err);
-      });
+      } catch (err) {
+        console.error("Failed to stop scanner", err);
+        toast.error("Error al apagar la cámara");
+        setIsScannerActive(false);
+        scannerRef.current = null;
+      }
+    } else {
+      setIsScannerActive(false);
     }
   };
 

@@ -78,3 +78,37 @@ CREATE TRIGGER set_timestamp_cajas
 BEFORE UPDATE ON cajas
 FOR EACH ROW
 EXECUTE PROCEDURE trigger_set_timestamp();
+
+-- =========================================================================
+-- 8. SEGURIDAD Y POLÍTICAS DE ACCESO (Row Level Security - RLS)
+-- =========================================================================
+-- Por defecto, Supabase activa RLS en las tablas nuevas. Si la aplicación no 
+-- utiliza autenticación de usuarios (como esta versión Alpha), las consultas 
+-- del servidor Express usando la clave pública (anon key) fallarán con error 500
+-- ("new row violates row-level security policy").
+--
+-- Tienes tres opciones para solucionar esto en la Consola de Supabase:
+--
+-- OPCIÓN A (Recomendada - Deshabilitar RLS por completo para uso interno/Alpha):
+-- Ejecuta esto en el SQL Editor de Supabase:
+--
+--   ALTER TABLE cajas DISABLE ROW LEVEL SECURITY;
+--   ALTER TABLE productos DISABLE ROW LEVEL SECURITY;
+--   ALTER TABLE caja_productos DISABLE ROW LEVEL SECURITY;
+--
+-- OPCIÓN B (Habilitar RLS y permitir acceso público completo):
+-- Ejecuta esto en el SQL Editor de Supabase:
+--
+--   ALTER TABLE cajas ENABLE ROW LEVEL SECURITY;
+--   ALTER TABLE productos ENABLE ROW LEVEL SECURITY;
+--   ALTER TABLE caja_productos ENABLE ROW LEVEL SECURITY;
+--
+--   CREATE POLICY "Permitir todo a anon en cajas" ON cajas FOR ALL TO anon USING (true) WITH CHECK (true);
+--   CREATE POLICY "Permitir todo a anon en productos" ON productos FOR ALL TO anon USING (true) WITH CHECK (true);
+--   CREATE POLICY "Permitir todo a anon en caja_productos" ON caja_productos FOR ALL TO anon USING (true) WITH CHECK (true);
+--
+-- OPCIÓN C (Mejor práctica para servidores backend):
+-- En el panel de Render, cambia el valor de la variable de entorno `SUPABASE_KEY` 
+-- por la clave secreta `service_role` (que se encuentra en Supabase -> API Settings).
+-- La clave `service_role` tiene permisos de administrador y salta las reglas de RLS automáticamente.
+
