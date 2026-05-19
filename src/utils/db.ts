@@ -4,6 +4,8 @@ export interface CajaHistorial {
   sku: string | null;
   estado: string;
   consultado_at: string;
+  seccion_nombre?: string | null;
+  almacen_nombre?: string | null;
   productos: {
     id_producto: number;
     cantidad: number;

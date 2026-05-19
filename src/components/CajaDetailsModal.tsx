@@ -1,8 +1,8 @@
-import { useState, useEffect, FormEvent } from "react";
+import React, { useState, useEffect, FormEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode } from "lucide-react";
+import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode, ArrowLeftRight } from "lucide-react";
 import { Caja, CajaProducto } from "../types";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,29 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   const [boxSku, setBoxSku] = useState(caja.sku || "");
   const [isEditingSku, setIsEditingSku] = useState(!caja.sku);
   const [isSavingSku, setIsSavingSku] = useState(false);
+
+  // Locations states
+  const [zones, setZones] = useState<any[]>([]);
+  const [sections, setSections] = useState<any[]>([]);
+  
+  const getInitialLocationValue = () => {
+    if ((caja as any).id_zona_seccion) {
+      return `section_${(caja as any).id_zona_seccion}`;
+    }
+    if ((caja as any).id_zona_almacen) {
+      return `zone_${(caja as any).id_zona_almacen}`;
+    }
+    return "";
+  };
+
+  const [selectedValue, setSelectedValue] = useState<string>(getInitialLocationValue());
+
+  // Product transfer states
+  const [transferringItem, setTransferringItem] = useState<CajaProducto | null>(null);
+  const [transferTargetBoxId, setTransferTargetBoxId] = useState<string>("");
+  const [transferQty, setTransferQty] = useState<number>(1);
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [allBoxes, setAllBoxes] = useState<Caja[]>([]);
 
   const handleSaveBoxSku = async (e: FormEvent) => {
     e.preventDefault();
@@ -46,9 +69,120 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
     }
   };
 
+  const handleSaveLocation = async (val: string) => {
+    let id_zona_seccion = null;
+    let id_zona_almacen = null;
+    if (val.startsWith("section_")) {
+      id_zona_seccion = parseInt(val.replace("section_", ""));
+    } else if (val.startsWith("zone_")) {
+      id_zona_almacen = parseInt(val.replace("zone_", ""));
+    }
+
+    try {
+      const resp = await fetch(`/api/cajas/${caja.id_caja}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_zona_seccion, id_zona_almacen })
+      });
+      if (resp.ok) {
+        toast.success("Ubicación física actualizada");
+        (caja as any).id_zona_seccion = id_zona_seccion;
+        (caja as any).id_zona_almacen = id_zona_almacen;
+        
+        // Update local object text representation
+        if (id_zona_seccion) {
+          const sec = sections.find(s => s.id_zona_seccion === id_zona_seccion);
+          (caja as any).seccion_nombre = sec ? sec.nombre : "";
+          (caja as any).almacen_nombre = sec ? sec.almacen_nombre : "";
+        } else if (id_zona_almacen) {
+          const zo = zones.find(z => z.id_zona_almacen === id_zona_almacen);
+          (caja as any).seccion_nombre = "";
+          (caja as any).almacen_nombre = zo ? zo.nombre : "";
+        } else {
+          (caja as any).seccion_nombre = "";
+          (caja as any).almacen_nombre = "";
+        }
+
+        setSelectedValue(val);
+      } else {
+        toast.error("Error al actualizar la ubicación");
+      }
+    } catch (e) {
+      toast.error("Error al conectar con el servidor");
+    }
+  };
+
+  const fetchBoxesForTransfer = async () => {
+    try {
+      const resp = await fetch("/api/cajas");
+      if (resp.ok) {
+        const data = await resp.json();
+        setAllBoxes(data.filter((b: any) => b.id_caja !== caja.id_caja));
+      }
+    } catch (e) {}
+  };
+
+  const startTransfer = (item: CajaProducto) => {
+    setTransferringItem(item);
+    setTransferTargetBoxId("");
+    setTransferQty(1);
+    fetchBoxesForTransfer();
+  };
+
+  const handleExecuteTransfer = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!transferringItem || !transferTargetBoxId || transferQty <= 0) return;
+    
+    setIsTransferring(true);
+    try {
+      const resp = await fetch("/api/transferir-producto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id_caja_origen: caja.id_caja,
+          id_caja_destino: parseInt(transferTargetBoxId),
+          id_producto: transferringItem.id_producto,
+          cantidad: transferQty
+        })
+      });
+      if (resp.ok) {
+        toast.success("Producto transferido con éxito");
+        setTransferringItem(null);
+        fetchProductos();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al transferir");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
   useEffect(() => {
     fetchProductos();
+    fetchLocations();
   }, [caja.id_caja]);
+
+  const fetchLocations = async () => {
+    try {
+      const [zonesResp, sectionsResp] = await Promise.all([
+        fetch("/api/almacen/zonas"),
+        fetch("/api/almacen/secciones")
+      ]);
+      if (zonesResp.ok && sectionsResp.ok) {
+        const [zonesData, sectionsData] = await Promise.all([
+          zonesResp.json(),
+          sectionsResp.json()
+        ]);
+        setZones(zonesData);
+        setSections(sectionsData);
+      }
+    } catch (err) {
+      console.error("Error fetching locations:", err);
+    }
+  };
 
   const fetchProductos = async () => {
     setLoading(true);
@@ -141,54 +275,82 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
         </DialogHeader>
 
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
-          {/* Formulario de SKU de la Caja Contenedora (al tope de la modal) */}
-          <div className="p-6 pb-4 border-b bg-neutral-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
-            <div>
-              <h3 className="font-bold text-neutral-900 flex items-center gap-2 text-sm">
-                <Barcode size={16} className="text-neutral-500" /> Código SKU de la Caja
-              </h3>
-              <p className="text-[11px] text-neutral-500">Asocia el código de barras físico del contenedor</p>
-            </div>
-            
-            {isEditingSku ? (
-              <form onSubmit={handleSaveBoxSku} className="flex gap-2 w-full sm:w-auto">
-                <Input 
-                  placeholder="Escanea o escribe SKU de la caja" 
-                  value={boxSku}
-                  onChange={(e) => setBoxSku(e.target.value)}
-                  className="bg-white rounded-xl text-sm h-10 w-full sm:w-60 focus-visible:ring-neutral-400"
-                  disabled={isSavingSku}
-                />
-                <Button type="submit" disabled={isSavingSku} className="rounded-xl h-10 bg-neutral-900 text-sm whitespace-nowrap px-4 text-white font-semibold">
-                  {isSavingSku ? <Loader2 className="animate-spin" size={16} /> : "Guardar"}
-                </Button>
-                {caja.sku && (
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    onClick={() => {
-                      setBoxSku(caja.sku || "");
-                      setIsEditingSku(false);
-                    }}
-                    className="rounded-xl h-10 text-sm"
-                  >
-                    Cancelar
-                  </Button>
-                )}
-              </form>
-            ) : (
-              <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end bg-white px-4 py-1.5 rounded-xl border">
-                <span className="font-mono text-sm font-bold text-neutral-900">{boxSku}</span>
-                <Button 
-                  size="icon" 
-                  variant="ghost" 
-                  onClick={() => setIsEditingSku(true)}
-                  className="h-8 w-8 rounded-lg hover:bg-neutral-100"
-                >
-                  <Edit2 size={14} className="text-neutral-600" />
-                </Button>
+          {/* Formulario de SKU y Ubicación de la Caja Contenedora (al tope de la modal) */}
+          <div className="p-6 pb-4 border-b bg-neutral-50 grid grid-cols-1 md:grid-cols-2 gap-6 shrink-0">
+            {/* SKU Field */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="font-bold text-neutral-900 flex items-center gap-2 text-sm">
+                  <Barcode size={16} className="text-neutral-500" /> SKU de la Caja
+                </h3>
+                <p className="text-[11px] text-neutral-500">Asocia el código de barras físico</p>
               </div>
-            )}
+              
+              {isEditingSku ? (
+                <form onSubmit={handleSaveBoxSku} className="flex gap-2 w-full sm:w-auto">
+                  <Input 
+                    placeholder="Escribe SKU de la caja" 
+                    value={boxSku}
+                    onChange={(e) => setBoxSku(e.target.value)}
+                    className="bg-white rounded-xl text-sm h-10 w-full sm:w-40 focus-visible:ring-neutral-400"
+                    disabled={isSavingSku}
+                  />
+                  <Button type="submit" disabled={isSavingSku} className="rounded-xl h-10 bg-neutral-900 text-xs px-3 text-white font-semibold">
+                    {isSavingSku ? <Loader2 className="animate-spin" size={16} /> : "Ok"}
+                  </Button>
+                </form>
+              ) : (
+                <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end bg-white px-4 py-1.5 rounded-xl border">
+                  <span className="font-mono text-sm font-bold text-neutral-900">{boxSku || "Sin SKU"}</span>
+                  <Button 
+                    size="icon" 
+                    variant="ghost" 
+                    onClick={() => setIsEditingSku(true)}
+                    className="h-8 w-8 rounded-lg hover:bg-neutral-100"
+                  >
+                    <Edit2 size={14} className="text-neutral-600" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Location Field */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 md:border-l md:pl-6">
+              <div>
+                <h3 className="font-bold text-neutral-900 flex items-center gap-2 text-sm">
+                  📍 Ubicación Física
+                </h3>
+                <p className="text-[11px] text-neutral-500">Asocia a una sección de almacén</p>
+              </div>
+
+              <div className="w-full sm:w-auto">
+                <select
+                  value={selectedValue}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    handleSaveLocation(val);
+                  }}
+                  className="rounded-xl h-10 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full sm:w-48"
+                >
+                  <option value="">Sin ubicación física</option>
+                  {zones.map((zone) => {
+                    const zoneSections = sections.filter(s => s.id_zona_almacen === zone.id_zona_almacen);
+                    return (
+                      <React.Fragment key={zone.id_zona_almacen}>
+                        <option value={`zone_${zone.id_zona_almacen}`} className="font-extrabold bg-neutral-100 text-neutral-950">
+                          {zone.nombre.toUpperCase()} (SOLO ALMACÉN)
+                        </option>
+                        {zoneSections.map((sec) => (
+                          <option key={sec.id_zona_seccion} value={`section_${sec.id_zona_seccion}`}>
+                            &nbsp;&nbsp;↳ {sec.nombre.toUpperCase()}
+                          </option>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
+                </select>
+              </div>
+            </div>
           </div>
 
           <div className="flex-1 overflow-auto p-6">
@@ -212,6 +374,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                       <TableHead>Producto (SKU)</TableHead>
                       <TableHead>Detalles</TableHead>
                       <TableHead className="text-right">Cant.</TableHead>
+                      <TableHead className="w-[120px] text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -247,6 +410,16 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                         <TableCell className="text-right font-black text-lg">
                           <span className="bg-neutral-100 px-3 py-1 rounded-lg border">{item.cantidad}</span>
                         </TableCell>
+                        <TableCell className="text-right">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => startTransfer(item)}
+                            className="h-8 rounded-lg hover:bg-neutral-100 font-bold text-xs flex gap-1 items-center justify-end w-full"
+                          >
+                            <ArrowLeftRight size={12} className="mr-1" /> Transferir
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -278,6 +451,74 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
           </div>
         </div>
       </DialogContent>
+
+      {transferringItem && (
+        <Dialog open={true} onOpenChange={() => setTransferringItem(null)}>
+          <DialogContent className="max-w-md rounded-2xl p-6">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black flex items-center gap-2">
+                <ArrowLeftRight className="text-amber-500" size={20} />
+                Transferir Producto
+              </DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleExecuteTransfer} className="space-y-4 mt-2">
+              <div className="bg-neutral-50 p-4 rounded-xl border space-y-1">
+                <p className="text-xs text-neutral-400 font-bold uppercase">Prenda</p>
+                <p className="text-sm font-extrabold text-neutral-900">{transferringItem.productos.sku}</p>
+                <p className="text-[11px] text-neutral-500 font-mono">Cantidad disponible: {transferringItem.cantidad}</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-neutral-700 block">Caja de Destino</label>
+                <select
+                  required
+                  value={transferTargetBoxId}
+                  onChange={(e) => setTransferTargetBoxId(e.target.value)}
+                  className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                >
+                  <option value="">Selecciona la caja destino</option>
+                  {allBoxes.map((b) => (
+                    <option key={b.id_caja} value={b.id_caja}>
+                      CAJA {b.numero_caja} {b.sku ? `(SKU: ${b.sku})` : ""} - {b.estado.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-neutral-700 block">Cantidad a Transferir</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={transferringItem.cantidad}
+                  required
+                  value={transferQty}
+                  onChange={(e) => setTransferQty(parseInt(e.target.value) || 1)}
+                  className="rounded-xl h-11 bg-white border-neutral-200 text-sm font-semibold"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => setTransferringItem(null)} 
+                  className="flex-1 rounded-xl h-11 font-bold text-xs"
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  type="submit" 
+                  disabled={isTransferring || !transferTargetBoxId || transferQty <= 0 || transferQty > transferringItem.cantidad}
+                  className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold text-xs"
+                >
+                  {isTransferring ? <Loader2 className="animate-spin" size={16} /> : "Transferir"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </Dialog>
   );
 }

@@ -12,12 +12,16 @@ export default function CajasView() {
   const [cajas, setCajas] = useState<Caja[]>([]);
   const [loading, setLoading] = useState(true);
   const [newCajaNumber, setNewCajaNumber] = useState("");
+  const [zones, setZones] = useState<any[]>([]);
+  const [sections, setSections] = useState<any[]>([]);
+  const [selectedValue, setSelectedValue] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [selectedCaja, setSelectedCaja] = useState<Caja | null>(null);
   const [activeCajaId, setActiveCajaId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchCajas();
+    fetchLocations();
     const saved = localStorage.getItem("activeCaja");
     if (saved) {
       setActiveCajaId(JSON.parse(saved).id_caja);
@@ -37,20 +41,52 @@ export default function CajasView() {
     }
   };
 
+  const fetchLocations = async () => {
+    try {
+      const [zonesResp, sectionsResp] = await Promise.all([
+        fetch("/api/almacen/zonas"),
+        fetch("/api/almacen/secciones")
+      ]);
+      if (zonesResp.ok && sectionsResp.ok) {
+        const [zonesData, sectionsData] = await Promise.all([
+          zonesResp.json(),
+          sectionsResp.json()
+        ]);
+        setZones(zonesData);
+        setSections(sectionsData);
+      }
+    } catch (err) {
+      console.error("Error fetching locations:", err);
+    }
+  };
+
   const handleCreateCaja = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCajaNumber) return;
 
     setIsCreating(true);
+    let id_zona_seccion = null;
+    let id_zona_almacen = null;
+    if (selectedValue.startsWith("section_")) {
+      id_zona_seccion = parseInt(selectedValue.replace("section_", ""));
+    } else if (selectedValue.startsWith("zone_")) {
+      id_zona_almacen = parseInt(selectedValue.replace("zone_", ""));
+    }
+
     try {
       const resp = await fetch("/api/cajas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ numero_caja: newCajaNumber })
+        body: JSON.stringify({ 
+          numero_caja: newCajaNumber,
+          id_zona_seccion,
+          id_zona_almacen
+        })
       });
       if (resp.ok) {
         toast.success("Caja creada correctamente");
         setNewCajaNumber("");
+        setSelectedValue("");
         fetchCajas();
       } else {
         const err = await resp.json();
@@ -104,15 +140,38 @@ export default function CajasView() {
           <p className="text-neutral-500">Administra contenedores y estados de envío</p>
         </div>
 
-        <form onSubmit={handleCreateCaja} className="flex gap-2 bg-white p-2 rounded-2xl shadow-sm border">
+        <form onSubmit={handleCreateCaja} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white p-2 rounded-2xl shadow-sm border w-full md:w-auto">
           <Input 
             placeholder="Nº de Caja (ej: 001)" 
             value={newCajaNumber}
             onChange={e => setNewCajaNumber(e.target.value)}
-            className="border-none bg-transparent focus-visible:ring-0 w-44"
+            className="border-none bg-transparent focus-visible:ring-0 w-full sm:w-36 h-10 text-sm font-semibold"
           />
-          <Button disabled={isCreating} type="submit" className="rounded-xl h-10 bg-neutral-900">
-            {isCreating ? <Loader2 className="animate-spin" /> : <Plus className="mr-2" size={18} />}
+          <div className="h-6 w-px bg-neutral-200 hidden sm:block"></div>
+          <select
+            value={selectedValue}
+            onChange={e => setSelectedValue(e.target.value)}
+            className="bg-neutral-50 px-3 py-2 rounded-xl text-xs font-bold border border-neutral-100 outline-none w-full sm:w-48 h-10"
+          >
+            <option value="">Sin Ubicación</option>
+            {zones.map((zone) => {
+              const zoneSections = sections.filter(s => s.id_zona_almacen === zone.id_zona_almacen);
+              return (
+                <React.Fragment key={zone.id_zona_almacen}>
+                  <option value={`zone_${zone.id_zona_almacen}`} className="font-extrabold bg-neutral-100 text-neutral-950">
+                    {zone.nombre.toUpperCase()} (SOLO ALMACÉN)
+                  </option>
+                  {zoneSections.map((sec) => (
+                    <option key={sec.id_zona_seccion} value={`section_${sec.id_zona_seccion}`}>
+                      &nbsp;&nbsp;↳ {sec.nombre.toUpperCase()}
+                    </option>
+                  ))}
+                </React.Fragment>
+              );
+            })}
+          </select>
+          <Button disabled={isCreating} type="submit" className="rounded-xl h-10 bg-neutral-900 px-5 font-bold">
+            {isCreating ? <Loader2 className="animate-spin" size={16} /> : <Plus className="mr-2" size={18} />}
             Crear
           </Button>
         </form>
@@ -161,6 +220,19 @@ export default function CajasView() {
               )}
             </CardHeader>
             <CardContent>
+              {/* Location Badge */}
+              <div className="pb-3 flex">
+                {(caja as any).almacen_nombre ? (
+                  <span className="font-extrabold text-neutral-700 bg-neutral-100 px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider border">
+                    📍 {((caja as any).almacen_nombre || "")} {((caja as any).seccion_nombre) ? `| ${((caja as any).seccion_nombre)}` : ""}
+                  </span>
+                ) : (
+                  <span className="italic text-neutral-400 bg-neutral-50 px-2.5 py-1 rounded-lg text-[9px] border">
+                    📍 Sin ubicación
+                  </span>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-4 py-3 border-y border-neutral-50 mb-4">
                 <div>
                   <p className="text-[10px] uppercase font-bold text-neutral-400">Modelos</p>

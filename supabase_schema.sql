@@ -188,3 +188,53 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 --
 -- INSERT INTO temporadas (nombre) VALUES ('verano'), ('invierno'), ('entretiempo'), ('todouso') ON CONFLICT DO NOTHING;
 -- INSERT INTO tipos_producto (nombre) VALUES ('pantalon'), ('accesorio'), ('camisa'), ('calzado'), ('chaqueta'), ('otro') ON CONFLICT DO NOTHING;
+
+-- MIGRACIÓN 4: UBICACIONES DE ALMACÉN Y SECCIONES
+-- Ejecuta esto en el SQL Editor de Supabase:
+--
+-- CREATE TABLE IF NOT EXISTS zonas_almacen (
+--     id_zona_almacen SERIAL PRIMARY KEY,
+--     nombre VARCHAR(100) UNIQUE NOT NULL
+-- );
+--
+-- CREATE TABLE IF NOT EXISTS zonas_seccion (
+--     id_zona_seccion SERIAL PRIMARY KEY,
+--     nombre VARCHAR(100) NOT NULL,
+--     id_zona_almacen INT REFERENCES zonas_almacen(id_zona_almacen) ON DELETE CASCADE,
+--     UNIQUE(nombre, id_zona_almacen)
+-- );
+--
+-- -- Poblar zonas de almacén por defecto
+-- INSERT INTO zonas_almacen (nombre) VALUES 
+-- ('bodega superior'), 
+-- ('bodega inferior'), 
+-- ('piso venta'), 
+-- ('zona pos'), 
+-- ('probadores')
+-- ON CONFLICT (nombre) DO NOTHING;
+--
+-- -- Agregar columna de sección y almacén directo a cajas
+-- ALTER TABLE cajas ADD COLUMN IF NOT EXISTS id_zona_seccion INT REFERENCES zonas_seccion(id_zona_seccion) ON DELETE SET NULL;
+-- ALTER TABLE cajas ADD COLUMN IF NOT EXISTS id_zona_almacen INT REFERENCES zonas_almacen(id_zona_almacen) ON DELETE SET NULL;
+--
+-- -- Recrear la vista de cajas para incluir la sección y almacén de forma dinámica
+-- DROP VIEW IF EXISTS vista_total_cajas;
+-- CREATE VIEW vista_total_cajas AS
+-- SELECT 
+--     c.id_caja,
+--     c.numero_caja,
+--     c.sku,
+--     c.estado,
+--     c.fecha_creacion,
+--     c.id_zona_seccion,
+--     zs.nombre as seccion_nombre,
+--     COALESCE(c.id_zona_almacen, zs.id_zona_almacen) as id_zona_almacen,
+--     COALESCE(za_direct.nombre, za_sec.nombre) as almacen_nombre,
+--     COUNT(DISTINCT cp.id_producto) as total_productos_unicos,
+--     COALESCE(SUM(cp.cantidad), 0) as total_unidades
+-- FROM cajas c
+-- LEFT JOIN caja_productos cp ON c.id_caja = cp.id_caja
+-- LEFT JOIN zonas_seccion zs ON c.id_zona_seccion = zs.id_zona_seccion
+-- LEFT JOIN zonas_almacen za_sec ON zs.id_zona_almacen = za_sec.id_zona_almacen
+-- LEFT JOIN zonas_almacen za_direct ON c.id_zona_almacen = za_direct.id_zona_almacen
+-- GROUP BY c.id_caja, c.numero_caja, c.sku, c.estado, c.fecha_creacion, c.id_zona_seccion, zs.nombre, c.id_zona_almacen, zs.id_zona_almacen, za_direct.nombre, za_sec.nombre;

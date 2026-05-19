@@ -155,11 +155,20 @@ app.get("/api/cajas", async (req, res) => {
 app.post("/api/cajas", async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { numero_caja } = req.body;
+    const { numero_caja, id_zona_seccion, id_zona_almacen } = req.body;
+    
+    const insertData: any = { numero_caja, estado: 'vacia' };
+    if (id_zona_seccion !== undefined && id_zona_seccion !== null && id_zona_seccion !== "") {
+      insertData.id_zona_seccion = parseInt(id_zona_seccion);
+      insertData.id_zona_almacen = null;
+    } else if (id_zona_almacen !== undefined && id_zona_almacen !== null && id_zona_almacen !== "") {
+      insertData.id_zona_almacen = parseInt(id_zona_almacen);
+      insertData.id_zona_seccion = null;
+    }
     
     const { data, error } = await supabase
       .from("cajas")
-      .insert([{ numero_caja, estado: 'vacia' }])
+      .insert([insertData])
       .select();
     
     if (error) throw error;
@@ -174,13 +183,24 @@ app.put("/api/cajas/:id", async (req, res) => {
   try {
     const supabase = getSupabase();
     const { id } = req.params;
-    const { estado, sku } = req.body;
+    const { estado, sku, id_zona_seccion, id_zona_almacen } = req.body;
     
     const updateData: any = {};
     if (estado !== undefined) updateData.estado = estado;
     if (sku !== undefined) {
-      // Allow empty string to clear the SKU, or convert to trimmed string
       updateData.sku = sku.trim() === "" ? null : sku.trim();
+    }
+    if (id_zona_seccion !== undefined) {
+      updateData.id_zona_seccion = id_zona_seccion === "" || id_zona_seccion === null ? null : parseInt(id_zona_seccion);
+      if (updateData.id_zona_seccion !== null) {
+        updateData.id_zona_almacen = null;
+      }
+    }
+    if (id_zona_almacen !== undefined) {
+      updateData.id_zona_almacen = id_zona_almacen === "" || id_zona_almacen === null ? null : parseInt(id_zona_almacen);
+      if (updateData.id_zona_almacen !== null) {
+        updateData.id_zona_seccion = null;
+      }
     }
     
     const { data, error } = await supabase
@@ -526,9 +546,9 @@ app.get("/api/consultar-caja/:query", async (req, res) => {
     const supabase = getSupabase();
     const { query } = req.params;
     
-    // Find the box in the cajas table
+    // Find the box in the vista_total_cajas view to get section/warehouse names
     const { data: caja, error: cErr } = await supabase
-      .from("cajas")
+      .from("vista_total_cajas")
       .select("*")
       .or(`sku.eq.${query},numero_caja.eq.${query}`)
       .maybeSingle();
@@ -554,6 +574,359 @@ app.get("/api/consultar-caja/:query", async (req, res) => {
       ...caja,
       productos: productos || []
     });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/consultar-producto/:query - Query boxes containing a specific product by SKU or EAN-13
+app.get("/api/consultar-producto/:query", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { query } = req.params;
+    
+    // Find the product by SKU or EAN-13
+    const { data: product, error: pErr } = await supabase
+      .from("productos")
+      .select("*")
+      .or(`sku.eq.${query},ean_13.eq.${query}`)
+      .maybeSingle();
+      
+    if (pErr) throw pErr;
+    if (!product) {
+      return res.status(404).json({ error: "Producto no encontrado en el sistema" });
+    }
+    
+    // Get boxes containing this product, with nested warehouse section and warehouse zone info
+    const { data: boxes, error: bErr } = await supabase
+      .from("caja_productos")
+      .select(`
+        cantidad,
+        cajas (
+          id_caja, 
+          numero_caja, 
+          sku, 
+          estado,
+          id_zona_seccion,
+          id_zona_almacen,
+          zonas_seccion (
+            nombre,
+            zonas_almacen (nombre)
+          ),
+          zonas_almacen (
+            nombre
+          )
+        )
+      `)
+      .eq("id_producto", product.id_producto);
+      
+    if (bErr) throw bErr;
+    
+    const resultBoxes = (boxes || []).map((b: any) => {
+      const c = b.cajas;
+      const seccion = c.zonas_seccion;
+      const almacen = seccion ? seccion.zonas_almacen : c.zonas_almacen;
+      return {
+        cantidad: b.cantidad,
+        cajas: {
+          id_caja: c.id_caja,
+          numero_caja: c.numero_caja,
+          sku: c.sku,
+          estado: c.estado,
+          seccion_nombre: seccion ? seccion.nombre : null,
+          almacen_nombre: almacen ? almacen.nombre : null
+        }
+      };
+    });
+    
+    res.json({
+      product,
+      boxes: resultBoxes
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/transferir-producto - Transfer quantity of a product between boxes
+app.post("/api/transferir-producto", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id_caja_origen, id_caja_destino, id_producto, cantidad } = req.body;
+    
+    if (!id_caja_origen || !id_caja_destino || !id_producto || !cantidad || cantidad <= 0) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos o la cantidad es inválida" });
+    }
+    
+    if (parseInt(id_caja_origen) === parseInt(id_caja_destino)) {
+      return res.status(400).json({ error: "La caja de origen y destino no pueden ser la misma" });
+    }
+    
+    // 1. Check if product exists in origin box and has enough quantity
+    const { data: origItem, error: origErr } = await supabase
+      .from("caja_productos")
+      .select("*")
+      .eq("id_caja", id_caja_origen)
+      .eq("id_producto", id_producto)
+      .maybeSingle();
+      
+    if (origErr) throw origErr;
+    if (!origItem || origItem.cantidad < cantidad) {
+      return res.status(400).json({ error: "La caja origen no cuenta con la cantidad suficiente del producto" });
+    }
+    
+    // 2. Perform transfer
+    const newOrigQty = origItem.cantidad - cantidad;
+    
+    if (newOrigQty === 0) {
+      // Delete relation from origin
+      const { error: delErr } = await supabase
+        .from("caja_productos")
+        .delete()
+        .eq("id_caja", id_caja_origen)
+        .eq("id_producto", id_producto);
+      if (delErr) throw delErr;
+    } else {
+      // Update origin quantity
+      const { error: updErr } = await supabase
+        .from("caja_productos")
+        .update({ cantidad: newOrigQty })
+        .eq("id_caja", id_caja_origen)
+        .eq("id_producto", id_producto);
+      if (updErr) throw updErr;
+    }
+    
+    // Check if product already exists in target box
+    const { data: destItem, error: destErr } = await supabase
+      .from("caja_productos")
+      .select("*")
+      .eq("id_caja", id_caja_destino)
+      .eq("id_producto", id_producto)
+      .maybeSingle();
+      
+    if (destErr) throw destErr;
+    
+    if (destItem) {
+      // Update destination quantity
+      const { error: destUpdErr } = await supabase
+        .from("caja_productos")
+        .update({ cantidad: destItem.cantidad + cantidad })
+        .eq("id_caja", id_caja_destino)
+        .eq("id_producto", id_producto);
+      if (destUpdErr) throw destUpdErr;
+    } else {
+      // Insert new relation at destination
+      const { error: insErr } = await supabase
+        .from("caja_productos")
+        .insert([{ id_caja: id_caja_destino, id_producto, cantidad }]);
+      if (insErr) throw insErr;
+    }
+    
+    // 3. Update origin box state if it is now empty
+    const { data: remainingOrig } = await supabase
+      .from("caja_productos")
+      .select("cantidad")
+      .eq("id_caja", id_caja_origen);
+      
+    if (!remainingOrig || remainingOrig.length === 0) {
+      await supabase.from("cajas").update({ estado: 'vacia' }).eq("id_caja", id_caja_origen);
+    }
+    
+    // 4. Update destination box state if it was empty
+    const { data: destBox } = await supabase
+      .from("cajas")
+      .select("estado")
+      .eq("id_caja", id_caja_destino)
+      .single();
+      
+    if (destBox && destBox.estado === 'vacia') {
+      await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", id_caja_destino);
+    }
+    
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- WAREHOUSE LOCATIONS ENDPOINTS ---
+
+// GET /api/almacen/zonas - List all warehouse zones
+app.get("/api/almacen/zonas", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data: zones, error: zErr } = await supabase
+      .from("zonas_almacen")
+      .select("*")
+      .order("nombre", { ascending: true });
+      
+    if (zErr) throw zErr;
+    res.json(zones);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/almacen/zonas - Create a warehouse zone
+app.post("/api/almacen/zonas", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({ error: "El nombre es requerido" });
+    }
+    
+    const cleanNombre = nombre.trim().toLowerCase();
+    const { data, error } = await supabase
+      .from("zonas_almacen")
+      .insert([{ nombre: cleanNombre }])
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/almacen/zonas/:id - Update warehouse zone name
+app.put("/api/almacen/zonas/:id", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id } = req.params;
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({ error: "El nombre es requerido" });
+    }
+    
+    const cleanNombre = nombre.trim().toLowerCase();
+    const { data, error } = await supabase
+      .from("zonas_almacen")
+      .update({ nombre: cleanNombre })
+      .eq("id_zona_almacen", id)
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/almacen/zonas/:id - Delete warehouse zone
+app.delete("/api/almacen/zonas/:id", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id } = req.params;
+    
+    const { error } = await supabase
+      .from("zonas_almacen")
+      .delete()
+      .eq("id_zona_almacen", id);
+      
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/almacen/secciones - List all section zones
+app.get("/api/almacen/secciones", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    
+    const { data: sections, error: sErr } = await supabase
+      .from("zonas_seccion")
+      .select(`
+        id_zona_seccion,
+        nombre,
+        id_zona_almacen,
+        zonas_almacen (nombre)
+      `)
+      .order("nombre", { ascending: true });
+      
+    if (sErr) throw sErr;
+    
+    const result = (sections || []).map((s: any) => ({
+      id_zona_seccion: s.id_zona_seccion,
+      nombre: s.nombre,
+      id_zona_almacen: s.id_zona_almacen,
+      almacen_nombre: s.zonas_almacen ? s.zonas_almacen.nombre : "Sin almacén"
+    }));
+    
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/almacen/secciones - Create section zone
+app.post("/api/almacen/secciones", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { nombre, id_zona_almacen } = req.body;
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({ error: "El nombre es requerido" });
+    }
+    if (!id_zona_almacen) {
+      return res.status(400).json({ error: "La zona de almacén es requerida" });
+    }
+    
+    const cleanNombre = nombre.trim().toLowerCase();
+    const { data, error } = await supabase
+      .from("zonas_seccion")
+      .insert([{ nombre: cleanNombre, id_zona_almacen: parseInt(id_zona_almacen) }])
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/almacen/secciones/:id - Update section zone
+app.put("/api/almacen/secciones/:id", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id } = req.params;
+    const { nombre, id_zona_almacen } = req.body;
+    
+    const updateData: any = {};
+    if (nombre !== undefined && nombre.trim() !== "") {
+      updateData.nombre = nombre.trim().toLowerCase();
+    }
+    if (id_zona_almacen !== undefined) {
+      updateData.id_zona_almacen = parseInt(id_zona_almacen);
+    }
+    
+    const { data, error } = await supabase
+      .from("zonas_seccion")
+      .update(updateData)
+      .eq("id_zona_seccion", id)
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/almacen/secciones/:id - Delete section zone
+app.delete("/api/almacen/secciones/:id", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id } = req.params;
+    
+    const { error } = await supabase
+      .from("zonas_seccion")
+      .delete()
+      .eq("id_zona_seccion", id);
+      
+    if (error) throw error;
+    res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
