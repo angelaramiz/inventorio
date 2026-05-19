@@ -254,6 +254,32 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
     }
   };
 
+  const handleUpdateQty = async (id_producto: number, newQty: number) => {
+    if (newQty < 0) return;
+    
+    if (newQty === 0) {
+      const confirmDelete = window.confirm("¿Seguro que deseas eliminar este producto de la caja?");
+      if (!confirmDelete) return;
+    }
+    
+    try {
+      const resp = await fetch(`/api/cajas/${caja.id_caja}/productos/${id_producto}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cantidad: newQty })
+      });
+      if (resp.ok) {
+        toast.success(newQty === 0 ? "Producto removido" : "Cantidad actualizada");
+        fetchProductos();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al actualizar cantidad");
+      }
+    } catch (e) {
+      toast.error("Error al actualizar cantidad");
+    }
+  };
+
   const totalUnidades = loading ? (caja.total_unidades || 0) : productos.reduce((sum, item) => sum + item.cantidad, 0);
 
   return (
@@ -410,7 +436,33 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                           </div>
                         </TableCell>
                         <TableCell className="text-right font-black text-lg">
-                          <span className="bg-neutral-100 px-3 py-1 rounded-lg border">{item.cantidad}</span>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateQty(item.id_producto, item.cantidad - 1)}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg border bg-white hover:bg-neutral-100 active:scale-95 transition-all text-neutral-600 font-bold text-xs select-none"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              value={item.cantidad}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                if (!isNaN(val) && val >= 0) {
+                                  handleUpdateQty(item.id_producto, val);
+                                }
+                              }}
+                              className="w-12 h-7 text-center font-black text-sm bg-neutral-50 border rounded-lg focus:outline-none focus:ring-1 focus:ring-neutral-900 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateQty(item.id_producto, item.cantidad + 1)}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg border bg-white hover:bg-neutral-100 active:scale-95 transition-all text-neutral-600 font-bold text-xs select-none"
+                            >
+                              +
+                            </button>
+                          </div>
                         </TableCell>
                         <TableCell className="text-right">
                           <Button 

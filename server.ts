@@ -426,6 +426,63 @@ app.get("/api/cajas/:id/productos", async (req, res) => {
   }
 });
 
+// PUT /api/cajas/:id/productos/:id_producto - Update product quantity in box
+app.put("/api/cajas/:id/productos/:id_producto", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const id_caja = parseInt(req.params.id);
+    const id_producto = parseInt(req.params.id_producto);
+    const { cantidad } = req.body;
+    
+    if (isNaN(id_caja) || id_caja <= 0 || isNaN(id_producto) || id_producto <= 0) {
+      return res.status(400).json({ error: "IDs inválidos" });
+    }
+    
+    const parsedCantidad = parseInt(cantidad);
+    if (isNaN(parsedCantidad) || parsedCantidad < 0) {
+      return res.status(400).json({ error: "Cantidad inválida" });
+    }
+    
+    if (parsedCantidad === 0) {
+      // Delete the product relation from the box
+      const { error: delErr } = await supabase
+        .from("caja_productos")
+        .delete()
+        .eq("id_caja", id_caja)
+        .eq("id_producto", id_producto);
+      if (delErr) throw delErr;
+      
+      // Update box state to vacia if there are no more products
+      const { data: remaining } = await supabase
+        .from("caja_productos")
+        .select("cantidad")
+        .eq("id_caja", id_caja);
+        
+      if (!remaining || remaining.length === 0) {
+        await supabase.from("cajas").update({ estado: 'vacia' }).eq("id_caja", id_caja);
+      }
+    } else {
+      // Update the quantity
+      const { error: updErr } = await supabase
+        .from("caja_productos")
+        .update({ cantidad: parsedCantidad })
+        .eq("id_caja", id_caja)
+        .eq("id_producto", id_producto);
+      if (updErr) throw updErr;
+      
+      // Update box state to activa if it was vacia
+      const { data: caja } = await supabase.from("cajas").select("estado").eq("id_caja", id_caja).single();
+      if (caja?.estado === 'vacia') {
+        await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", id_caja);
+      }
+    }
+    
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // PUT /api/productos/:id - Editing product info and/or photo
 app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
   try {
