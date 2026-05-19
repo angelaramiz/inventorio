@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, FormEvent } from "react";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { AlertCircle, CheckCircle2, Box, Package, Camera, Power, RefreshCw, Scan
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ProductQuickRegister from "./ProductQuickRegister";
 import { Caja, Producto } from "../types";
+import { Input } from "@/components/ui/input";
 
 export default function ScannerView() {
   const [isScannerActive, setIsScannerActive] = useState(false);
@@ -17,7 +18,18 @@ export default function ScannerView() {
   const [activeCaja, setActiveCaja] = useState<Caja | null>(null);
   const [showQuickRegister, setShowQuickRegister] = useState(false);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
+  const [manualInput, setManualInput] = useState("");
   const scannerRef = useRef<Html5Qrcode | null>(null);
+
+  const handleManualSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!manualInput.trim()) return;
+    
+    const query = manualInput.trim();
+    setScannedResult(query);
+    verifyProduct(query);
+    setManualInput("");
+  };
 
   useEffect(() => {
     // Cargar la caja seleccionada del localStorage si existe
@@ -218,44 +230,73 @@ export default function ScannerView() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-          <Card className="md:col-span-3 overflow-hidden border-none shadow-lg">
-            <CardHeader className="bg-neutral-900 text-white pb-8">
-              <div className="flex justify-between items-center">
-                <div>
-                  <CardTitle>Visor de Cámara</CardTitle>
-                  <CardDescription className="text-neutral-400">Escaneando EAN-13 / UPC / CODE 128</CardDescription>
-                </div>
-                <Button 
-                  size="icon" 
-                  variant={isScannerActive ? "destructive" : "secondary"}
-                  onClick={isScannerActive ? stopScanner : startScanner}
-                  className="rounded-full"
-                >
-                  {isScannerActive ? <Power size={18} /> : <Camera size={18} />}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className={`p-0 bg-neutral-100 relative min-h-[300px] flex items-center justify-center ${!isScannerActive ? "bg-neutral-200" : ""}`}>
-              <div id="reader" className="w-full h-full"></div>
-              
-              {!isScannerActive && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400 space-y-4">
-                  <Camera size={48} strokeWidth={1} />
-                  <p className="text-sm font-medium">Cámara desactivada</p>
-                  <Button onClick={startScanner} variant="outline" size="sm" className="rounded-full bg-white">
-                    Activar ahora
+          <div className="md:col-span-3 space-y-6">
+            <Card className="overflow-hidden border-none shadow-lg">
+              <CardHeader className="bg-neutral-900 text-white pb-8">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle>Visor de Cámara</CardTitle>
+                    <CardDescription className="text-neutral-400">Escaneando EAN-13 / UPC / CODE 128</CardDescription>
+                  </div>
+                  <Button 
+                    size="icon" 
+                    variant={isScannerActive ? "destructive" : "secondary"}
+                    onClick={isScannerActive ? stopScanner : startScanner}
+                    className="rounded-full"
+                  >
+                    {isScannerActive ? <Power size={18} /> : <Camera size={18} />}
                   </Button>
                 </div>
-              )}
+              </CardHeader>
+              <CardContent className={`p-0 bg-neutral-100 relative min-h-[300px] flex items-center justify-center ${!isScannerActive ? "bg-neutral-200" : ""}`}>
+                <div id="reader" className="w-full h-full"></div>
+                
+                {!isScannerActive && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400 space-y-4">
+                    <Camera size={48} strokeWidth={1} />
+                    <p className="text-sm font-medium">Cámara desactivada</p>
+                    <Button onClick={startScanner} variant="outline" size="sm" className="rounded-full bg-white">
+                      Activar ahora
+                    </Button>
+                  </div>
+                )}
 
-              {isChecking && (
-                <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
-                  <RefreshCw className="animate-spin text-neutral-900 mb-2" size={32} />
-                  <p className="font-semibold">Verificando en base de datos...</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                {isChecking && (
+                  <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
+                    <RefreshCw className="animate-spin text-neutral-900 mb-2" size={32} />
+                    <p className="font-semibold">Verificando en base de datos...</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border border-neutral-100 shadow-lg rounded-3xl overflow-hidden bg-white">
+              <CardHeader className="pb-3 bg-neutral-50 border-b">
+                <CardTitle className="text-lg flex items-center gap-2 font-bold text-neutral-900">
+                  <Scan size={18} className="text-neutral-500" />
+                  Ingreso Manual de SKU / EAN
+                </CardTitle>
+                <CardDescription className="text-neutral-500">
+                  Si no dispones de cámara o prefieres escribir, ingresa el SKU o código EAN-13 del producto.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-4">
+                <form onSubmit={handleManualSubmit} className="flex gap-2">
+                  <Input 
+                    type="text" 
+                    placeholder="Escribe el SKU o EAN-13 (ej: SKU-PANT-01)" 
+                    value={manualInput}
+                    onChange={(e) => setManualInput(e.target.value)}
+                    className="rounded-2xl h-11 border-neutral-200 focus-visible:ring-neutral-400"
+                    disabled={isChecking}
+                  />
+                  <Button type="submit" disabled={isChecking || !manualInput.trim()} className="rounded-2xl h-11 px-5 bg-neutral-900 hover:bg-neutral-800 text-white shrink-0 font-semibold transition-all">
+                    Buscar / Asociar
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
 
           <div className="md:col-span-2 space-y-4">
             <Card className="h-full">
