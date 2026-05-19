@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   Plus, Edit2, Trash2, Home, MapPin, 
-  Loader2, Check, X, AlertTriangle, FileText, Printer, Barcode, Package
+  Loader2, Check, X, AlertTriangle, FileText, Printer
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -1073,6 +1073,7 @@ export default function AlmacenView() {
             </CardContent>
           </Card>
         </div>
+      </div>
       )}
     </div>
   );
