@@ -138,7 +138,7 @@ app.post("/api/productos", upload.single('foto'), async (req, res) => {
     tipo = (sanitizeIdentifier(tipo, 100) || "otro").toLowerCase();
     marca_sub = sanitizeIdentifier(marca_sub, 100);
     
-    const foto = req.file ? req.file.buffer : null;
+    const foto = req.file ? '\\x' + req.file.buffer.toString('hex') : null;
     
     const { data, error } = await supabase
       .from("productos")
@@ -173,7 +173,22 @@ app.get("/api/productos/:id/image", async (req, res) => {
     let buffer: Buffer;
     if (typeof data.foto === 'string') {
       if (data.foto.startsWith('\\x')) {
-        buffer = Buffer.from(data.foto.substring(2), 'hex');
+        const rawBuffer = Buffer.from(data.foto.substring(2), 'hex');
+        const rawString = rawBuffer.toString('utf8');
+        if (rawString.startsWith('{"type":"Buffer"') || rawString.startsWith('{"type":"Buffer","data"')) {
+          try {
+            const parsed = JSON.parse(rawString);
+            if (parsed && parsed.type === 'Buffer' && Array.isArray(parsed.data)) {
+              buffer = Buffer.from(parsed.data);
+            } else {
+              buffer = rawBuffer;
+            }
+          } catch (e) {
+            buffer = rawBuffer;
+          }
+        } else {
+          buffer = rawBuffer;
+        }
       } else {
         buffer = Buffer.from(data.foto, 'base64');
       }
@@ -564,7 +579,7 @@ app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
     if (marca_sub !== undefined) updateData.marca_sub = sanitizeIdentifier(marca_sub, 100);
     
     if (req.file) {
-      updateData.foto = req.file.buffer;
+      updateData.foto = '\\x' + req.file.buffer.toString('hex');
     } else if (delete_foto === 'true') {
       updateData.foto = null;
     }
