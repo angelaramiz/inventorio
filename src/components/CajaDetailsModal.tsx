@@ -95,7 +95,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl h-[80vh] flex flex-col p-0 border-none rounded-2xl overflow-hidden shadow-2xl">
+      <DialogContent className="max-w-3xl sm:max-w-3xl gap-0 h-[80vh] flex flex-col p-0 border-none rounded-2xl overflow-hidden shadow-2xl">
         <DialogHeader className="bg-neutral-900 text-white p-6 shrink-0">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
@@ -149,7 +149,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                 <p className="text-sm">Asocia productos arriba o usa el Escáner para empezar a llenarla</p>
               </div>
             ) : (
-              <div className="rounded-xl border overflow-hidden">
+              <div className="rounded-xl border overflow-hidden overflow-x-auto w-full">
                 <Table>
                   <TableHeader className="bg-neutral-50/50">
                     <TableRow>

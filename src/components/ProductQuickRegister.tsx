@@ -137,7 +137,7 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-md w-[95vw] rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl flex flex-col max-h-[90vh]">
+      <DialogContent className="max-w-md sm:max-w-md gap-0 w-[95vw] rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl flex flex-col max-h-[90vh]">
         <DialogHeader className="bg-neutral-950 text-white p-6 shrink-0">
           <DialogTitle className="text-xl font-black flex items-center gap-3 uppercase tracking-tight">
             <div className="bg-amber-400 p-1.5 rounded-lg text-black">
@@ -161,11 +161,11 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
                 </button>
               </div>
             ) : showCamera ? (
-              <div className="relative w-full aspect-square bg-black rounded-2xl overflow-hidden">
+              <div className="relative w-40 h-40 bg-black rounded-2xl overflow-hidden mx-auto">
                 <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                <div className="absolute bottom-4 left-0 right-0 flex justify-center">
-                  <Button type="button" onClick={capturePhoto} className="rounded-full h-14 w-14 bg-white text-black hover:bg-neutral-200 shadow-xl border-4 border-neutral-900/10">
-                    <div className="h-10 w-10 rounded-full border-2 border-black"></div>
+                <div className="absolute bottom-2 left-0 right-0 flex justify-center">
+                  <Button type="button" onClick={capturePhoto} className="rounded-full h-9 w-9 bg-white text-black hover:bg-neutral-200 shadow-xl border-2 border-neutral-900/10 flex items-center justify-center p-0">
+                    <div className="h-6 w-6 rounded-full border border-black"></div>
                   </Button>
                 </div>
               </div>
