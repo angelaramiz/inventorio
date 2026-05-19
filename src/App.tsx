@@ -6,10 +6,11 @@
 import React, { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toaster } from "@/components/ui/sonner";
-import { Boxes, Package, Scan, LayoutDashboard } from "lucide-react";
+import { Boxes, Package, Scan, LayoutDashboard, Tag } from "lucide-react";
 import InventoryView from "./components/InventoryView";
 import CajasView from "./components/CajasView";
 import ScannerView from "./components/ScannerView";
+import ConceptosView from "./components/ConceptosView";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
@@ -45,6 +46,12 @@ export default function App() {
               icon={<LayoutDashboard size={18} />}
               label="Cajas"
             />
+            <TabButton 
+              active={activeTab === "concepts"} 
+              onClick={() => setActiveTab("concepts")}
+              icon={<Tag size={18} />}
+              label="Conceptos"
+            />
           </nav>
         </div>
       </header>
@@ -61,6 +68,7 @@ export default function App() {
             {activeTab === "scanner" && <ScannerView />}
             {activeTab === "inventory" && <InventoryView />}
             {activeTab === "boxes" && <CajasView />}
+            {activeTab === "concepts" && <ConceptosView />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -84,6 +92,12 @@ export default function App() {
           onClick={() => setActiveTab("boxes")}
           icon={<LayoutDashboard size={24} />}
           label="Cajas"
+        />
+        <MobileNavButton 
+          active={activeTab === "concepts"} 
+          onClick={() => setActiveTab("concepts")}
+          icon={<Tag size={24} />}
+          label="Conceptos"
         />
       </nav>
 

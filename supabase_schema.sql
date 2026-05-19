@@ -167,6 +167,24 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 -- BEFORE INSERT OR UPDATE ON productos
 -- FOR EACH ROW
 -- EXECUTE PROCEDURE trigger_set_has_foto();
-
-
-
+-- MIGRACIÓN 3: CONVERTIR COLUMNAS A TEXTO DINÁMICO Y CREAR TABLAS DE CONCEPTOS DINÁMICOS
+-- Ejecuta esto en el SQL Editor de Supabase para poder agregar/eliminar temporadas y tipos dinámicamente:
+--
+-- ALTER TABLE productos ALTER COLUMN temporada DROP DEFAULT;
+-- ALTER TABLE productos ALTER COLUMN temporada TYPE VARCHAR(100);
+-- ALTER TABLE productos ALTER COLUMN temporada SET DEFAULT 'todouso';
+--
+-- ALTER TABLE productos ALTER COLUMN tipo DROP DEFAULT;
+-- ALTER TABLE productos ALTER COLUMN tipo TYPE VARCHAR(100);
+-- ALTER TABLE productos ALTER COLUMN tipo SET DEFAULT 'otro';
+--
+-- CREATE TABLE IF NOT EXISTS temporadas (
+--     nombre VARCHAR(100) PRIMARY KEY
+-- );
+--
+-- CREATE TABLE IF NOT EXISTS tipos_producto (
+--     nombre VARCHAR(100) PRIMARY KEY
+-- );
+--
+-- INSERT INTO temporadas (nombre) VALUES ('verano'), ('invierno'), ('entretiempo'), ('todouso') ON CONFLICT DO NOTHING;
+-- INSERT INTO tipos_producto (nombre) VALUES ('pantalon'), ('accesorio'), ('camisa'), ('calzado'), ('chaqueta'), ('otro') ON CONFLICT DO NOTHING;

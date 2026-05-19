@@ -1,5 +1,5 @@
-export type Temporada = 'verano' | 'invierno' | 'entretiempo' | 'todouso';
-export type TipoProducto = 'pantalon' | 'accesorio' | 'camisa' | 'calzado' | 'chaqueta' | 'otro';
+export type Temporada = string;
+export type TipoProducto = string;
 export type EstadoCaja = 'vacia' | 'activa' | 'llena';
 
 export interface Producto {

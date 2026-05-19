@@ -1,15 +1,19 @@
 import React, { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, Image as ImageIcon, Loader2, Calendar } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Search, Package, Image as ImageIcon, Loader2, Calendar, Edit2, Trash2 } from "lucide-react";
 import { Producto } from "../types";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
+import ProductEditModal from "./ProductEditModal";
 
 export default function InventoryView() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   useEffect(() => {
     fetchProductos();
@@ -25,6 +29,27 @@ export default function InventoryView() {
       toast.error("Error al cargar productos");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteProduct = async (product: Producto) => {
+    if (!window.confirm(`¿Estás seguro de eliminar el producto "${product.sku}"? Se eliminará permanentemente de todas las cajas asignadas.`)) {
+      return;
+    }
+
+    try {
+      const resp = await fetch(`/api/productos/${product.id_producto}`, {
+        method: "DELETE"
+      });
+      if (resp.ok) {
+        toast.success("Producto eliminado con éxito");
+        fetchProductos();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al eliminar producto");
+      }
+    } catch (err) {
+      toast.error("Error de conexión");
     }
   };
 
@@ -79,8 +104,29 @@ export default function InventoryView() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   key={p.id_producto}
-                  className="bg-white p-4 rounded-3xl border border-neutral-100 shadow-sm flex flex-col sm:flex-row gap-4 hover:border-neutral-900 transition-all group"
+                  className="relative bg-white p-4 rounded-3xl border border-neutral-100 shadow-sm flex flex-col sm:flex-row gap-4 hover:border-neutral-900 transition-all group overflow-hidden"
                 >
+                  <div className="absolute top-3 right-3 flex gap-1 items-center md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => {
+                        setSelectedProduct(p);
+                        setShowEditModal(true);
+                      }}
+                      className="h-8 w-8 rounded-lg bg-neutral-50 hover:bg-neutral-900 hover:text-white border"
+                    >
+                      <Edit2 size={13} />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => handleDeleteProduct(p)}
+                      className="h-8 w-8 rounded-lg bg-neutral-50 hover:bg-rose-500 hover:text-white text-rose-500 border"
+                    >
+                      <Trash2 size={13} />
+                    </Button>
+                  </div>
                   <div className="flex items-center gap-4">
                     <div className="relative">
                       {p.has_foto ? (
@@ -138,6 +184,17 @@ export default function InventoryView() {
           Live Cloud
         </div>
       </div>
+
+      {selectedProduct && showEditModal && (
+        <ProductEditModal 
+          product={selectedProduct}
+          onClose={() => {
+            setSelectedProduct(null);
+            setShowEditModal(false);
+          }}
+          onSuccess={fetchProductos}
+        />
+      )}
     </div>
   );
 }

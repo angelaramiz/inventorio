@@ -1,31 +1,33 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, FormEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Camera, Save, X, Loader2 } from "lucide-react";
+import { Camera, Save, X, Loader2, Image as ImageIcon, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Producto, Temporada, TipoProducto } from "../types";
 
 interface Props {
-  ean: string;
+  product: Producto;
   onClose: () => void;
-  onSuccess: (product: Producto) => void;
+  onSuccess: () => void;
 }
 
-export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props) {
+export default function ProductEditModal({ product, onClose, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
+  const [deleteFoto, setDeleteFoto] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
-  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [formData, setFormData] = useState({
-    sku: ean,
-    ean_13: ean,
-    talla: "",
-    temporada: "todouso" as Temporada,
-    tipo: "otro" as TipoProducto,
-    marca_sub: ""
+    sku: product.sku,
+    ean_13: product.ean_13 || "",
+    talla: product.talla || "",
+    temporada: product.temporada as Temporada,
+    tipo: product.tipo as TipoProducto,
+    marca_sub: product.marca_sub || ""
   });
 
   const [temporadas, setTemporadas] = useState<string[]>([]);
@@ -42,14 +44,8 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
         const tipoVals = await respTipos.json();
         setTemporadas(tempVals);
         setTipos(tipoVals);
-        
-        setFormData(prev => ({
-          ...prev,
-          temporada: tempVals.includes("todouso") ? "todouso" : (tempVals[0] || ""),
-          tipo: tipoVals.includes("otro") ? "otro" : (tipoVals[0] || "")
-        }));
       } catch (err) {
-        console.error("Error loading dynamic concepts", err);
+        console.error("Error loading concepts", err);
       }
     };
     loadOptions();
@@ -57,6 +53,7 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
 
   const startCamera = async () => {
     setShowCamera(true);
+    setDeleteFoto(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       if (videoRef.current) {
@@ -73,7 +70,6 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
     if (!video) return;
 
     const canvas = document.createElement("canvas");
-    // Redimensionar a maximo 400px (mantenemos aspecto)
     const targetSize = 400;
     let width = video.videoWidth;
     let height = video.videoHeight;
@@ -94,22 +90,16 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (ctx) {
-      // Dibujar imagen centrada y escalada
       ctx.drawImage(video, 0, 0, width, height);
-      
-      // Convertir a WebP con calidad optimizada (0.7)
       const dataUrl = canvas.toDataURL("image/webp", 0.7);
       
-      // Validar tamaño aproximado (DataURL es ~33% más grande que el binario)
       const estimatedSize = (dataUrl.length * 3) / 4;
-      if (estimatedSize > 180000) { // 180KB
-        // Reintentar con menor calidad si es muy grande
+      if (estimatedSize > 180000) {
         const superCompressed = canvas.toDataURL("image/webp", 0.5);
         setPhoto(superCompressed);
       } else {
         setPhoto(dataUrl);
       }
-      
       stopCamera();
     }
   };
@@ -122,38 +112,67 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
     setShowCamera(false);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  useEffect(() => {
+    return () => {
+      // Clean up camera stream if modal unmounts
+      if (videoRef.current && videoRef.current.srcObject) {
+        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+        tracks.forEach(track => track.stop());
+      }
+    };
+  }, []);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("El archivo debe ser una imagen");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPhoto(reader.result as string);
+      setDeleteFoto(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!formData.sku) return toast.error("El SKU es obligatorio");
+    if (!formData.sku.trim()) return toast.error("El SKU es obligatorio");
 
     setLoading(true);
     try {
       const fd = new FormData();
-      fd.append("sku", formData.sku);
-      fd.append("ean_13", formData.ean_13);
-      fd.append("talla", formData.talla);
+      fd.append("sku", formData.sku.trim());
+      fd.append("ean_13", formData.ean_13.trim());
+      fd.append("talla", formData.talla.trim());
       fd.append("temporada", formData.temporada);
       fd.append("tipo", formData.tipo);
-      fd.append("marca_sub", formData.marca_sub);
+      fd.append("marca_sub", formData.marca_sub.trim());
       
       if (photo) {
         const res = await fetch(photo);
         const blob = await res.blob();
-        fd.append("foto", blob, "captura.webp");
+        fd.append("foto", blob, "producto.webp");
+      } else if (deleteFoto) {
+        fd.append("delete_foto", "true");
       }
 
-      const resp = await fetch("/api/productos", {
-        method: "POST",
+      const resp = await fetch(`/api/productos/${product.id_producto}`, {
+        method: "PUT",
         body: fd
       });
 
       if (resp.ok) {
-        const product = await resp.json();
-        toast.success("Articulo registrado y sincronizado");
-        onSuccess(product);
+        toast.success("Producto actualizado correctamente");
+        onSuccess();
+        onClose();
       } else {
-        const error = await resp.json();
-        toast.error(error.error || "Fallo en registro");
+        const err = await resp.json();
+        toast.error(err.error || "Error al actualizar producto");
       }
     } catch (err) {
       toast.error("Error de conexión");
@@ -170,51 +189,113 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
             <div className="bg-amber-400 p-1.5 rounded-lg text-black">
               <Save size={18} />
             </div>
-            Registro Express
+            Editar Producto
           </DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto custom-scrollbar">
-          <div className="flex justify-center">
-            {photo ? (
-              <div className="relative group">
-                <img src={photo} alt="Preview" className="w-40 h-40 object-cover rounded-2xl shadow-md border-2 border-white" />
+          {/* SECCIÓN FOTO */}
+          <div className="flex flex-col items-center gap-3">
+            <div className="relative group">
+              {photo ? (
+                <img src={photo} alt="Preview" className="w-36 h-36 object-cover rounded-2xl shadow-md border-2 border-white" />
+              ) : !deleteFoto && product.has_foto ? (
+                <img 
+                  src={`/api/productos/${product.id_producto}/image?t=${new Date().getTime()}`} 
+                  alt="Actual" 
+                  className="w-36 h-36 object-cover rounded-2xl shadow-md border-2 border-white" 
+                />
+              ) : showCamera ? (
+                <div className="relative w-36 h-36 bg-black rounded-2xl overflow-hidden">
+                  <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                  <div className="absolute bottom-2 left-0 right-0 flex justify-center">
+                    <Button type="button" onClick={capturePhoto} className="rounded-full h-9 w-9 bg-white text-black hover:bg-neutral-200 shadow-xl border-2 border-neutral-900/10 flex items-center justify-center p-0">
+                      <div className="h-6 w-6 rounded-full border border-black"></div>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-36 h-36 bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-2xl flex flex-col items-center justify-center text-neutral-400">
+                  <ImageIcon size={32} />
+                  <span className="text-[10px] font-semibold mt-1">Sin Foto</span>
+                </div>
+              )}
+              
+              {(photo || (!deleteFoto && product.has_foto)) && (
                 <button 
                   type="button"
-                  onClick={() => setPhoto(null)}
+                  onClick={() => {
+                    setPhoto(null);
+                    setDeleteFoto(true);
+                  }}
                   className="absolute -top-2 -right-2 bg-rose-500 text-white p-1.5 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Eliminar foto"
                 >
                   <X size={14} />
                 </button>
-              </div>
-            ) : showCamera ? (
-              <div className="relative w-40 h-40 bg-black rounded-2xl overflow-hidden mx-auto">
-                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                <div className="absolute bottom-2 left-0 right-0 flex justify-center">
-                  <Button type="button" onClick={capturePhoto} className="rounded-full h-9 w-9 bg-white text-black hover:bg-neutral-200 shadow-xl border-2 border-neutral-900/10 flex items-center justify-center p-0">
-                    <div className="h-6 w-6 rounded-full border border-black"></div>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileUpload} 
+                className="hidden" 
+                accept="image/*"
+              />
+              {!showCamera ? (
+                <>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="sm"
+                    className="rounded-xl gap-1 text-xs h-9 px-3"
+                    onClick={startCamera}
+                  >
+                    <Camera size={14} /> Cámara
                   </Button>
-                </div>
-              </div>
-            ) : (
-              <button 
-                type="button"
-                onClick={startCamera}
-                className="w-40 h-40 bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-2xl flex flex-col items-center justify-center text-neutral-400 hover:bg-neutral-50 hover:border-neutral-400 transition-all group"
-              >
-                <Camera size={32} className="mb-2 group-hover:scale-110 transition-transform" />
-                <span className="text-xs font-semibold">Tomar Foto</span>
-              </button>
-            )}
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="sm"
+                    className="rounded-xl gap-1 text-xs h-9 px-3"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload size={14} /> Archivo
+                  </Button>
+                </>
+              ) : (
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="sm"
+                  className="rounded-xl gap-1 text-xs h-9 px-3 border-rose-200 text-rose-600 hover:bg-rose-50"
+                  onClick={stopCamera}
+                >
+                  Cancelar Cámara
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1 col-span-2">
-              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">SKU / EAN-13</label>
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">SKU</label>
               <Input 
                 value={formData.sku} 
                 onChange={e => setFormData({...formData, sku: e.target.value})}
-                placeholder="Código de barras"
+                placeholder="Código de barras SKU"
+                className="rounded-xl bg-neutral-50"
+              />
+            </div>
+
+            <div className="space-y-1 col-span-2">
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">EAN-13</label>
+              <Input 
+                value={formData.ean_13} 
+                onChange={e => setFormData({...formData, ean_13: e.target.value})}
+                placeholder="Escribir EAN-13 si es diferente al SKU"
                 className="rounded-xl bg-neutral-50"
               />
             </div>
@@ -234,7 +315,7 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
               <Input 
                 value={formData.marca_sub} 
                 onChange={e => setFormData({...formData, marca_sub: e.target.value})}
-                placeholder="Sub-marca"
+                placeholder="Sub-marca / Proveedor"
                 className="rounded-xl bg-neutral-50"
               />
             </div>
@@ -274,7 +355,7 @@ export default function ProductQuickRegister({ ean, onClose, onSuccess }: Props)
             </Button>
             <Button type="submit" disabled={loading} className="flex-1 rounded-xl h-12 bg-neutral-900 group">
               {loading ? <Loader2 className="animate-spin mr-2" /> : <Save className="mr-2 group-hover:scale-110 transition-transform" />}
-              Guardar
+              Guardar Cambios
             </Button>
           </div>
         </form>

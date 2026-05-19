@@ -314,6 +314,172 @@ app.get("/api/cajas/:id/productos", async (req, res) => {
   }
 });
 
+// PUT /api/productos/:id - Editing product info and/or photo
+app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id } = req.params;
+    const { sku, ean_13, talla, temporada, tipo, marca_sub, delete_foto } = req.body;
+    
+    const updateData: any = {};
+    if (sku !== undefined) updateData.sku = sku;
+    if (ean_13 !== undefined) updateData.ean_13 = ean_13 || null;
+    if (talla !== undefined) updateData.talla = talla;
+    if (temporada !== undefined) updateData.temporada = temporada;
+    if (tipo !== undefined) updateData.tipo = tipo;
+    if (marca_sub !== undefined) updateData.marca_sub = marca_sub;
+    
+    if (req.file) {
+      updateData.foto = req.file.buffer;
+    } else if (delete_foto === 'true') {
+      updateData.foto = null;
+    }
+    
+    const { data, error } = await supabase
+      .from("productos")
+      .update(updateData)
+      .eq("id_producto", id)
+      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at");
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/productos/:id - Deleting product
+app.delete("/api/productos/:id", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id } = req.params;
+    
+    const { error } = await supabase
+      .from("productos")
+      .delete()
+      .eq("id_producto", id);
+      
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/conceptos/temporadas - Get dynamic seasons
+app.get("/api/conceptos/temporadas", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("temporadas")
+      .select("nombre")
+      .order("nombre", { ascending: true });
+      
+    if (error) throw error;
+    res.json(data.map((d: any) => d.nombre));
+  } catch (error: any) {
+    // Fallback if table doesn't exist yet
+    res.json(['verano', 'invierno', 'entretiempo', 'todouso']);
+  }
+});
+
+// POST /api/conceptos/temporadas - Add a dynamic season
+app.post("/api/conceptos/temporadas", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({ error: "Nombre inválido" });
+    }
+    const cleanNombre = nombre.trim().toLowerCase();
+    
+    const { data, error } = await supabase
+      .from("temporadas")
+      .insert([{ nombre: cleanNombre }])
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/conceptos/temporadas/:nombre - Delete a dynamic season
+app.delete("/api/conceptos/temporadas/:nombre", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { nombre } = req.params;
+    
+    const { error } = await supabase
+      .from("temporadas")
+      .delete()
+      .eq("nombre", nombre);
+      
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/conceptos/tipos - Get dynamic product types
+app.get("/api/conceptos/tipos", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("tipos_producto")
+      .select("nombre")
+      .order("nombre", { ascending: true });
+      
+    if (error) throw error;
+    res.json(data.map((d: any) => d.nombre));
+  } catch (error: any) {
+    // Fallback if table doesn't exist yet
+    res.json(['pantalon', 'accesorio', 'camisa', 'calzado', 'chaqueta', 'otro']);
+  }
+});
+
+// POST /api/conceptos/tipos - Add a dynamic product type
+app.post("/api/conceptos/tipos", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({ error: "Nombre inválido" });
+    }
+    const cleanNombre = nombre.trim().toLowerCase();
+    
+    const { data, error } = await supabase
+      .from("tipos_producto")
+      .insert([{ nombre: cleanNombre }])
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/conceptos/tipos/:nombre - Delete a dynamic product type
+app.delete("/api/conceptos/tipos/:nombre", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { nombre } = req.params;
+    
+    const { error } = await supabase
+      .from("tipos_producto")
+      .delete()
+      .eq("nombre", nombre);
+      
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- VITE MIDDLEWARE ---
 
 async function startServer() {
