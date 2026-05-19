@@ -169,8 +169,19 @@ app.get("/api/productos/:id/image", async (req, res) => {
       return res.status(404).end();
     }
 
-    // data.foto comes as a base64 string from PostgREST when column is BYTEA
-    const buffer = Buffer.from(data.foto, 'base64');
+    // data.foto can come as a hex string starting with \x from PostgREST or base64
+    let buffer: Buffer;
+    if (typeof data.foto === 'string') {
+      if (data.foto.startsWith('\\x')) {
+        buffer = Buffer.from(data.foto.substring(2), 'hex');
+      } else {
+        buffer = Buffer.from(data.foto, 'base64');
+      }
+    } else if (Buffer.isBuffer(data.foto)) {
+      buffer = data.foto;
+    } else {
+      buffer = Buffer.from(data.foto as any);
+    }
     
     res.setHeader('Content-Type', 'image/webp');
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -478,6 +489,43 @@ app.put("/api/cajas/:id/productos/:id_producto", async (req, res) => {
     }
     
     res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/reporte-inventario - Fetch all box-product relations for reporting
+app.get("/api/reporte-inventario", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    
+    const { data, error } = await supabase
+      .from("caja_productos")
+      .select(`
+        id_caja,
+        id_producto,
+        cantidad,
+        cajas (
+          id_caja,
+          numero_caja,
+          sku,
+          estado,
+          id_zona_seccion,
+          id_zona_almacen
+        ),
+        productos (
+          id_producto,
+          sku,
+          ean_13,
+          talla,
+          temporada,
+          tipo,
+          marca_sub
+        )
+      `);
+      
+    if (error) throw error;
+    res.json(data);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

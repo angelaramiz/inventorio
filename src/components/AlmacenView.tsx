@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   Plus, Edit2, Trash2, Home, MapPin, 
-  Loader2, Check, X, AlertTriangle 
+  Loader2, Check, X, AlertTriangle, FileText, Printer, Barcode, Package
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -22,13 +22,115 @@ interface SectionZone {
   almacen_nombre: string;
 }
 
+// EAN-13 Barcode generator in SVG (Zero dependencies)
+const EAN13Barcode = ({ code }: { code: string }) => {
+  // Validate EAN-13 code (strictly 13 digits)
+  if (!code || !/^\d{13}$/.test(code)) {
+    return <span className="text-red-500 font-mono text-xs">EAN-13 inválido ({code})</span>;
+  }
+  
+  // Parity patterns for L (0) and G (1) depending on first digit
+  const parityPatterns = [
+    [0,0,0,0,0,0], // 0
+    [0,0,1,0,1,1], // 1
+    [0,0,1,1,0,1], // 2
+    [0,0,1,1,1,0], // 3
+    [0,1,0,0,1,1], // 4
+    [0,1,1,0,0,1], // 5
+    [0,1,1,1,0,0], // 6
+    [0,1,0,1,0,1], // 7
+    [0,1,0,1,1,0], // 8
+    [0,1,1,0,1,0]  // 9
+  ];
+
+  const L = [
+    "0001101", "0011001", "0010011", "0111101", "0100011",
+    "0110001", "0101111", "0111011", "0110111", "0001011"
+  ];
+  const G = [
+    "0100111", "0110011", "0011011", "0100001", "0011101",
+    "0111001", "0000101", "0010001", "0001001", "0010111"
+  ];
+  const R = [
+    "1110010", "1100110", "1101100", "1000010", "1011100",
+    "1001110", "1010000", "1000100", "1001000", "1110100"
+  ];
+
+  const firstDigit = parseInt(code[0]);
+  const leftPattern = parityPatterns[firstDigit];
+
+  let binary = "101"; // Left guard
+
+  // Left 6 digits
+  for (let i = 1; i <= 6; i++) {
+    const digit = parseInt(code[i]);
+    const isG = leftPattern[i - 1] === 1;
+    binary += isG ? G[digit] : L[digit];
+  }
+
+  binary += "01010"; // Center guard
+
+  // Right 6 digits
+  for (let i = 7; i <= 12; i++) {
+    const digit = parseInt(code[i]);
+    binary += R[digit];
+  }
+
+  binary += "101"; // Right guard
+
+  // Render SVG barcode
+  const barWidth = 1.6;
+  const barHeight = 35;
+  const totalWidth = binary.length * barWidth;
+
+  return (
+    <div className="flex flex-col items-center select-none py-1">
+      <svg width={totalWidth} height={barHeight + 12} viewBox={`0 0 ${totalWidth} ${barHeight + 12}`}>
+        <g fill="black">
+          {binary.split("").map((bit, idx) => (
+            bit === "1" ? (
+              <rect
+                key={idx}
+                x={idx * barWidth}
+                y={0}
+                width={barWidth}
+                height={barHeight}
+              />
+            ) : null
+          ))}
+        </g>
+        <text
+          x={totalWidth / 2}
+          y={barHeight + 10}
+          textAnchor="middle"
+          fontSize="9"
+          fontFamily="monospace"
+          fontWeight="black"
+          fill="black"
+        >
+          {code}
+        </text>
+      </svg>
+    </div>
+  );
+};
+
 export default function AlmacenView() {
-  const [activeTab, setActiveTab] = useState<"zonas" | "secciones">("zonas");
+  const [activeTab, setActiveTab] = useState<"zonas" | "secciones" | "inventario">("zonas");
   
   // Data lists
   const [zones, setZones] = useState<WarehouseZone[]>([]);
   const [sections, setSections] = useState<SectionZone[]>([]);
+  const [boxes, setBoxes] = useState<any[]>([]);
   
+  // Report states
+  const [selectedReportZoneId, setSelectedReportZoneId] = useState("all");
+  const [selectedReportSectionId, setSelectedReportSectionId] = useState("all");
+  const [selectedReportBoxId, setSelectedReportBoxId] = useState("all");
+  const [reportData, setReportData] = useState<any[]>([]);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+
   // Loading states
   const [loadingZones, setLoadingZones] = useState(false);
   const [loadingSections, setLoadingSections] = useState(false);
@@ -52,7 +154,117 @@ export default function AlmacenView() {
   useEffect(() => {
     fetchZones();
     fetchSections();
+    fetchBoxes();
   }, []);
+
+  const fetchBoxes = async () => {
+    try {
+      const resp = await fetch("/api/cajas");
+      if (resp.ok) {
+        const data = await resp.json();
+        setBoxes(data);
+      }
+    } catch (e) {
+      console.error("Error fetching boxes:", e);
+    }
+  };
+
+  const handleGenerateReport = async () => {
+    setIsGeneratingReport(true);
+    try {
+      const resp = await fetch("/api/reporte-inventario");
+      if (resp.ok) {
+        const data = await resp.json();
+        setReportData(data);
+        setShowPreview(true);
+        toast.success("Vista previa del reporte generada");
+      } else {
+        toast.error("Error al obtener los datos del reporte");
+      }
+    } catch (e) {
+      toast.error("Error de conexión al generar reporte");
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
+  const generateGroupedReportData = () => {
+    let filteredZones = zones;
+    if (selectedReportZoneId !== "all") {
+      filteredZones = zones.filter(z => z.id_zona_almacen === parseInt(selectedReportZoneId));
+    }
+
+    const result: any[] = [];
+
+    for (const zone of filteredZones) {
+      let zoneSections = sections.filter(s => s.id_zona_almacen === zone.id_zona_almacen);
+      if (selectedReportSectionId !== "all") {
+        zoneSections = zoneSections.filter(s => s.id_zona_seccion === parseInt(selectedReportSectionId));
+      }
+
+      const sectionGroup: any[] = [];
+
+      // Check direct boxes for this zone (boxes without a section)
+      let directBoxes: any[] = [];
+      if (selectedReportSectionId === "all") {
+        directBoxes = boxes.filter(b => b.id_zona_almacen === zone.id_zona_almacen && !b.id_zona_seccion);
+        if (selectedReportBoxId !== "all") {
+          directBoxes = directBoxes.filter(b => b.id_caja === parseInt(selectedReportBoxId));
+        }
+      }
+
+      for (const section of zoneSections) {
+        let sectionBoxes = boxes.filter(b => b.id_zona_seccion === section.id_zona_seccion);
+        if (selectedReportBoxId !== "all") {
+          sectionBoxes = sectionBoxes.filter(b => b.id_caja === parseInt(selectedReportBoxId));
+        }
+
+        const boxGroup: any[] = [];
+        for (const box of sectionBoxes) {
+          const boxItems = reportData.filter(item => item.id_caja === box.id_caja);
+          boxGroup.push({
+            ...box,
+            productos: boxItems
+          });
+        }
+
+        if (boxGroup.length > 0 || selectedReportBoxId === "all") {
+          sectionGroup.push({
+            ...section,
+            cajas: boxGroup
+          });
+        }
+      }
+
+      const directBoxGroup: any[] = [];
+      for (const box of directBoxes) {
+        const boxItems = reportData.filter(item => item.id_caja === box.id_caja);
+        directBoxGroup.push({
+          ...box,
+          productos: boxItems
+        });
+      }
+
+      if (directBoxGroup.length > 0) {
+        sectionGroup.push({
+          id_zona_seccion: 0,
+          nombre: "Sin sección específica",
+          id_zona_almacen: zone.id_zona_almacen,
+          almacen_nombre: zone.nombre,
+          cajas: directBoxGroup
+        });
+      }
+
+      if (sectionGroup.length > 0) {
+        result.push({
+          ...zone,
+          secciones: sectionGroup
+        });
+      }
+    }
+
+    return result;
+  };
 
   const fetchZones = async () => {
     setLoadingZones(true);
@@ -266,10 +478,300 @@ export default function AlmacenView() {
             <MapPin size={14} />
             Secciones
           </button>
+          <button
+            onClick={() => {
+              setActiveTab("inventario");
+              fetchBoxes();
+              setShowPreview(false);
+            }}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+              activeTab === "inventario" 
+                ? "bg-white text-neutral-950 shadow-md" 
+                : "text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            <FileText size={14} />
+            Inventario (Reporte)
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {activeTab === "inventario" ? (
+        <div className="space-y-6">
+          <Card className="border border-neutral-100 shadow-xl rounded-[2rem] overflow-hidden bg-white">
+            <CardHeader className="bg-neutral-50/50 pb-4 border-b">
+              <CardTitle className="text-lg font-bold flex items-center gap-2">
+                <FileText size={18} className="text-neutral-600" />
+                Reporte de Inventario Físico
+              </CardTitle>
+              <CardDescription>Genera una vista estructurada y descarga el PDF con códigos de barras de los productos</CardDescription>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                {/* Selector Almacen */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Filtrar por Almacén</label>
+                  <select
+                    value={selectedReportZoneId}
+                    onChange={(e) => {
+                      setSelectedReportZoneId(e.target.value);
+                      setSelectedReportSectionId("all");
+                      setSelectedReportBoxId("all");
+                      setShowPreview(false);
+                    }}
+                    className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                  >
+                    <option value="all">TODOS LOS ALMACENES</option>
+                    {zones.map((z) => (
+                      <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                        {z.nombre.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Selector Sección */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Filtrar por Sección</label>
+                  <select
+                    value={selectedReportSectionId}
+                    onChange={(e) => {
+                      setSelectedReportSectionId(e.target.value);
+                      setSelectedReportBoxId("all");
+                      setShowPreview(false);
+                    }}
+                    disabled={selectedReportZoneId === "all"}
+                    className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                  >
+                    <option value="all">TODAS LAS SECCIONES</option>
+                    {sections
+                      .filter((s) => s.id_zona_almacen === parseInt(selectedReportZoneId))
+                      .map((s) => (
+                        <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
+                          {s.nombre.toUpperCase()}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {/* Selector Caja */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Filtrar por Caja</label>
+                  <select
+                    value={selectedReportBoxId}
+                    onChange={(e) => {
+                      setSelectedReportBoxId(e.target.value);
+                      setShowPreview(false);
+                    }}
+                    className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                  >
+                    <option value="all">TODAS LAS CAJAS</option>
+                    {boxes
+                      .filter((b) => {
+                        if (selectedReportZoneId !== "all") {
+                          if (selectedReportSectionId !== "all") {
+                            return b.id_zona_seccion === parseInt(selectedReportSectionId);
+                          } else {
+                            if (b.id_zona_seccion) {
+                              const sec = sections.find((s) => s.id_zona_seccion === b.id_zona_seccion);
+                              return sec && sec.id_zona_almacen === parseInt(selectedReportZoneId);
+                            }
+                            return b.id_zona_almacen === parseInt(selectedReportZoneId);
+                          }
+                        }
+                        return true;
+                      })
+                      .map((b) => (
+                        <option key={b.id_caja} value={b.id_caja}>
+                          CAJA {b.numero_caja} ({b.estado.toUpperCase()})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleGenerateReport}
+                disabled={isGeneratingReport}
+                className="w-full rounded-xl h-12 bg-neutral-900 hover:bg-neutral-800 text-white font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2"
+              >
+                {isGeneratingReport ? (
+                  <>
+                    <Loader2 className="animate-spin" size={18} />
+                    Generando reporte...
+                  </>
+                ) : (
+                  <>
+                    <FileText size={18} />
+                    Generar reporte de inventario
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {showPreview && (
+            <Card className="border border-neutral-100 shadow-xl rounded-[2rem] overflow-hidden bg-white">
+              <CardHeader className="bg-neutral-50/50 pb-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <CardTitle className="text-lg font-bold">Vista Previa del Reporte</CardTitle>
+                  <CardDescription>Confirma la estructura del reporte antes de exportar</CardDescription>
+                </div>
+                <Button
+                  onClick={() => window.print()}
+                  className="rounded-xl h-10 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5"
+                >
+                  <Printer size={14} />
+                  Confirmar preview de reporte
+                </Button>
+              </CardHeader>
+              
+              <style>{`
+                @media print {
+                  body * {
+                    visibility: hidden;
+                  }
+                  #report-print-area, #report-print-area * {
+                    visibility: visible;
+                  }
+                  #report-print-area {
+                    position: absolute;
+                    left: 0;
+                    top: 0;
+                    width: 100%;
+                    background-color: white !important;
+                    color: black !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                  }
+                  .page-break {
+                    page-break-before: always;
+                    break-before: page;
+                  }
+                  .no-print {
+                    display: none !important;
+                  }
+                }
+              `}</style>
+
+              <CardContent id="report-print-area" className="p-8 bg-neutral-50/30">
+                <div className="mb-8 border-b pb-6 print-only">
+                  <h1 className="text-3xl font-black tracking-tight text-neutral-900 uppercase">REPORTE DE INVENTARIO FÍSICO</h1>
+                  <p className="text-xs text-neutral-500 mt-1">Generado el: {new Date().toLocaleString()}</p>
+                  <div className="mt-4 flex gap-4 text-xs font-bold text-neutral-600">
+                    <span>Almacén: {selectedReportZoneId === "all" ? "TODOS" : zones.find(z => z.id_zona_almacen === parseInt(selectedReportZoneId))?.nombre.toUpperCase()}</span>
+                    <span>Sección: {selectedReportSectionId === "all" ? "TODAS" : sections.find(s => s.id_zona_seccion === parseInt(selectedReportSectionId))?.nombre.toUpperCase()}</span>
+                    <span>Caja: {selectedReportBoxId === "all" ? "TODAS" : `CAJA ${boxes.find(b => b.id_caja === parseInt(selectedReportBoxId))?.numero_caja}`}</span>
+                  </div>
+                </div>
+
+                {generateGroupedReportData().length === 0 ? (
+                  <div className="text-center py-16 text-neutral-400">
+                    <p className="text-sm font-bold">No se encontraron datos para los filtros seleccionados</p>
+                  </div>
+                ) : (
+                  generateGroupedReportData().map((zone) => (
+                    <div key={zone.id_zona_almacen} className="mb-8 last:mb-0 border-b pb-8 last:border-b-0">
+                      <div className="bg-neutral-900 text-white px-5 py-3.5 rounded-2xl flex items-center gap-2 mb-4">
+                        <Home size={18} />
+                        <h3 className="font-black text-sm uppercase tracking-wider">
+                          ALMACÉN: {zone.nombre.toUpperCase()}
+                        </h3>
+                      </div>
+
+                      {zone.secciones.map((sec: any) => (
+                        <div key={sec.id_zona_seccion} className="ml-0 md:ml-4 mb-6 last:mb-0">
+                          <div className="flex items-center gap-2 mb-4 border-l-4 border-neutral-700 pl-3.5 py-0.5">
+                            <MapPin size={15} className="text-neutral-700" />
+                            <h4 className="font-extrabold text-xs uppercase tracking-wide text-neutral-800">
+                              SECCIÓN: {sec.nombre.toUpperCase()}
+                            </h4>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-6">
+                            {sec.cajas.map((box: any) => (
+                              <div key={box.id_caja} className="border rounded-2xl p-5 bg-white shadow-sm page-break">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-2 border-b">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-black text-xs bg-neutral-100 text-neutral-900 px-3 py-1 rounded-lg">
+                                      CAJA {box.numero_caja}
+                                    </span>
+                                    <span className="text-[10px] bg-emerald-500/10 text-emerald-700 px-2 py-0.5 rounded-full font-bold uppercase">
+                                      {box.estado}
+                                    </span>
+                                  </div>
+                                  <span className="font-mono text-xs text-neutral-500 font-bold">
+                                    SKU Caja: {box.sku || "Sin SKU"}
+                                  </span>
+                                </div>
+
+                                {box.productos.length === 0 ? (
+                                  <p className="text-xs text-neutral-400 italic py-2">Esta caja no tiene productos asignados</p>
+                                ) : (
+                                  <div className="overflow-x-auto">
+                                    <Table className="text-xs">
+                                      <TableHeader className="bg-neutral-50/50">
+                                        <TableRow>
+                                          <TableHead className="font-bold text-neutral-800">Producto (SKU)</TableHead>
+                                          <TableHead className="font-bold text-neutral-800">Detalles</TableHead>
+                                          <TableHead className="w-[180px] text-center font-bold text-neutral-800">Código EAN-13 (Escanear)</TableHead>
+                                          <TableHead className="text-right w-[80px] font-bold text-neutral-800">Cantidad</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {box.productos.map((item: any) => (
+                                          <TableRow key={item.id_producto} className="hover:bg-neutral-50/50">
+                                            <TableCell className="font-bold text-neutral-900 py-3">
+                                              <div className="flex flex-col">
+                                                <span>{item.productos.sku}</span>
+                                                {item.productos.marca_sub && (
+                                                  <span className="text-[10px] text-neutral-400 font-normal">{item.productos.marca_sub}</span>
+                                                )}
+                                              </div>
+                                            </TableCell>
+                                            <TableCell className="py-3">
+                                              <div className="flex gap-1.5 flex-wrap">
+                                                <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
+                                                  {item.productos.tipo}
+                                                </span>
+                                                <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
+                                                  Talla {item.productos.talla}
+                                                </span>
+                                                <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
+                                                  {item.productos.temporada}
+                                                </span>
+                                              </div>
+                                            </TableCell>
+                                            <TableCell className="text-center py-2 flex justify-center">
+                                              {item.productos.ean_13 ? (
+                                                <EAN13Barcode code={item.productos.ean_13} />
+                                              ) : (
+                                                <span className="text-[10px] text-neutral-400 italic">Sin EAN-13</span>
+                                              )}
+                                            </TableCell>
+                                            <TableCell className="text-right font-black text-sm pr-6 py-3">
+                                              {item.cantidad}
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         {/* Left Column: Form */}
         <div className="lg:col-span-4">
@@ -571,8 +1073,7 @@ export default function AlmacenView() {
             </CardContent>
           </Card>
         </div>
-
-      </div>
+      )}
     </div>
   );
 }
