@@ -323,6 +323,31 @@ app.put("/api/cajas/:id", async (req, res) => {
   }
 });
 
+// DELETE /api/cajas/:id
+app.delete("/api/cajas/:id", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const id = parseInt(req.params.id);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ error: "ID de caja inválido" });
+    }
+    
+    const { data, error } = await supabase
+      .from("cajas")
+      .delete()
+      .eq("id_caja", id)
+      .select();
+      
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: "La caja no existe" });
+    }
+    res.json({ success: true, message: "Caja eliminada correctamente", deleted: data[0] });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/verificar/:ean
 app.get("/api/verificar/:ean", async (req, res) => {
   try {

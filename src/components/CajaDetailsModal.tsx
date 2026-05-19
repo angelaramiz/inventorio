@@ -2,7 +2,7 @@ import React, { useState, useEffect, FormEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode, ArrowLeftRight } from "lucide-react";
+import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode, ArrowLeftRight, Trash2 } from "lucide-react";
 import { Caja, CajaProducto } from "../types";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -185,6 +185,33 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
     }
   };
 
+  const handleDeleteCaja = async () => {
+    const confirmMsg = `¿Estás seguro de que deseas eliminar la caja "${caja.numero_caja}"? Se desvincularán todos sus productos.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const resp = await fetch(`/api/cajas/${caja.id_caja}`, {
+        method: "DELETE"
+      });
+      if (resp.ok) {
+        toast.success(`Caja "${caja.numero_caja}" eliminada con éxito`);
+        const saved = localStorage.getItem("activeCaja");
+        if (saved) {
+          const activeCaja = JSON.parse(saved);
+          if (activeCaja.id_caja === caja.id_caja) {
+            localStorage.removeItem("activeCaja");
+          }
+        }
+        onClose();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al eliminar la caja");
+      }
+    } catch (err) {
+      toast.error("Error de conexión al eliminar la caja");
+    }
+  };
+
   const fetchProductos = async () => {
     setLoading(true);
     try {
@@ -192,7 +219,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       const data = await resp.json();
       setProductos(data);
     } catch (err) {
-      console.error(err);
+      toast.error("Error al cargar productos de la caja");
     } finally {
       setLoading(false);
     }
@@ -299,6 +326,15 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                 </div>
               </div>
             </div>
+            
+            <Button
+              onClick={handleDeleteCaja}
+              variant="destructive"
+              className="mr-8 h-9 text-xs rounded-xl font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5"
+            >
+              <Trash2 size={14} />
+              Eliminar Caja
+            </Button>
           </div>
         </DialogHeader>
 

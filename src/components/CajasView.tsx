@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Plus, Box, ExternalLink, Archive, CheckCircle2, History, Loader2 } from "lucide-react";
+import { Plus, Box, ExternalLink, Archive, CheckCircle2, History, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Caja } from "../types";
 import CajaDetailsModal from "./CajaDetailsModal";
@@ -121,6 +121,30 @@ export default function CajasView() {
     }
   };
 
+  const handleDeleteCaja = async (caja: Caja) => {
+    const confirmMsg = `¿Estás seguro de que deseas eliminar la caja "${caja.numero_caja}"? Se desvincularán todos sus productos.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const resp = await fetch(`/api/cajas/${caja.id_caja}`, {
+        method: "DELETE"
+      });
+      if (resp.ok) {
+        toast.success(`Caja "${caja.numero_caja}" eliminada con éxito`);
+        if (activeCajaId === caja.id_caja) {
+          localStorage.removeItem("activeCaja");
+          setActiveCajaId(null);
+        }
+        fetchCajas();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al eliminar la caja");
+      }
+    } catch (err) {
+      toast.error("Error de conexión al eliminar la caja");
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "vacia": return "bg-neutral-100 text-neutral-500 border-neutral-200";
@@ -195,13 +219,23 @@ export default function CajasView() {
             }`}
           >
             <div className={`absolute top-0 right-0 p-3 flex gap-1 items-center z-10 transition-opacity ${activeCajaId === caja.id_caja ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"}`}>
-               <Button 
+              <Button 
                 variant="ghost" 
                 size="icon" 
-                className="rounded-full bg-white/80 backdrop-blur-sm h-8 w-8 hover:bg-neutral-900 hover:text-white"
+                className="rounded-full bg-white/80 backdrop-blur-sm h-8 w-8 hover:bg-neutral-900 hover:text-white border border-neutral-100"
                 onClick={() => setSelectedCaja(caja)}
+                title="Detalles de Caja"
               >
                 <ExternalLink size={14} />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="rounded-full bg-white/80 backdrop-blur-sm h-8 w-8 hover:bg-rose-600 hover:text-white text-rose-600 border border-neutral-100"
+                onClick={() => handleDeleteCaja(caja)}
+                title="Eliminar Caja"
+              >
+                <Trash2 size={14} />
               </Button>
             </div>
 
