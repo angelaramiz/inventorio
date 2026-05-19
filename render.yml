@@ -1,0 +1,20 @@
+# Render Deployment Configuration
+# This file is optional but recommended for production deployments
+
+start = "npm start"
+build = "npm run build"
+
+# Node environment
+environments = [
+  { name = "NODE_ENV", value = "production" }
+]
+
+# Region for deployment (adjust based on your needs)
+# Supported: oregon, frankfurt, singapore, ohio, virginia
+region = "ohio"
+
+# Health check configuration
+healthCheckPath = "/api/health"
+
+# Auto-deploy on push
+autoDeploy = true

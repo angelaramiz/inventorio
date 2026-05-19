@@ -1,0 +1,42 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env
+!.env.example
+!.env.production
+
+# Development
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Production
+dist/
+build/
+
+# Testing
+coverage/
+.nyc_output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vs/
+.vscode/
+*.code-workspace
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Ignore compiled output
+*.tsbuildinfo

@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: inventario-app
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    
+    envVars:
+      - key: NODE_ENV
+        value: production
+      
+      - key: PORT
+        value: 3000
+      
+      - key: SUPABASE_URL
+        sync: false
+      
+      - key: SUPABASE_KEY
+        sync: false
+      
+      - key: ALLOWED_ORIGINS
+        value: "https://*.onrender.com,https://inventario-app.onrender.com"
+    
+    # Health check
+    healthCheckPath: /api/health
+    
+    # Auto-deploy on push
+    autoDeploy: true
+    
+    # Branch
+    branch: main

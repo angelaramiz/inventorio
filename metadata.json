@@ -1,0 +1,6 @@
+{
+  "name": "SISTEMA DE GESTION DE INVENTARIO Y CAJAS",
+  "description": "Sistema completo para control de inventario fisico y gestion de cajas con escaneo de codigos de barras.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
