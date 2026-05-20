@@ -835,6 +835,100 @@ app.delete("/api/conceptos/tipos/:nombre", async (req, res) => {
   }
 });
 
+// GET /api/conceptos/marcas - Get dynamic sub-brands with usage counts
+app.get("/api/conceptos/marcas", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data: marcas, error: mErr } = await supabase
+      .from("sub_marcas")
+      .select("nombre")
+      .order("nombre", { ascending: true });
+      
+    if (mErr) throw mErr;
+
+    // Get count of products using each sub-brand
+    const { data: counts, error: cErr } = await supabase
+      .from("productos")
+      .select("marca_sub");
+      
+    const countMap: Record<string, number> = {};
+    if (!cErr && counts) {
+      counts.forEach((p: any) => {
+        const val = p.marca_sub || 'Guess';
+        countMap[val] = (countMap[val] || 0) + 1;
+      });
+    }
+
+    const result = marcas.map((m: any) => ({
+      nombre: m.nombre,
+      productos_count: countMap[m.nombre] || 0
+    }));
+      
+    res.json(result);
+  } catch (error: any) {
+    // Fallback if table doesn't exist yet
+    const defaults = ['Guess', 'Marciano', 'GuessEco'];
+    
+    // Also try to get counts from products even in fallback
+    let countMap: Record<string, number> = {};
+    try {
+      const supabase = getSupabase();
+      const { data: counts } = await supabase.from("productos").select("marca_sub");
+      if (counts) {
+        counts.forEach((p: any) => {
+          const val = p.marca_sub || 'Guess';
+          countMap[val] = (countMap[val] || 0) + 1;
+        });
+      }
+    } catch (_) {}
+
+    res.json(defaults.map(d => ({ nombre: d, productos_count: countMap[d] || 0 })));
+  }
+});
+
+// POST /api/conceptos/marcas - Add a dynamic sub-brand
+app.post("/api/conceptos/marcas", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    let { nombre } = req.body;
+    nombre = sanitizeIdentifier(nombre, 50);
+    if (!nombre) {
+      return res.status(400).json({ error: "Nombre de marca inválido o vacío" });
+    }
+    
+    const { data, error } = await supabase
+      .from("sub_marcas")
+      .insert([{ nombre }])
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/conceptos/marcas/:nombre - Delete a dynamic sub-brand
+app.delete("/api/conceptos/marcas/:nombre", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const nombre = sanitizeIdentifier(req.params.nombre, 50);
+    if (!nombre) {
+      return res.status(400).json({ error: "Nombre de marca inválido o vacío" });
+    }
+    
+    const { error } = await supabase
+      .from("sub_marcas")
+      .delete()
+      .eq("nombre", nombre);
+      
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/consultar-caja/:query - Fetch box inventory by box SKU or number
 app.get("/api/consultar-caja/:query", async (req, res) => {
   try {
@@ -1253,6 +1347,22 @@ app.delete("/api/almacen/secciones/:id", async (req, res) => {
 // --- VITE MIDDLEWARE ---
 
 async function startServer() {
+  // Normalizar marcas en la base de datos de manera asíncrona al iniciar
+  try {
+    const supabase = getSupabase();
+    supabase.from("productos").update({ marca_sub: "Guess" }).eq("marca_sub", "Gues").then(({ error }) => {
+      if (error) console.error("Error al normalizar Gues a Guess:", error.message);
+    });
+    supabase.from("productos").update({ marca_sub: "GuessEco" }).eq("marca_sub", "Guess-eco").then(({ error }) => {
+      if (error) console.error("Error al normalizar Guess-eco a GuessEco:", error.message);
+    });
+    supabase.from("productos").update({ marca_sub: "GuessEco" }).eq("marca_sub", "guesseco").then(({ error }) => {
+      if (error) console.error("Error al normalizar guesseco a GuessEco:", error.message);
+    });
+  } catch (err: any) {
+    console.error("Error al iniciar normalización de marcas:", err.message);
+  }
+
   if (NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

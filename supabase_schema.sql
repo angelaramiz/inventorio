@@ -254,3 +254,14 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 -- -- IMPORTANTE: Desactivar RLS si estás usando la API anon pública sin políticas restrictivas
 -- ALTER TABLE zonas_almacen DISABLE ROW LEVEL SECURITY;
 -- ALTER TABLE zonas_seccion DISABLE ROW LEVEL SECURITY;
+
+-- MIGRACIÓN 5: SUB MARCAS DINÁMICAS
+-- Ejecuta esto en el SQL Editor de Supabase:
+--
+-- CREATE TABLE IF NOT EXISTS sub_marcas (
+--     nombre VARCHAR(100) PRIMARY KEY
+-- );
+--
+-- INSERT INTO sub_marcas (nombre) VALUES ('Guess'), ('Marciano'), ('GuessEco') ON CONFLICT DO NOTHING;
+-- ALTER TABLE sub_marcas DISABLE ROW LEVEL SECURITY;
+

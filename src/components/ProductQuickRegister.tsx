@@ -14,6 +14,9 @@ interface Props {
   onSuccess: (product: Producto, qty: number) => void;
 }
 
+const TALLAS_LETRA = ["XS", "S", "M", "L", "XL", "XXL"];
+const TALLAS_NUMERO = ["38", "40", "42", "44", "46", "48"];
+
 export default function ProductQuickRegister({ ean, defaultQty = 1, onClose, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
@@ -21,37 +24,53 @@ export default function ProductQuickRegister({ ean, defaultQty = 1, onClose, onS
   const [cantidad, setCantidad] = useState(defaultQty);
   const videoRef = useRef<HTMLVideoElement>(null);
   
+  const [tallaTipo, setTallaTipo] = useState<"letra" | "numero">("letra");
+  const [tallaValue, setTallaValue] = useState("M");
+
   const [formData, setFormData] = useState({
     sku: ean,
     ean_13: ean,
-    talla: "",
+    talla: "M",
     temporada: "todouso" as Temporada,
     tipo: "otro" as TipoProducto,
-    marca_sub: ""
+    marca_sub: "Guess"
   });
 
   const [temporadas, setTemporadas] = useState<string[]>([]);
   const [tipos, setTipos] = useState<string[]>([]);
+  const [marcas, setMarcas] = useState<string[]>(["Guess", "Marciano", "GuessEco"]);
+
+  useEffect(() => {
+    setFormData(prev => ({ ...prev, talla: tallaValue }));
+  }, [tallaValue]);
 
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const [respTemp, respTipos] = await Promise.all([
+        const [respTemp, respTipos, respMarcas] = await Promise.all([
           fetch("/api/conceptos/temporadas"),
-          fetch("/api/conceptos/tipos")
+          fetch("/api/conceptos/tipos"),
+          fetch("/api/conceptos/marcas")
         ]);
         const tempVals = await respTemp.json();
         const tipoVals = await respTipos.json();
+        const marcaVals = await respMarcas.json();
+        
         const tempNames = tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v);
         const tipoNames = tipoVals.map((v: any) => typeof v === 'object' ? v.nombre : v);
+        const marcaNames = marcaVals.map((v: any) => typeof v === 'object' ? v.nombre : v);
         
         setTemporadas(tempNames);
         setTipos(tipoNames);
+        if (marcaNames.length > 0) {
+          setMarcas(marcaNames);
+        }
         
         setFormData(prev => ({
           ...prev,
           temporada: tempNames.includes("todouso") ? "todouso" : (tempNames[0] || ""),
-          tipo: tipoNames.includes("otro") ? "otro" : (tipoNames[0] || "")
+          tipo: tipoNames.includes("otro") ? "otro" : (tipoNames[0] || ""),
+          marca_sub: prev.marca_sub || marcaNames[0] || "Guess"
         }));
       } catch (err) {
         console.error("Error loading dynamic concepts", err);
@@ -59,6 +78,12 @@ export default function ProductQuickRegister({ ean, defaultQty = 1, onClose, onS
     };
     loadOptions();
   }, []);
+
+  const handleTallaTipoChange = (val: "letra" | "numero") => {
+    setTallaTipo(val);
+    const defaultVal = val === "letra" ? "M" : "40";
+    setTallaValue(defaultVal);
+  };
 
   const startCamera = async () => {
     setShowCamera(true);
@@ -237,23 +262,44 @@ export default function ProductQuickRegister({ ean, defaultQty = 1, onClose, onS
             </div>
             
             <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Talla</label>
-              <Input 
-                value={formData.talla} 
-                onChange={e => setFormData({...formData, talla: e.target.value})}
-                placeholder="L, 42, etc"
-                className="rounded-xl bg-neutral-50"
-              />
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Tipo Talla</label>
+              <Select value={tallaTipo} onValueChange={(v: any) => handleTallaTipoChange(v)}>
+                <SelectTrigger className="rounded-xl bg-neutral-50 capitalize">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="letra">Letra</SelectItem>
+                  <SelectItem value="numero">Número</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Valor Talla</label>
+              <Select value={tallaValue} onValueChange={setTallaValue}>
+                <SelectTrigger className="rounded-xl bg-neutral-50">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(tallaTipo === "letra" ? TALLAS_LETRA : TALLAS_NUMERO).map(t => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-1">
               <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Marca</label>
-              <Input 
-                value={formData.marca_sub} 
-                onChange={e => setFormData({...formData, marca_sub: e.target.value})}
-                placeholder="Sub-marca"
-                className="rounded-xl bg-neutral-50"
-              />
+              <Select value={formData.marca_sub} onValueChange={(v) => setFormData({...formData, marca_sub: v})}>
+                <SelectTrigger className="rounded-xl bg-neutral-50">
+                  <SelectValue placeholder="Seleccionar marca" />
+                </SelectTrigger>
+                <SelectContent>
+                  {marcas.map(m => (
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-1">

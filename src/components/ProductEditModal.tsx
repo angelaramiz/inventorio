@@ -13,6 +13,9 @@ interface Props {
   onSuccess: () => void;
 }
 
+const TALLAS_LETRA = ["XS", "S", "M", "L", "XL", "XXL"];
+const TALLAS_NUMERO = ["38", "40", "42", "44", "46", "48"];
+
 export default function ProductEditModal({ product, onClose, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
@@ -21,35 +24,62 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [tallaTipo, setTallaTipo] = useState<"letra" | "numero">(() => {
+    const isNum = /^\d+$/.test(product.talla || "");
+    return isNum ? "numero" : "letra";
+  });
+  const [tallaValue, setTallaValue] = useState(() => {
+    return product.talla || "M";
+  });
+
   const [formData, setFormData] = useState({
     sku: product.sku,
     ean_13: product.ean_13 || "",
-    talla: product.talla || "",
+    talla: product.talla || "M",
     temporada: product.temporada as Temporada,
     tipo: product.tipo as TipoProducto,
-    marca_sub: product.marca_sub || ""
+    marca_sub: product.marca_sub || "Guess"
   });
 
   const [temporadas, setTemporadas] = useState<string[]>([]);
   const [tipos, setTipos] = useState<string[]>([]);
+  const [marcas, setMarcas] = useState<string[]>(["Guess", "Marciano", "GuessEco"]);
+
+  useEffect(() => {
+    setFormData(prev => ({ ...prev, talla: tallaValue }));
+  }, [tallaValue]);
 
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const [respTemp, respTipos] = await Promise.all([
+        const [respTemp, respTipos, respMarcas] = await Promise.all([
           fetch("/api/conceptos/temporadas"),
-          fetch("/api/conceptos/tipos")
+          fetch("/api/conceptos/tipos"),
+          fetch("/api/conceptos/marcas")
         ]);
         const tempVals = await respTemp.json();
         const tipoVals = await respTipos.json();
+        const marcaVals = await respMarcas.json();
+        
         setTemporadas(tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
         setTipos(tipoVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
+        
+        const marcaNames = marcaVals.map((v: any) => typeof v === 'object' ? v.nombre : v);
+        if (marcaNames.length > 0) {
+          setMarcas(marcaNames);
+        }
       } catch (err) {
         console.error("Error loading concepts", err);
       }
     };
     loadOptions();
   }, []);
+
+  const handleTallaTipoChange = (val: "letra" | "numero") => {
+    setTallaTipo(val);
+    const defaultVal = val === "letra" ? "M" : "40";
+    setTallaValue(defaultVal);
+  };
 
   const startCamera = async () => {
     setShowCamera(true);
@@ -301,23 +331,44 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
             </div>
             
             <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Talla</label>
-              <Input 
-                value={formData.talla} 
-                onChange={e => setFormData({...formData, talla: e.target.value})}
-                placeholder="L, 42, etc"
-                className="rounded-xl bg-neutral-50"
-              />
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Tipo Talla</label>
+              <Select value={tallaTipo} onValueChange={(v: any) => handleTallaTipoChange(v)}>
+                <SelectTrigger className="rounded-xl bg-neutral-50 capitalize">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="letra">Letra</SelectItem>
+                  <SelectItem value="numero">Número</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Valor Talla</label>
+              <Select value={tallaValue} onValueChange={setTallaValue}>
+                <SelectTrigger className="rounded-xl bg-neutral-50">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(tallaTipo === "letra" ? TALLAS_LETRA : TALLAS_NUMERO).map(t => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-1">
               <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Marca</label>
-              <Input 
-                value={formData.marca_sub} 
-                onChange={e => setFormData({...formData, marca_sub: e.target.value})}
-                placeholder="Sub-marca / Proveedor"
-                className="rounded-xl bg-neutral-50"
-              />
+              <Select value={formData.marca_sub} onValueChange={(v) => setFormData({...formData, marca_sub: v})}>
+                <SelectTrigger className="rounded-xl bg-neutral-50">
+                  <SelectValue placeholder="Seleccionar marca" />
+                </SelectTrigger>
+                <SelectContent>
+                  {marcas.map(m => (
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-1">
