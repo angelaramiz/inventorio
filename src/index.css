@@ -128,3 +128,13 @@
     @apply font-sans;
     }
 }
+
+/* Clickable image styles for global lightbox */
+img:not(.no-zoom):not(.fixed img):not([class*="cursor-default"]) {
+  cursor: zoom-in;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s ease-in-out;
+}
+img:not(.no-zoom):not(.fixed img):not([class*="cursor-default"]):hover {
+  transform: scale(1.03);
+  filter: brightness(1.04);
+}

@@ -13,6 +13,7 @@ import ScannerView from "./components/ScannerView";
 import ConceptosView from "./components/ConceptosView";
 import AlmacenView from "./components/AlmacenView";
 import ConsultaDashboard from "./components/ConsultaDashboard";
+import ImageLightbox from "./components/ImageLightbox";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
     return (
       <>
         <ConsultaDashboard />
+        <ImageLightbox />
         <Toaster position="top-center" expand={true} richColors />
       </>
     );
@@ -133,6 +135,7 @@ export default function App() {
         />
       </nav>
 
+      <ImageLightbox />
       <Toaster position="top-center" expand={true} richColors />
     </div>
   );
