@@ -496,7 +496,7 @@ app.get("/api/cajas/:id/productos", async (req, res) => {
       .select(`
         id_producto,
         cantidad,
-        productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, activo, created_at)
+        productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at)
       `)
       .eq("id_caja", id);
     

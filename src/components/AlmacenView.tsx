@@ -270,7 +270,55 @@ export default function AlmacenView() {
   const handleDownloadPDF = async () => {
     setDownloadingPDF(true);
     toast.info("Generando archivo PDF para descarga...");
+    
+    const isDark = document.documentElement.classList.contains("dark");
+    const originalStyles = document.documentElement.getAttribute("style");
+
     try {
+      // 1. Remove dark class if active
+      if (isDark) {
+        document.documentElement.classList.remove("dark");
+      }
+
+      // 2. Set HEX color variables on documentElement to override oklch
+      const hexVariables: Record<string, string> = {
+        "--background": "#ffffff",
+        "--foreground": "#252525",
+        "--card": "#ffffff",
+        "--card-foreground": "#252525",
+        "--popover": "#ffffff",
+        "--popover-foreground": "#252525",
+        "--primary": "#333333",
+        "--primary-foreground": "#fafafa",
+        "--secondary": "#f5f5f5",
+        "--secondary-foreground": "#333333",
+        "--muted": "#f5f5f5",
+        "--muted-foreground": "#8e8e8e",
+        "--accent": "#f5f5f5",
+        "--accent-foreground": "#333333",
+        "--destructive": "#dc2626",
+        "--border": "#ebebeb",
+        "--input": "#ebebeb",
+        "--ring": "#b5b5b5",
+        "--chart-1": "#dfdfdf",
+        "--chart-2": "#8e8e8e",
+        "--chart-3": "#707070",
+        "--chart-4": "#5e5e5e",
+        "--chart-5": "#444444",
+        "--sidebar": "#fafafa",
+        "--sidebar-foreground": "#252525",
+        "--sidebar-primary": "#333333",
+        "--sidebar-primary-foreground": "#fafafa",
+        "--sidebar-accent": "#f5f5f5",
+        "--sidebar-accent-foreground": "#333333",
+        "--sidebar-border": "#ebebeb",
+        "--sidebar-ring": "#b5b5b5",
+      };
+
+      Object.entries(hexVariables).forEach(([key, val]) => {
+        document.documentElement.style.setProperty(key, val, "important");
+      });
+
       const html2pdf = await new Promise<any>((resolve, reject) => {
         if ((window as any).html2pdf) {
           resolve((window as any).html2pdf);
@@ -304,6 +352,16 @@ export default function AlmacenView() {
       console.error(err);
       toast.error("Error al generar PDF: " + err.message);
     } finally {
+      // Restore dark mode if it was active
+      if (isDark) {
+        document.documentElement.classList.add("dark");
+      }
+      // Restore inline styles
+      if (originalStyles) {
+        document.documentElement.setAttribute("style", originalStyles);
+      } else {
+        document.documentElement.removeAttribute("style");
+      }
       setDownloadingPDF(false);
     }
   };
@@ -708,13 +766,13 @@ export default function AlmacenView() {
                   }
                   /* Force light theme variables and overrides */
                   :root, .dark, body {
-                    --background: oklch(1 0 0) !important;
-                    --foreground: oklch(0.145 0 0) !important;
-                    --card: oklch(1 0 0) !important;
-                    --card-foreground: oklch(0.145 0 0) !important;
-                    --muted: oklch(0.97 0 0) !important;
-                    --muted-foreground: oklch(0.556 0 0) !important;
-                    --border: oklch(0.922 0 0) !important;
+                    --background: #ffffff !important;
+                    --foreground: #252525 !important;
+                    --card: #ffffff !important;
+                    --card-foreground: #252525 !important;
+                    --muted: #f5f5f5 !important;
+                    --muted-foreground: #8e8e8e !important;
+                    --border: #ebebeb !important;
                   }
                   #report-print-area .bg-white,
                   #report-print-area .bg-neutral-50\/30,
@@ -738,13 +796,13 @@ export default function AlmacenView() {
                 .html2pdf-mode {
                   background-color: white !important;
                   color: black !important;
-                  --background: oklch(1 0 0) !important;
-                  --foreground: oklch(0.145 0 0) !important;
-                  --card: oklch(1 0 0) !important;
-                  --card-foreground: oklch(0.145 0 0) !important;
-                  --muted: oklch(0.97 0 0) !important;
-                  --muted-foreground: oklch(0.556 0 0) !important;
-                  --border: oklch(0.922 0 0) !important;
+                  --background: #ffffff !important;
+                  --foreground: #252525 !important;
+                  --card: #ffffff !important;
+                  --card-foreground: #252525 !important;
+                  --muted: #f5f5f5 !important;
+                  --muted-foreground: #8e8e8e !important;
+                  --border: #ebebeb !important;
                 }
                 .html2pdf-mode .bg-white,
                 .html2pdf-mode .bg-neutral-50\/30,
