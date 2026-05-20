@@ -22,6 +22,7 @@ export default function ScannerView() {
   const [manualQty, setManualQty] = useState(1);
   const [pendingQty, setPendingQty] = useState(1);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const preventReactivateRef = useRef(false);
 
   const handleManualSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -124,13 +125,10 @@ export default function ScannerView() {
   };
 
   const onScanSuccess = (decodedText: string) => {
-    // Pausar escaneo para procesar
-    if (scannerRef.current) {
-      // Html5QrcodeScanner no tiene pausa nativa simple, pero podemos usar un flag
-      // o limpiar y reiniciar. Aquí simplemente verificamos si ya estamos procesando.
-    }
-    
     if (isChecking) return;
+    
+    // Stop the scanner immediately to avoid duplicate scan loops
+    stopScanner();
     
     setScannedResult(decodedText);
     verifyProduct(decodedText);
@@ -174,18 +172,29 @@ export default function ScannerView() {
     }
   };
 
-  const asignarProducto = async (id_producto: number, force = false, qty = 1) => {
+  const handleConflictClose = (open: boolean) => {
+    if (!open) {
+      setShowConflictDialog(false);
+      if (!preventReactivateRef.current) {
+        startScanner();
+      }
+      preventReactivateRef.current = false;
+    }
+  };
+
+  const asignarProducto = async (id_producto: number, force = false, qty = 1, accion?: 'mover' | 'agregar') => {
     if (!activeCaja) return;
 
     try {
+      preventReactivateRef.current = true;
       const resp = await fetch(`/api/cajas/${activeCaja.id_caja}/asignar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id_producto, force, cantidad: qty })
+        body: JSON.stringify({ id_producto, force, cantidad: qty, accion })
       });
       
       if (resp.ok) {
-        toast.success("Producto asignado a la caja");
+        toast.success(accion === 'mover' ? "Producto movido a la caja" : "Producto asignado a la caja");
         setVerificationResult(null);
         setScannedResult(null);
         setShowConflictDialog(false);
@@ -394,8 +403,12 @@ export default function ScannerView() {
         <ProductQuickRegister 
           ean={scannedResult || ""} 
           defaultQty={pendingQty}
-          onClose={() => setShowQuickRegister(false)}
+          onClose={() => {
+            setShowQuickRegister(false);
+            startScanner();
+          }}
           onSuccess={(product, qty) => {
+            preventReactivateRef.current = true;
             asignarProducto(product.id_producto, false, qty);
             setShowQuickRegister(false);
           }}
@@ -403,7 +416,7 @@ export default function ScannerView() {
       )}
 
       {/* Dialogo de Conflicto de Ubicación */}
-      <Dialog open={showConflictDialog} onOpenChange={setShowConflictDialog}>
+      <Dialog open={showConflictDialog} onOpenChange={handleConflictClose}>
         <DialogContent className="rounded-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-rose-600">
@@ -423,13 +436,26 @@ export default function ScannerView() {
               ¿Deseas mover el producto a la caja actual <strong>{activeCaja?.numero_caja}</strong>?
             </p>
           </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setShowConflictDialog(false)} className="rounded-full flex-1">
+          <DialogFooter className="flex flex-col sm:flex-row gap-2 w-full pt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setShowConflictDialog(false);
+                startScanner();
+              }} 
+              className="rounded-xl flex-1 h-11 text-xs sm:text-sm font-semibold"
+            >
               Cancelar
             </Button>
             <Button 
-              className="rounded-full flex-1 bg-neutral-900"
-              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty)}
+              className="rounded-xl flex-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-900 border border-neutral-200 h-11 text-xs sm:text-sm font-extrabold"
+              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'agregar')}
+            >
+              Agregar a caja actual
+            </Button>
+            <Button 
+              className="rounded-xl flex-1 bg-neutral-900 hover:bg-neutral-800 text-white h-11 text-xs sm:text-sm font-extrabold"
+              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'mover')}
             >
               Mover a esta caja
             </Button>

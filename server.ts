@@ -404,7 +404,7 @@ app.post("/api/cajas/:id/asignar", async (req, res) => {
   try {
     const supabase = getSupabase();
     const { id: id_caja } = req.params;
-    const { id_producto, cantidad = 1, force = false } = req.body;
+    const { id_producto, cantidad = 1, force = false, accion = 'agregar' } = req.body;
     
     // 1. Verificar si el producto ya esta en OTRA caja activa/llena
     if (!force) {
@@ -422,6 +422,36 @@ app.post("/api/cajas/:id/asignar", async (req, res) => {
           ubicacion: conflicto.cajas.numero_caja,
           estado: conflicto.cajas.estado
         });
+      }
+    } else {
+      if (accion === 'mover') {
+        const { data: existing, error: eError } = await supabase
+          .from("caja_productos")
+          .select("id_caja, cajas(estado)")
+          .eq("id_producto", id_producto);
+        
+        if (eError) throw eError;
+        
+        const conflicto = existing?.find((e: any) => e.id_caja != id_caja && e.cajas.estado !== 'vacia');
+        if (conflicto) {
+          const { error: delError } = await supabase
+            .from("caja_productos")
+            .delete()
+            .eq("id_producto", id_producto)
+            .eq("id_caja", conflicto.id_caja);
+            
+          if (delError) throw delError;
+          
+          // Actualizar estado de la caja origen si quedo vacia
+          const { data: remaining } = await supabase
+            .from("caja_productos")
+            .select("cantidad")
+            .eq("id_caja", conflicto.id_caja);
+            
+          if (!remaining || remaining.length === 0) {
+            await supabase.from("cajas").update({ estado: 'vacia' }).eq("id_caja", conflicto.id_caja);
+          }
+        }
       }
     }
     
