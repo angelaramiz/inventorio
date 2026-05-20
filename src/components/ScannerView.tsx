@@ -417,47 +417,47 @@ export default function ScannerView() {
 
       {/* Dialogo de Conflicto de Ubicación */}
       <Dialog open={showConflictDialog} onOpenChange={handleConflictClose}>
-        <DialogContent className="rounded-2xl">
+        <DialogContent className="rounded-2xl max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-rose-600">
               <AlertCircle /> Conflicto de Ubicación
             </DialogTitle>
           </DialogHeader>
-          <div className="py-6 space-y-4 text-center">
-            <p className="text-neutral-600">
+          <div className="py-4 space-y-4 text-center">
+            <p className="text-neutral-600 text-sm">
               Este producto ya se encuentra registrado en otra caja activa:
             </p>
-            <div className="bg-neutral-100 p-6 rounded-2xl border border-neutral-200">
-              <p className="text-xs uppercase font-bold text-neutral-400 mb-1">Caja Origen</p>
-              <p className="text-2xl font-black text-neutral-900">{verificationResult?.ubicacion?.numero_caja}</p>
-              <Badge className="mt-2 bg-amber-500">{verificationResult?.ubicacion?.estado}</Badge>
+            <div className="bg-neutral-100 p-5 rounded-2xl border border-neutral-200">
+              <p className="text-[10px] uppercase font-black text-neutral-400 tracking-[0.1em] mb-1">Caja Origen</p>
+              <p className="text-2xl font-black text-neutral-900 leading-none">{verificationResult?.ubicacion?.numero_caja}</p>
+              <Badge className="mt-2 bg-amber-500 border-none hover:bg-amber-600 uppercase text-[9px] font-bold">{verificationResult?.ubicacion?.estado}</Badge>
             </div>
             <p className="text-sm text-neutral-500">
               ¿Deseas mover el producto a la caja actual <strong>{activeCaja?.numero_caja}</strong>?
             </p>
           </div>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2 w-full pt-4">
+          <DialogFooter className="flex flex-col gap-2 w-full pt-2">
+            <Button 
+              className="rounded-xl w-full bg-neutral-900 hover:bg-neutral-800 text-white h-11 text-sm font-extrabold transition-all"
+              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'mover')}
+            >
+              Mover a esta caja
+            </Button>
+            <Button 
+              className="rounded-xl w-full bg-neutral-100 hover:bg-neutral-200 text-neutral-900 border border-neutral-200 h-11 text-sm font-bold transition-all"
+              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'agregar')}
+            >
+              Agregar a caja actual
+            </Button>
             <Button 
               variant="outline" 
               onClick={() => {
                 setShowConflictDialog(false);
                 startScanner();
               }} 
-              className="rounded-xl flex-1 h-11 text-xs sm:text-sm font-semibold"
+              className="rounded-xl w-full h-11 text-sm font-semibold border-neutral-200 text-neutral-500 hover:text-neutral-900 transition-all"
             >
               Cancelar
-            </Button>
-            <Button 
-              className="rounded-xl flex-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-900 border border-neutral-200 h-11 text-xs sm:text-sm font-extrabold"
-              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'agregar')}
-            >
-              Agregar a caja actual
-            </Button>
-            <Button 
-              className="rounded-xl flex-1 bg-neutral-900 hover:bg-neutral-800 text-white h-11 text-xs sm:text-sm font-extrabold"
-              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'mover')}
-            >
-              Mover a esta caja
             </Button>
           </DialogFooter>
         </DialogContent>
