@@ -229,11 +229,18 @@ app.get("/api/productos/:id/image", async (req, res) => {
 app.get("/api/cajas", async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { data, error } = await supabase
+    const { temporada_default } = req.query as Record<string, string>;
+    
+    let query = supabase
       .from("vista_total_cajas")
       .select("*")
       .order("fecha_creacion", { ascending: false });
     
+    if (temporada_default) {
+      query = query.ilike("temporada_default", temporada_default);
+    }
+    
+    const { data, error } = await query;
     if (error) throw error;
     res.json(data);
   } catch (error: any) {

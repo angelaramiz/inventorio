@@ -61,6 +61,11 @@ export default function ConsultaDashboard() {
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
   const [marcasOpts, setMarcasOpts] = useState<string[]>([]);
   const [prodResults, setProdResults] = useState<ProductoQueryResult[]>([]);
+
+  // Box filter by temporada
+  const [boxFilterTemporada, setBoxFilterTemporada] = useState("");
+  const [boxFilterResults, setBoxFilterResults] = useState<any[]>([]);
+  const [boxFilterLoading, setBoxFilterLoading] = useState(false);
   
   // Scanner Ref
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -131,6 +136,8 @@ export default function ConsultaDashboard() {
 
   const handleBoxSearch = async (searchQuery: string) => {
     if (!searchQuery.trim()) return;
+    setBoxFilterResults([]);
+    setBoxFilterTemporada("");
     setBoxLoading(true);
     try {
       const resp = await fetch(`/api/consultar-caja/${encodeURIComponent(searchQuery.trim())}`);
@@ -150,6 +157,33 @@ export default function ConsultaDashboard() {
       toast.error("Error al conectar con el servidor");
     } finally {
       setBoxLoading(false);
+    }
+  };
+
+  const handleBoxByTemporada = async (temporada: string) => {
+    if (!temporada) {
+      setBoxFilterResults([]);
+      return;
+    }
+    setCurrentBox(null);
+    setBoxFilterLoading(true);
+    try {
+      const resp = await fetch(`/api/cajas?temporada_default=${encodeURIComponent(temporada)}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setBoxFilterResults(data);
+        if (data.length === 0) {
+          toast.info(`No hay cajas con temporada "${temporada}"`); 
+        } else {
+          toast.success(`${data.length} caja(s) con temporada "${temporada}"`);
+        }
+      } else {
+        toast.error("Error al buscar cajas por temporada");
+      }
+    } catch (err) {
+      toast.error("Error al conectar con el servidor");
+    } finally {
+      setBoxFilterLoading(false);
     }
   };
 
@@ -398,6 +432,35 @@ export default function ConsultaDashboard() {
                   >
                     {boxLoading ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
                   </Button>
+                </div>
+
+                {/* Temporada Filter */}
+                <div className="border-t border-neutral-100 pt-3 space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-neutral-400">Filtrar por Temporada de Caja</p>
+                  <div className="flex gap-2 items-center">
+                    <select
+                      value={boxFilterTemporada}
+                      onChange={e => {
+                        setBoxFilterTemporada(e.target.value);
+                        handleBoxByTemporada(e.target.value);
+                      }}
+                      className="flex-1 rounded-xl h-10 px-3 bg-neutral-50 border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                    >
+                      <option value="">Todas las temporadas</option>
+                      {temporadasOpts.map(t => (
+                        <option key={t} value={t}>{t.toUpperCase()}</option>
+                      ))}
+                    </select>
+                    {boxFilterLoading && <Loader2 className="animate-spin text-neutral-400" size={16} />}
+                    {boxFilterTemporada && !boxFilterLoading && (
+                      <button
+                        onClick={() => { setBoxFilterTemporada(""); setBoxFilterResults([]); }}
+                        className="text-neutral-400 hover:text-red-500 p-1"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -729,6 +792,52 @@ export default function ConsultaDashboard() {
                     </CardContent>
                   </Card>
                 </motion.div>
+              ) : boxFilterResults.length > 0 ? (
+                <motion.div
+                  key="box-filter-results"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  className="space-y-3"
+                >
+                  <div className="flex items-center justify-between px-1">
+                    <h3 className="text-sm font-black uppercase tracking-wider text-neutral-500">
+                      {boxFilterResults.length} CAJA(S) · TEMPORADA: {boxFilterTemporada.toUpperCase()}
+                    </h3>
+                    <button
+                      onClick={() => { setBoxFilterTemporada(""); setBoxFilterResults([]); }}
+                      className="text-[10px] font-bold text-neutral-400 hover:text-red-500 flex items-center gap-1"
+                    >
+                      <X size={10} /> Limpiar
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {boxFilterResults.map((b: any) => (
+                      <button
+                        key={b.id_caja}
+                        onClick={() => handleBoxSearch(b.numero_caja)}
+                        className="bg-white border border-neutral-100 hover:border-neutral-900 rounded-2xl p-4 flex gap-3 items-center text-left transition-all group shadow-sm hover:shadow-md"
+                      >
+                        <div className={`p-2.5 rounded-xl text-white shadow-sm flex-shrink-0 ${
+                          b.estado === 'llena' ? 'bg-rose-500' : b.estado === 'activa' ? 'bg-amber-400 text-neutral-900' : 'bg-neutral-700'
+                        }`}>
+                          <Package size={20} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-sm text-neutral-900">Caja {b.numero_caja}</p>
+                          <p className="text-[10px] font-mono text-neutral-400 truncate">{b.sku || "Sin SKU"}</p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md ${
+                              b.estado === 'llena' ? 'bg-rose-50 text-rose-600' : b.estado === 'activa' ? 'bg-amber-50 text-amber-700' : 'bg-neutral-100 text-neutral-500'
+                            }`}>{b.estado}</span>
+                            <span className="text-[9px] font-black uppercase bg-neutral-100 px-1.5 py-0.5 rounded-md">{b.total_unidades || 0} uds</span>
+                          </div>
+                        </div>
+                        <ChevronRight size={14} className="text-neutral-300 group-hover:text-neutral-700 flex-shrink-0 transition-colors" />
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
               ) : (
                 <motion.div
                   key="empty-box"
@@ -742,7 +851,7 @@ export default function ConsultaDashboard() {
                   </div>
                   <h3 className="text-xl font-bold text-neutral-800">Esperando Consulta de Caja</h3>
                   <p className="text-sm text-neutral-400 max-w-sm mt-1">
-                    Inicia la cámara a la izquierda o escribe un código manual para consultar los productos que hay en una caja.
+                    Inicia la cámara, escribe un número/SKU de caja, o filtra por temporada para ver las cajas asignadas.
                   </p>
                 </motion.div>
               )

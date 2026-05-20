@@ -2,7 +2,7 @@ import React, { useState, useEffect, FormEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode, ArrowLeftRight, Trash2 } from "lucide-react";
+import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode, ArrowLeftRight, Trash2, Calendar } from "lucide-react";
 import { Caja, CajaProducto } from "../types";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,9 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   const [isEditingSku, setIsEditingSku] = useState(!caja.sku);
   const [isSavingSku, setIsSavingSku] = useState(false);
   const [qtyInput, setQtyInput] = useState(1);
+  const [cajaTemporada, setCajaTemporada] = useState(caja.temporada_default || "");
+  const [isSavingTemporada, setIsSavingTemporada] = useState(false);
+  const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
 
   // Locations states
   const [zones, setZones] = useState<any[]>([]);
@@ -164,6 +167,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   useEffect(() => {
     fetchProductos();
     fetchLocations();
+    fetchTemporadas();
   }, [caja.id_caja]);
 
   const fetchLocations = async () => {
@@ -182,6 +186,40 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       }
     } catch (err) {
       console.error("Error fetching locations:", err);
+    }
+  };
+
+  const fetchTemporadas = async () => {
+    try {
+      const resp = await fetch("/api/conceptos/temporadas");
+      if (resp.ok) {
+        const data = await resp.json();
+        setTemporadasOpts(data.map((v: any) => typeof v === 'object' ? v.nombre : v));
+      }
+    } catch (err) {
+      console.error("Error fetching temporadas:", err);
+    }
+  };
+
+  const handleSaveTemporada = async () => {
+    setIsSavingTemporada(true);
+    try {
+      const resp = await fetch(`/api/cajas/${caja.id_caja}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ temporada_default: cajaTemporada || null })
+      });
+      if (resp.ok) {
+        toast.success(cajaTemporada ? `Temporada "${cajaTemporada}" asignada a la caja` : "Temporada por defecto eliminada");
+        caja.temporada_default = cajaTemporada || null;
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al actualizar la temporada");
+      }
+    } catch (err) {
+      toast.error("Error al conectar con el servidor");
+    } finally {
+      setIsSavingTemporada(false);
     }
   };
 
@@ -323,6 +361,11 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                 <div className="flex items-center gap-2 mt-1">
                   <Badge className="bg-emerald-500 hover:bg-emerald-600 border-none uppercase text-[10px]">{caja.estado}</Badge>
                   <span className="text-neutral-400 text-xs">{totalUnidades} unidades totales</span>
+                  {caja.temporada_default && (
+                    <span className="text-[10px] font-black uppercase bg-amber-400/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                      🗓 {caja.temporada_default}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -339,8 +382,8 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
         </DialogHeader>
 
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
-          {/* Formulario de SKU y Ubicación de la Caja Contenedora (al tope de la modal) */}
-          <div className="p-6 pb-4 border-b bg-neutral-50 grid grid-cols-1 md:grid-cols-2 gap-6 shrink-0">
+          {/* Formulario de SKU, Ubicación y Temporada de la Caja Contenedora (al tope de la modal) */}
+          <div className="p-6 pb-4 border-b bg-neutral-50 grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
             {/* SKU Field */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
@@ -414,6 +457,41 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                   })}
                 </select>
               </div>
+            </div>
+
+            {/* Temporada Default Field */}
+            <div className="flex flex-col justify-between gap-3 md:border-l md:pl-4">
+              <div>
+                <h3 className="font-bold text-neutral-900 flex items-center gap-2 text-sm">
+                  <Calendar size={16} className="text-neutral-500" /> Temporada Default
+                </h3>
+                <p className="text-[11px] text-neutral-500">Los nuevos productos heredan esta temporada</p>
+              </div>
+              <div className="flex gap-2 items-center">
+                <select
+                  value={cajaTemporada}
+                  onChange={e => setCajaTemporada(e.target.value)}
+                  className="flex-1 rounded-xl h-10 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                >
+                  <option value="">Sin temporada</option>
+                  {temporadasOpts.map(t => (
+                    <option key={t} value={t}>{t.toUpperCase()}</option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  onClick={handleSaveTemporada}
+                  disabled={isSavingTemporada}
+                  className="rounded-xl h-10 bg-neutral-900 text-xs px-3 text-white font-semibold shrink-0"
+                >
+                  {isSavingTemporada ? <Loader2 className="animate-spin" size={14} /> : "Ok"}
+                </Button>
+              </div>
+              {cajaTemporada && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 px-2 py-1 rounded-full w-fit">
+                  🗓 {cajaTemporada}
+                </span>
+              )}
             </div>
           </div>
 
