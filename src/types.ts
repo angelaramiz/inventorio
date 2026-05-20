@@ -24,6 +24,7 @@ export interface Caja {
   fecha_creacion: string;
   total_productos_unicos?: number;
   total_unidades?: number;
+  temporada_default?: string | null;
 }
 
 export interface CajaProducto {

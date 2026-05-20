@@ -97,15 +97,32 @@ app.get('/api/health', (req, res) => {
 
 // --- API ROUTES ---
 
-// GET /api/productos - EXCLUDING foto column for performance
+// GET /api/productos - EXCLUDING foto column for performance. Supports ?q, ?marca, ?talla, ?temporada filters
 app.get("/api/productos", async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { data, error } = await supabase
+    const { q, marca, talla, temporada } = req.query as Record<string, string>;
+    
+    let query = supabase
       .from("productos")
       .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at")
       .order("created_at", { ascending: false });
     
+    if (q) {
+      // Search by SKU or EAN (partial match)
+      query = query.or(`sku.ilike.%${q}%,ean_13.ilike.%${q}%,marca_sub.ilike.%${q}%`);
+    }
+    if (marca) {
+      query = query.ilike("marca_sub", marca);
+    }
+    if (talla) {
+      query = query.ilike("talla", talla);
+    }
+    if (temporada) {
+      query = query.ilike("temporada", temporada);
+    }
+    
+    const { data, error } = await query;
     if (error) throw error;
     res.json(data);
   } catch (error: any) {
@@ -228,7 +245,7 @@ app.get("/api/cajas", async (req, res) => {
 app.post("/api/cajas", async (req, res) => {
   try {
     const supabase = getSupabase();
-    let { numero_caja, id_zona_seccion, id_zona_almacen } = req.body;
+    let { numero_caja, id_zona_seccion, id_zona_almacen, temporada_default } = req.body;
     
     numero_caja = sanitizeIdentifier(numero_caja, 50);
     if (!numero_caja) {
@@ -251,6 +268,11 @@ app.post("/api/cajas", async (req, res) => {
       insertData.id_zona_almacen = parsedAlm;
       insertData.id_zona_seccion = null;
     }
+
+    // Optional: set default season for products added to this box
+    if (temporada_default && temporada_default.trim()) {
+      insertData.temporada_default = sanitizeIdentifier(temporada_default, 100).toLowerCase();
+    }
     
     const { data, error } = await supabase
       .from("cajas")
@@ -272,7 +294,7 @@ app.put("/api/cajas/:id", async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: "ID de caja inválido" });
     }
-    const { estado, sku, id_zona_seccion, id_zona_almacen } = req.body;
+    const { estado, sku, id_zona_seccion, id_zona_almacen, temporada_default } = req.body;
     
     const updateData: any = {};
     if (estado !== undefined) {
@@ -284,6 +306,13 @@ app.put("/api/cajas/:id", async (req, res) => {
     if (sku !== undefined) {
       const cleanSku = sanitizeIdentifier(sku, 100);
       updateData.sku = cleanSku === "" ? null : cleanSku;
+    }
+    if (temporada_default !== undefined) {
+      if (temporada_default === null || temporada_default === "") {
+        updateData.temporada_default = null;
+      } else {
+        updateData.temporada_default = sanitizeIdentifier(temporada_default, 100).toLowerCase();
+      }
     }
     if (id_zona_seccion !== undefined) {
       if (id_zona_seccion === "" || id_zona_seccion === null) {

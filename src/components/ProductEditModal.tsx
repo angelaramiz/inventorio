@@ -13,8 +13,8 @@ interface Props {
   onSuccess: () => void;
 }
 
-const TALLAS_LETRA = ["XS", "S", "M", "L", "XL", "XXL"];
-const TALLAS_NUMERO = ["38", "40", "42", "44", "46", "48"];
+const TALLAS_LETRA = ["SinTalla", "XS", "S", "M", "L", "XL", "XXL"];
+const TALLAS_NUMERO = ["SinTalla", "38", "40", "42", "44", "46", "48"];
 
 export default function ProductEditModal({ product, onClose, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);

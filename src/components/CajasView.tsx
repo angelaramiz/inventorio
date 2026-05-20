@@ -15,6 +15,8 @@ export default function CajasView() {
   const [zones, setZones] = useState<any[]>([]);
   const [sections, setSections] = useState<any[]>([]);
   const [selectedValue, setSelectedValue] = useState("");
+  const [newCajaTemporada, setNewCajaTemporada] = useState("");
+  const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [selectedCaja, setSelectedCaja] = useState<Caja | null>(null);
   const [activeCajaId, setActiveCajaId] = useState<number | null>(null);
@@ -22,6 +24,7 @@ export default function CajasView() {
   useEffect(() => {
     fetchCajas();
     fetchLocations();
+    fetchTemporadas();
     const saved = localStorage.getItem("activeCaja");
     if (saved) {
       setActiveCajaId(JSON.parse(saved).id_caja);
@@ -60,6 +63,19 @@ export default function CajasView() {
     }
   };
 
+  const fetchTemporadas = async () => {
+    try {
+      const resp = await fetch("/api/conceptos/temporadas");
+      if (resp.ok) {
+        const data = await resp.json();
+        const names = data.map((v: any) => typeof v === 'object' ? v.nombre : v) as string[];
+        setTemporadasOpts(names);
+      }
+    } catch (err) {
+      console.error("Error fetching temporadas:", err);
+    }
+  };
+
   const handleCreateCaja = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCajaNumber) return;
@@ -80,13 +96,15 @@ export default function CajasView() {
         body: JSON.stringify({ 
           numero_caja: newCajaNumber,
           id_zona_seccion,
-          id_zona_almacen
+          id_zona_almacen,
+          temporada_default: newCajaTemporada || null
         })
       });
       if (resp.ok) {
         toast.success("Caja creada correctamente");
         setNewCajaNumber("");
         setSelectedValue("");
+        setNewCajaTemporada("");
         fetchCajas();
       } else {
         const err = await resp.json();
@@ -194,6 +212,18 @@ export default function CajasView() {
               );
             })}
           </select>
+          <div className="h-6 w-px bg-neutral-200 hidden sm:block"></div>
+          <select
+            value={newCajaTemporada}
+            onChange={e => setNewCajaTemporada(e.target.value)}
+            title="Temporada por defecto de los productos en esta caja (opcional)"
+            className="bg-neutral-50 px-3 py-2 rounded-xl text-xs font-bold border border-neutral-100 outline-none w-full sm:w-40 h-10"
+          >
+            <option value="">Sin temporada default</option>
+            {temporadasOpts.map(t => (
+              <option key={t} value={t}>{t.toUpperCase()}</option>
+            ))}
+          </select>
           <Button disabled={isCreating} type="submit" className="rounded-xl h-10 bg-neutral-900 px-5 font-bold">
             {isCreating ? <Loader2 className="animate-spin" size={16} /> : <Plus className="mr-2" size={18} />}
             Crear
@@ -251,6 +281,11 @@ export default function CajasView() {
               <CardTitle className="text-2xl pt-4 font-black tracking-tight">{caja.numero_caja}</CardTitle>
               {caja.sku && (
                 <span className="text-xs text-neutral-400 font-mono mt-1 block">SKU: {caja.sku}</span>
+              )}
+              {caja.temporada_default && (
+                <span className="inline-flex items-center gap-1 mt-1.5 text-[9px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
+                  🗓 Temporada: {caja.temporada_default}
+                </span>
               )}
             </CardHeader>
             <CardContent>

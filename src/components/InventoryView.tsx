@@ -2,21 +2,31 @@ import React, { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search, Package, Image as ImageIcon, Loader2, Calendar, Edit2, Trash2 } from "lucide-react";
+import { Search, Package, Image as ImageIcon, Loader2, Calendar, Edit2, Trash2, SlidersHorizontal, X } from "lucide-react";
 import { Producto } from "../types";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import ProductEditModal from "./ProductEditModal";
 
+const TALLAS_LETRA = ["SinTalla", "XS", "S", "M", "L", "XL", "XXL"];
+const TALLAS_NUMERO = ["SinTalla", "38", "40", "42", "44", "46", "48"];
+
 export default function InventoryView() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterMarca, setFilterMarca] = useState("");
+  const [filterTalla, setFilterTalla] = useState("");
+  const [filterTemporada, setFilterTemporada] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
+  const [marcasOpts, setMarcasOpts] = useState<string[]>([]);
 
   useEffect(() => {
     fetchProductos();
+    fetchFilterOptions();
   }, []);
 
   const fetchProductos = async () => {
@@ -29,6 +39,21 @@ export default function InventoryView() {
       toast.error("Error al cargar productos");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchFilterOptions = async () => {
+    try {
+      const [respTemp, respMarcas] = await Promise.all([
+        fetch("/api/conceptos/temporadas"),
+        fetch("/api/conceptos/marcas"),
+      ]);
+      const tempVals = await respTemp.json();
+      const marcaVals = await respMarcas.json();
+      setTemporadasOpts(tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
+      setMarcasOpts(marcaVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
+    } catch (err) {
+      console.error("Error loading filter options", err);
     }
   };
 
@@ -53,11 +78,25 @@ export default function InventoryView() {
     }
   };
 
-  const filtered = productos.filter(p => 
-    p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.ean_13.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.marca_sub.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const activeFilterCount = [filterMarca, filterTalla, filterTemporada].filter(Boolean).length;
+
+  const filtered = productos.filter(p => {
+    const term = searchTerm.toLowerCase();
+    const matchesSearch = !term || 
+      p.sku.toLowerCase().includes(term) ||
+      p.ean_13.toLowerCase().includes(term) ||
+      p.marca_sub.toLowerCase().includes(term);
+    const matchesMarca = !filterMarca || p.marca_sub.toLowerCase() === filterMarca.toLowerCase();
+    const matchesTalla = !filterTalla || p.talla.toLowerCase() === filterTalla.toLowerCase();
+    const matchesTemporada = !filterTemporada || p.temporada.toLowerCase() === filterTemporada.toLowerCase();
+    return matchesSearch && matchesMarca && matchesTalla && matchesTemporada;
+  });
+
+  const clearFilters = () => {
+    setFilterMarca("");
+    setFilterTalla("");
+    setFilterTemporada("");
+  };
 
   return (
     <div className="space-y-6 pb-20 md:pb-0">
@@ -69,18 +108,93 @@ export default function InventoryView() {
           <p className="text-sm text-neutral-500 font-medium">Catálogo dinámico de artículos</p>
         </div>
 
-        <div className="flex gap-3 bg-white p-1.5 rounded-2xl shadow-sm border border-neutral-100 w-full md:w-96 overflow-hidden focus-within:border-neutral-900 transition-colors">
-          <div className="flex items-center pl-3 text-neutral-400">
-            <Search size={20} />
+        <div className="flex gap-2 items-center w-full md:w-auto">
+          <div className="flex gap-3 bg-white p-1.5 rounded-2xl shadow-sm border border-neutral-100 flex-1 md:w-96 overflow-hidden focus-within:border-neutral-900 transition-colors">
+            <div className="flex items-center pl-3 text-neutral-400">
+              <Search size={20} />
+            </div>
+            <Input 
+              placeholder="SKU, EAN o Marca..." 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="border-none bg-transparent focus-visible:ring-0 text-base h-11"
+            />
+            {searchTerm && (
+              <button onClick={() => setSearchTerm("")} className="pr-3 text-neutral-400 hover:text-neutral-700">
+                <X size={16} />
+              </button>
+            )}
           </div>
-          <Input 
-            placeholder="SKU, EAN o Marca..." 
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="border-none bg-transparent focus-visible:ring-0 text-base h-11"
-          />
+          <Button
+            variant="outline"
+            onClick={() => setShowFilters(!showFilters)}
+            className={`relative rounded-xl h-12 px-4 border transition-all ${showFilters ? "bg-neutral-900 text-white border-neutral-900" : "bg-white"}`}
+          >
+            <SlidersHorizontal size={18} />
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-amber-400 text-neutral-950 text-[10px] font-black rounded-full flex items-center justify-center">
+                {activeFilterCount}
+              </span>
+            )}
+          </Button>
         </div>
       </div>
+
+      {/* Advanced Filters Panel */}
+      <AnimatePresence>
+        {showFilters && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: "auto" }}
+            exit={{ opacity: 0, y: -10, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-white border border-neutral-100 rounded-2xl p-4 shadow-sm flex flex-wrap gap-3 items-end">
+              <div className="flex flex-col gap-1 min-w-[140px]">
+                <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Marca</label>
+                <select
+                  value={filterMarca}
+                  onChange={e => setFilterMarca(e.target.value)}
+                  className="bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2 text-sm font-semibold outline-none h-10 focus:ring-1 focus:ring-neutral-900"
+                >
+                  <option value="">Todas las marcas</option>
+                  {marcasOpts.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1 min-w-[160px]">
+                <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Talla (Letra)</label>
+                <select
+                  value={filterTalla}
+                  onChange={e => setFilterTalla(e.target.value)}
+                  className="bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2 text-sm font-semibold outline-none h-10 focus:ring-1 focus:ring-neutral-900"
+                >
+                  <option value="">Todas las tallas</option>
+                  {[...TALLAS_LETRA, ...TALLAS_NUMERO.filter(t => t !== "SinTalla")].filter((v, i, arr) => arr.indexOf(v) === i).map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1 min-w-[160px]">
+                <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Temporada</label>
+                <select
+                  value={filterTemporada}
+                  onChange={e => setFilterTemporada(e.target.value)}
+                  className="bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2 text-sm font-semibold outline-none h-10 focus:ring-1 focus:ring-neutral-900"
+                >
+                  <option value="">Todas las temporadas</option>
+                  {temporadasOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                </select>
+              </div>
+              {activeFilterCount > 0 && (
+                <Button variant="ghost" onClick={clearFilters} className="h-10 rounded-xl text-xs font-bold text-neutral-500 hover:text-red-500 hover:bg-red-50 gap-1.5">
+                  <X size={14} /> Limpiar filtros
+                </Button>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="space-y-4">
         {loading ? (

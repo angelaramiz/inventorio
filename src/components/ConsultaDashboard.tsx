@@ -7,11 +7,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { 
   Scan, Search, Package, Clock, ShieldAlert, Tag,
-  Trash2, ArrowLeftRight, Image as ImageIcon, Loader2, Sparkles, ChevronRight
+  Trash2, ArrowLeftRight, Image as ImageIcon, Loader2, Sparkles, ChevronRight, SlidersHorizontal, X
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import { saveBoxToHistory, getHistory, clearHistory, CajaHistorial } from "../utils/db";
+
+const TALLAS_LETRA = ["SinTalla", "XS", "S", "M", "L", "XL", "XXL"];
+const TALLAS_NUMERO = ["SinTalla", "38", "40", "42", "44", "46", "48"];
 
 interface ProductoQueryResult {
   product: {
@@ -51,6 +54,13 @@ export default function ConsultaDashboard() {
   const [prodLoading, setProdLoading] = useState(false);
   const [currentProduct, setCurrentProduct] = useState<ProductoQueryResult | null>(null);
   const [isProdScannerActive, setIsProdScannerActive] = useState(false);
+  const [showProdFilters, setShowProdFilters] = useState(false);
+  const [filterMarca, setFilterMarca] = useState("");
+  const [filterTalla, setFilterTalla] = useState("");
+  const [filterTemporada, setFilterTemporada] = useState("");
+  const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
+  const [marcasOpts, setMarcasOpts] = useState<string[]>([]);
+  const [prodResults, setProdResults] = useState<ProductoQueryResult[]>([]);
   
   // Scanner Ref
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -60,6 +70,7 @@ export default function ConsultaDashboard() {
 
   useEffect(() => {
     loadHistory();
+    loadFilterOptions();
     return () => {
       stopAnyScanner();
     };
@@ -69,6 +80,21 @@ export default function ConsultaDashboard() {
   useEffect(() => {
     stopAnyScanner();
   }, [activeTab]);
+
+  const loadFilterOptions = async () => {
+    try {
+      const [respTemp, respMarcas] = await Promise.all([
+        fetch("/api/conceptos/temporadas"),
+        fetch("/api/conceptos/marcas"),
+      ]);
+      const tempVals = await respTemp.json();
+      const marcaVals = await respMarcas.json();
+      setTemporadasOpts(tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
+      setMarcasOpts(marcaVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
+    } catch (err) {
+      console.error("Error loading filter options", err);
+    }
+  };
 
   const loadHistory = async () => {
     try {
@@ -128,23 +154,75 @@ export default function ConsultaDashboard() {
   };
 
   const handleProdSearch = async (searchQuery: string) => {
-    if (!searchQuery.trim()) return;
+    if (!searchQuery.trim() && !filterMarca && !filterTalla && !filterTemporada) return;
     setProdLoading(true);
     try {
-      const resp = await fetch(`/api/consultar-producto/${encodeURIComponent(searchQuery.trim())}`);
-      if (resp.ok) {
-        const data = await resp.json();
-        setCurrentProduct(data);
-        toast.success(`Producto ${data.product.sku} encontrado`);
+      // Single product lookup by EAN/SKU (scanner or exact input)
+      if (searchQuery.trim() && !filterMarca && !filterTalla && !filterTemporada) {
+        const resp = await fetch(`/api/consultar-producto/${encodeURIComponent(searchQuery.trim())}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          setCurrentProduct(data);
+          setProdResults([]);
+          toast.success(`Producto ${data.product.sku} encontrado`);
+        } else {
+          const err = await resp.json();
+          toast.error(err.error || "Producto no encontrado");
+        }
       } else {
-        const err = await resp.json();
-        toast.error(err.error || "Producto no encontrado");
+        // Advanced search with filters
+        await handleProdFilterSearch(searchQuery);
       }
     } catch (err) {
       toast.error("Error al conectar con el servidor");
     } finally {
       setProdLoading(false);
     }
+  };
+
+  const handleProdFilterSearch = async (searchQuery?: string) => {
+    setProdLoading(true);
+    setCurrentProduct(null);
+    try {
+      const params = new URLSearchParams();
+      if (searchQuery?.trim()) params.set("q", searchQuery.trim());
+      if (filterMarca) params.set("marca", filterMarca);
+      if (filterTalla) params.set("talla", filterTalla);
+      if (filterTemporada) params.set("temporada", filterTemporada);
+      
+      const resp = await fetch(`/api/productos?${params.toString()}`);
+      if (resp.ok) {
+        const products = await resp.json();
+        // Wrap each product as a pseudo-result (without box details)
+        const results: ProductoQueryResult[] = products.map((p: any) => ({
+          product: p,
+          boxes: []
+        }));
+        setProdResults(results);
+        if (results.length === 0) {
+          toast.info("No se encontraron productos con esos filtros");
+        } else {
+          toast.success(`${results.length} producto(s) encontrado(s)`);
+        }
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al buscar");
+      }
+    } catch (err) {
+      toast.error("Error al conectar con el servidor");
+    } finally {
+      setProdLoading(false);
+    }
+  };
+
+  const activeFilterCount = [filterMarca, filterTalla, filterTemporada].filter(Boolean).length;
+
+  const clearProdFilters = () => {
+    setFilterMarca("");
+    setFilterTalla("");
+    setFilterTemporada("");
+    setProdResults([]);
+    setCurrentProduct(null);
   };
 
   // Start Box Scanner
@@ -329,13 +407,103 @@ export default function ConsultaDashboard() {
           {activeTab === "productos" && (
             <Card className="border border-neutral-100 shadow-lg rounded-[2rem] overflow-hidden bg-white">
               <CardHeader className="pb-3 bg-neutral-50/50">
-                <CardTitle className="text-lg font-bold flex items-center gap-2">
-                  <Search size={18} className="text-neutral-500" />
-                  Buscar Producto
-                </CardTitle>
-                <CardDescription>Escanea o escribe el SKU o EAN-13 del producto</CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-lg font-bold flex items-center gap-2">
+                      <Search size={18} className="text-neutral-500" />
+                      Buscar Producto
+                    </CardTitle>
+                    <CardDescription>Escanea, escribe o filtra por atributos</CardDescription>
+                  </div>
+                  <button
+                    onClick={() => setShowProdFilters(!showProdFilters)}
+                    className={`relative p-2 rounded-xl border transition-all ${showProdFilters ? "bg-neutral-900 text-white border-neutral-900" : "bg-white border-neutral-200 text-neutral-600 hover:border-neutral-400"}`}
+                    title="Filtros avanzados"
+                  >
+                    <SlidersHorizontal size={16} />
+                    {activeFilterCount > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-400 text-neutral-950 text-[9px] font-black rounded-full flex items-center justify-center">
+                        {activeFilterCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
               </CardHeader>
               <CardContent className="p-5 space-y-4">
+                {/* Advanced Filters */}
+                <AnimatePresence>
+                  {showProdFilters && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="bg-neutral-50 border border-neutral-100 rounded-2xl p-3 space-y-2 mb-2">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-neutral-400">Búsqueda Avanzada</p>
+                        <div className="grid grid-cols-1 gap-2">
+                          <div className="flex flex-col gap-0.5">
+                            <label className="text-[10px] font-bold text-neutral-500">MARCA</label>
+                            <select
+                              value={filterMarca}
+                              onChange={e => setFilterMarca(e.target.value)}
+                              className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="">Todas las marcas</option>
+                              {marcasOpts.map(m => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <label className="text-[10px] font-bold text-neutral-500">TALLA</label>
+                            <select
+                              value={filterTalla}
+                              onChange={e => setFilterTalla(e.target.value)}
+                              className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="">Todas las tallas</option>
+                              {[...TALLAS_LETRA, ...TALLAS_NUMERO.filter(t => t !== "SinTalla")].filter((v, i, arr) => arr.indexOf(v) === i).map(t => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <label className="text-[10px] font-bold text-neutral-500">TEMPORADA</label>
+                            <select
+                              value={filterTemporada}
+                              onChange={e => setFilterTemporada(e.target.value)}
+                              className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="">Todas las temporadas</option>
+                              {temporadasOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <Button
+                            size="sm"
+                            onClick={() => handleProdFilterSearch(prodQuery)}
+                            disabled={prodLoading}
+                            className="flex-1 rounded-xl h-9 bg-neutral-900 hover:bg-neutral-800 text-xs font-bold"
+                          >
+                            {prodLoading ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
+                            Buscar con filtros
+                          </Button>
+                          {activeFilterCount > 0 && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={clearProdFilters}
+                              className="rounded-xl h-9 text-xs font-bold text-neutral-500 hover:text-red-500 hover:bg-red-50 gap-1"
+                            >
+                              <X size={12} /> Limpiar
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {/* Scanner Container */}
                 <div className="relative rounded-2xl overflow-hidden border bg-neutral-900 aspect-[4/3] w-full flex flex-col shadow-inner justify-center items-center">
                   <div 
@@ -377,7 +545,7 @@ export default function ConsultaDashboard() {
                   />
                   <Button 
                     onClick={() => handleProdSearch(prodQuery)}
-                    disabled={prodLoading || !prodQuery.trim()}
+                    disabled={prodLoading || (!prodQuery.trim() && activeFilterCount === 0)}
                     className="rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 font-bold shrink-0 px-4"
                   >
                     {prodLoading ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
@@ -619,7 +787,7 @@ export default function ConsultaDashboard() {
                         
                         <div className="flex flex-wrap gap-1.5 justify-center sm:justify-start pt-1.5">
                           <span className="text-[10px] font-black uppercase px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded-lg text-neutral-300">
-                            Talla {currentProduct.product.talla || "Única"}
+                            Talla {currentProduct.product.talla || "SinTalla"}
                           </span>
                           <span className="text-[10px] font-black uppercase px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded-lg text-neutral-300">
                             Colección: {currentProduct.product.temporada}
@@ -687,6 +855,55 @@ export default function ConsultaDashboard() {
                     </CardContent>
                   </Card>
                 </motion.div>
+              ) : prodResults.length > 0 ? (
+                <motion.div
+                  key="prod-filter-results"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  className="space-y-3"
+                >
+                  <div className="flex items-center justify-between px-1">
+                    <h3 className="text-sm font-black uppercase tracking-wider text-neutral-500">{prodResults.length} RESULTADO(S)</h3>
+                    <button onClick={clearProdFilters} className="text-[10px] font-bold text-neutral-400 hover:text-red-500 flex items-center gap-1">
+                      <X size={10} /> Limpiar
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {prodResults.map((r) => (
+                      <button
+                        key={r.product.id_producto}
+                        onClick={() => {
+                          setProdQuery(r.product.sku);
+                          handleProdSearch(r.product.sku);
+                        }}
+                        className="bg-white border border-neutral-100 hover:border-neutral-900 rounded-2xl p-3 flex gap-3 items-center text-left transition-all group shadow-sm hover:shadow-md"
+                      >
+                        {r.product.has_foto ? (
+                          <img
+                            src={`/api/productos/${r.product.id_producto}/image`}
+                            alt={r.product.sku}
+                            className="w-14 h-14 object-cover rounded-xl border shadow-sm flex-shrink-0"
+                          />
+                        ) : (
+                          <div className="w-14 h-14 bg-neutral-100 flex items-center justify-center rounded-xl text-neutral-400 border flex-shrink-0">
+                            <ImageIcon size={20} />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-sm text-neutral-900 truncate">{r.product.sku}</p>
+                          <p className="text-[10px] font-mono text-neutral-400 truncate">{r.product.ean_13 || "Sin EAN"}</p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            <span className="text-[9px] font-black uppercase bg-neutral-100 px-1.5 py-0.5 rounded-md">{r.product.talla || "SinTalla"}</span>
+                            <span className="text-[9px] font-black uppercase bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-md">{r.product.temporada}</span>
+                            {r.product.marca_sub && <span className="text-[9px] font-black uppercase bg-neutral-100 px-1.5 py-0.5 rounded-md">{r.product.marca_sub}</span>}
+                          </div>
+                        </div>
+                        <ChevronRight size={14} className="text-neutral-300 group-hover:text-neutral-700 flex-shrink-0 transition-colors" />
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
               ) : (
                 <motion.div
                   key="empty-prod"
@@ -700,11 +917,12 @@ export default function ConsultaDashboard() {
                   </div>
                   <h3 className="text-xl font-bold text-neutral-800">Esperando Consulta de Producto</h3>
                   <p className="text-sm text-neutral-400 max-w-sm mt-1">
-                    Inicia la cámara a la izquierda o escribe un código manual para consultar en qué cajas se encuentra guardado un producto.
+                    Inicia la cámara, escribe un SKU/EAN manual, o usa los filtros avanzados para buscar productos por marca, talla o temporada.
                   </p>
                 </motion.div>
               )
             )}
+
 
           </AnimatePresence>
         </div>

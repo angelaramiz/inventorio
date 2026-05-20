@@ -403,6 +403,7 @@ export default function ScannerView() {
         <ProductQuickRegister 
           ean={scannedResult || ""} 
           defaultQty={pendingQty}
+          defaultTemporada={activeCaja?.temporada_default || undefined}
           onClose={() => {
             setShowQuickRegister(false);
             startScanner();
