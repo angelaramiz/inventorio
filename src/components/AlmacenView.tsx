@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   Plus, Edit2, Trash2, Home, MapPin, 
-  Loader2, Check, X, AlertTriangle, FileText, Printer
+  Loader2, Check, X, AlertTriangle, FileText, Printer, Download
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -267,53 +267,197 @@ export default function AlmacenView() {
     return result;
   };
 
-  const oklchToRgb = (oklchStr: string): string => {
-    try {
-      const match = oklchStr.match(/oklch\(\s*([0-9.%]+)(?:\s+|\s*,\s*)([0-9.]+)(?:\s+|\s*,\s*)([0-9.]+)(?:\s*[\/,]\s*([0-9.]+))?\s*\)/i);
-      if (!match) return oklchStr;
-
-      let L = parseFloat(match[1]);
-      if (match[1].includes('%')) {
-        L = parseFloat(match[1]) / 100;
-      }
-      const C = parseFloat(match[2]);
-      const H = parseFloat(match[3]);
-      const alpha = match[4] !== undefined ? parseFloat(match[4]) : 1;
-
-      // Convert OKLCH to OKLab
-      const hRad = (H * Math.PI) / 180;
-      const a = C * Math.cos(hRad);
-      const b = C * Math.sin(hRad);
-
-      // Convert OKLab to LMS
-      const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
-      const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
-      const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
-
-      const l_3 = l_ * l_ * l_;
-      const m_3 = m_ * m_ * m_;
-      const s_3 = s_ * s_ * s_;
-
-      // Convert LMS to Linear RGB
-      let rL = +4.0767416621 * l_3 - 3.3077115913 * m_3 + 0.2309699292 * s_3;
-      let gL = -1.2684380046 * l_3 + 2.6097574011 * m_3 - 0.3413193965 * s_3;
-      let bL = -0.0041960863 * l_3 - 0.7034186147 * m_3 + 1.7076147010 * s_3;
-
-      // Helper to convert linear color channel to sRGB
-      const toSRGB = (c: number) => {
-        c = Math.max(0, Math.min(1, c)); // clamp
-        return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
-      };
-
-      const rVal = Math.round(toSRGB(rL) * 255);
-      const gVal = Math.round(toSRGB(gL) * 255);
-      const bVal = Math.round(toSRGB(bL) * 255);
-
-      return `rgba(${rVal}, ${gVal}, ${bVal}, ${alpha})`;
-    } catch (err) {
-      console.error("Error converting oklch to rgb:", err);
-      return oklchStr;
+  const parseRgba = (colorStr: string): [number, number, number, number] => {
+    const str = colorStr.trim().toLowerCase();
+    if (str === 'transparent') return [0, 0, 0, 0];
+    if (str === 'white') return [255, 255, 255, 1];
+    if (str === 'black') return [0, 0, 0, 1];
+    
+    // rgb/rgba
+    const rgbMatch = str.match(/rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*([0-9.]+))?\s*\)/i) ||
+                     str.match(/rgba?\(\s*([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)(?:\s*[\/,]\s*([0-9.]+))?\s*\)/i);
+    if (rgbMatch) {
+      return [
+        parseFloat(rgbMatch[1]),
+        parseFloat(rgbMatch[2]),
+        parseFloat(rgbMatch[3]),
+        rgbMatch[4] !== undefined ? parseFloat(rgbMatch[4]) : 1
+      ];
     }
+    
+    // Hex
+    if (str.startsWith('#')) {
+      const hex = str.slice(1);
+      if (hex.length === 3) {
+        return [
+          parseInt(hex[0] + hex[0], 16),
+          parseInt(hex[1] + hex[1], 16),
+          parseInt(hex[2] + hex[2], 16),
+          1
+        ];
+      }
+      if (hex.length === 6) {
+        return [
+          parseInt(hex.slice(0, 2), 16),
+          parseInt(hex.slice(2, 4), 16),
+          parseInt(hex.slice(4, 6), 16),
+          1
+        ];
+      }
+      if (hex.length === 8) {
+        return [
+          parseInt(hex.slice(0, 2), 16),
+          parseInt(hex.slice(2, 4), 16),
+          parseInt(hex.slice(4, 6), 16),
+          parseInt(hex.slice(6, 8), 16) / 255
+        ];
+      }
+    }
+    
+    return [0, 0, 0, 1];
+  };
+
+  const resolveColorMix = (colorMixStr: string): string => {
+    try {
+      const regex = /color-mix\(\s*in\s+srgb\s*,\s*([^,]+?)(?:\s+([0-9.]+)%)?\s*,\s*([^,)]+?)(?:\s+([0-9.]+)%)?\s*\)/gi;
+      
+      return colorMixStr.replace(regex, (match, color1Str, w1Str, color2Str, w2Str) => {
+        const c1 = parseRgba(color1Str);
+        const c2 = parseRgba(color2Str);
+        
+        let w1 = w1Str !== undefined ? parseFloat(w1Str) / 100 : null;
+        let w2 = w2Str !== undefined ? parseFloat(w2Str) / 100 : null;
+        
+        if (w1 === null && w2 === null) {
+          w1 = 0.5;
+          w2 = 0.5;
+        } else if (w1 !== null && w2 === null) {
+          w2 = 1 - w1;
+        } else if (w1 === null && w2 !== null) {
+          w1 = 1 - w2;
+        }
+        
+        const r = Math.round(c1[0] * w1 + c2[0] * w2);
+        const g = Math.round(c1[1] * w1 + c2[1] * w2);
+        const b = Math.round(c1[2] * w1 + c2[2] * w2);
+        const a = c1[3] * w1 + c2[3] * w2;
+        
+        return `rgba(${r}, ${g}, ${b}, ${a})`;
+      });
+    } catch (err) {
+      console.error("Error resolving color-mix:", err);
+      return colorMixStr;
+    }
+  };
+
+  const oklabToRgbString = (L: number, a: number, b: number, alpha: number): string => {
+    // Convert OKLab to LMS
+    const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+    const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+    const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+
+    const l_3 = l_ * l_ * l_;
+    const m_3 = m_ * m_ * m_;
+    const s_3 = s_ * s_ * s_;
+
+    // Convert LMS to Linear RGB
+    let rL = +4.0767416621 * l_3 - 3.3077115913 * m_3 + 0.2309699292 * s_3;
+    let gL = -1.2684380046 * l_3 + 2.6097574011 * m_3 - 0.3413193965 * s_3;
+    let bL = -0.0041960863 * l_3 - 0.7034186147 * m_3 + 1.7076147010 * s_3;
+
+    // Helper to convert linear color channel to sRGB
+    const toSRGB = (c: number) => {
+      c = Math.max(0, Math.min(1, c)); // clamp
+      return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+    };
+
+    const rVal = Math.round(toSRGB(rL) * 255);
+    const gVal = Math.round(toSRGB(gL) * 255);
+    const bVal = Math.round(toSRGB(bL) * 255);
+
+    return `rgba(${rVal}, ${gVal}, ${bVal}, ${alpha})`;
+  };
+
+  const colorToRgb = (colorStr: string): string => {
+    if (!colorStr || typeof colorStr !== 'string') return colorStr;
+    
+    let result = colorStr;
+    
+    // Replace all oklch occurrences
+    if (result.includes('oklch')) {
+      const oklchRegex = /oklch\(\s*([0-9.%]+)(?:\s+|\s*,\s*)([0-9.]+)(?:\s+|\s*,\s*)([0-9.]+)(?:\s*[\/,]\s*([0-9.]+))?\s*\)/gi;
+      result = result.replace(oklchRegex, (match, p1, p2, p3, p4) => {
+        try {
+          let L = parseFloat(p1);
+          if (p1.includes('%')) {
+            L = parseFloat(p1) / 100;
+          }
+          const C = parseFloat(p2);
+          const H = parseFloat(p3);
+          const alpha = p4 !== undefined ? parseFloat(p4) : 1;
+
+          // Convert OKLCH to OKLab
+          const hRad = (H * Math.PI) / 180;
+          const a = C * Math.cos(hRad);
+          const b = C * Math.sin(hRad);
+
+          return oklabToRgbString(L, a, b, alpha);
+        } catch (e) {
+          return match;
+        }
+      });
+    }
+    
+    // Replace all oklab occurrences
+    if (result.includes('oklab')) {
+      const oklabRegex = /oklab\(\s*([0-9.%]+)(?:\s+|\s*,\s*)([-0-9.]+)(?:\s+|\s*,\s*)([-0-9.]+)(?:\s*[\/,]\s*([0-9.]+))?\s*\)/gi;
+      result = result.replace(oklabRegex, (match, p1, p2, p3, p4) => {
+        try {
+          let L = parseFloat(p1);
+          if (p1.includes('%')) {
+            L = parseFloat(p1) / 100;
+          }
+          const a = parseFloat(p2);
+          const b = parseFloat(p3);
+          const alpha = p4 !== undefined ? parseFloat(p4) : 1;
+
+          return oklabToRgbString(L, a, b, alpha);
+        } catch (e) {
+          return match;
+        }
+      });
+    }
+
+    // Replace all color-mix occurrences
+    if (result.includes('color-mix')) {
+      result = resolveColorMix(result);
+    }
+
+    // Replace color(srgb/display-p3 R G B / A)
+    if (result.includes('color(')) {
+      const colorRegex = /color\(\s*(?:srgb|display-p3)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)(?:\s*[\/,]\s*([0-9.]+))?\s*\)/gi;
+      result = result.replace(colorRegex, (match, rStr, gStr, bStr, aStr) => {
+        try {
+          const r = Math.round(Math.max(0, Math.min(1, parseFloat(rStr))) * 255);
+          const g = Math.round(Math.max(0, Math.min(1, parseFloat(gStr))) * 255);
+          const b = Math.round(Math.max(0, Math.min(1, parseFloat(bStr))) * 255);
+          const alpha = aStr !== undefined ? parseFloat(aStr) : 1;
+          return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        } catch (e) {
+          return match;
+        }
+      });
+    }
+
+    // Replace light-dark(color1, color2) -> return color1 (light)
+    if (result.includes('light-dark(')) {
+      const lightDarkRegex = /light-dark\(\s*([^,]+)\s*,\s*([^)]+)\)/gi;
+      result = result.replace(lightDarkRegex, (match, p1) => {
+        return p1.trim();
+      });
+    }
+    
+    return result;
   };
 
   const handleDownloadPDF = async () => {
@@ -377,19 +521,22 @@ export default function AlmacenView() {
         const style = originalGetComputedStyle(el, pseudoElt);
         return new Proxy(style, {
           get(target, prop) {
+            const hasOklchOrOklabOrMix = (v: any) => 
+              typeof v === 'string' && (v.includes('oklch') || v.includes('oklab') || v.includes('color-mix') || v.includes('color(') || v.includes('light-dark('));
+
             if (prop === "getPropertyValue") {
               return function(propertyName: string) {
                 const value = target.getPropertyValue(propertyName);
-                if (typeof value === 'string' && value.includes('oklch')) {
-                  return oklchToRgb(value);
+                if (hasOklchOrOklabOrMix(value)) {
+                  return colorToRgb(value);
                 }
                 return value;
               };
             }
             
             const value = Reflect.get(target, prop);
-            if (typeof value === 'string' && value.includes('oklch')) {
-              return oklchToRgb(value);
+            if (hasOklchOrOklabOrMix(value)) {
+              return colorToRgb(value);
             }
             if (typeof value === 'function') {
               return value.bind(target);
@@ -422,19 +569,15 @@ export default function AlmacenView() {
       // Temporarily add a class to force light styling during html2pdf snapshotting
       element.classList.add("html2pdf-mode");
 
-      // 4. Temporarily sanitize and replace inline oklch styles inside print area
-      const oklchRegex = /oklch\([^)]+\)/gi;
+      // 4. Temporarily sanitize and replace inline oklch/oklab/color-mix styles inside print area
       const elementsWithStyle = element.querySelectorAll('[style]');
       const originalInlineStyles = new Map<Element, string | null>();
       
       elementsWithStyle.forEach((el: any) => {
         const styleAttr = el.getAttribute('style');
         originalInlineStyles.set(el, styleAttr);
-        if (styleAttr && styleAttr.includes('oklch')) {
-          const newStyleAttr = styleAttr.replace(oklchRegex, (match: string) => {
-            return oklchToRgb(match);
-          });
-          el.setAttribute('style', newStyleAttr);
+        if (styleAttr && (styleAttr.includes('oklch') || styleAttr.includes('oklab') || styleAttr.includes('color-mix') || styleAttr.includes('color(') || styleAttr.includes('light-dark('))) {
+          el.setAttribute('style', colorToRgb(styleAttr));
         }
       });
 
@@ -443,7 +586,8 @@ export default function AlmacenView() {
         filename:     `reporte-inventario-${new Date().toISOString().slice(0,10)}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
         html2canvas:  { scale: 2, useCORS: true, logging: false },
-        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak:    { mode: ['css', 'legacy'], avoid: ['tr'] }
       };
 
       await html2pdf().set(opt).from(element).save();
@@ -858,6 +1002,12 @@ export default function AlmacenView() {
               </CardHeader>
               
               <style>{`
+                @media screen {
+                  .print-only {
+                    display: none !important;
+                  }
+                }
+
                 @media print {
                   body * {
                     visibility: hidden;
@@ -872,6 +1022,13 @@ export default function AlmacenView() {
                     width: 100%;
                     padding: 0 !important;
                     margin: 0 !important;
+                  }
+                  .print-only {
+                    display: block !important;
+                  }
+                  tr {
+                    page-break-inside: avoid !important;
+                    break-inside: avoid !important;
                   }
                 }
 
@@ -921,6 +1078,9 @@ export default function AlmacenView() {
                   --muted-foreground: #8e8e8e !important;
                   --border: #ebebeb !important;
                 }
+                .html2pdf-mode .print-only {
+                  display: block !important;
+                }
                 .html2pdf-mode .bg-white,
                 .html2pdf-mode .bg-neutral-50\/30,
                 .html2pdf-mode .bg-neutral-50\/50,
@@ -938,10 +1098,14 @@ export default function AlmacenView() {
                 .html2pdf-mode svg text {
                   fill: black !important;
                 }
+                .html2pdf-mode tr {
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
+                }
 
                 .page-break {
-                  page-break-inside: avoid;
-                  break-inside: avoid;
+                  page-break-inside: auto !important;
+                  break-inside: auto !important;
                 }
                 .no-print {
                   display: none !important;
