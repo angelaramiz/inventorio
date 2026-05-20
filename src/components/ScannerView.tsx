@@ -436,7 +436,7 @@ export default function ScannerView() {
               ¿Deseas mover el producto a la caja actual <strong>{activeCaja?.numero_caja}</strong>?
             </p>
           </div>
-          <DialogFooter className="flex flex-col gap-2 w-full pt-2">
+          <div className="flex flex-col gap-2 w-full pt-4 border-t border-neutral-100">
             <Button 
               className="rounded-xl w-full bg-neutral-900 hover:bg-neutral-800 text-white h-11 text-sm font-extrabold transition-all"
               onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'mover')}
@@ -459,7 +459,7 @@ export default function ScannerView() {
             >
               Cancelar
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
