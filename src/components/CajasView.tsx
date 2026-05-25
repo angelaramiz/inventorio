@@ -457,7 +457,7 @@ export default function CajasView() {
                   <div className="pb-3 flex">
                     {(caja as any).almacen_nombre ? (
                       <span className="font-extrabold text-neutral-700 bg-neutral-100 px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider border">
-                        📍 {((caja as any).almacen_nombre || "")} {((caja as any).seccion_nombre) ? `| ${((caja as any).seccion_nombre)}` : ""}
+                        📍 {((caja as any).almacen_nombre || "")} {((caja as any).pasillo_nombre && (caja as any).pasillo_nombre !== "Sin pasillo") ? `| ${((caja as any).pasillo_nombre)}` : ""} {((caja as any).seccion_nombre) ? `| ${((caja as any).seccion_nombre)}` : ""}
                       </span>
                     ) : (
                       <span className="italic text-neutral-400 bg-neutral-50 px-2.5 py-1 rounded-lg text-[9px] border">
@@ -737,7 +737,7 @@ export default function CajasView() {
                       .filter(s => s.id_zona_almacen === z.id_zona_almacen)
                       .map(s => (
                         <option key={s.id_zona_seccion} value={`section_${s.id_zona_seccion}`}>
-                          ↳ {s.nombre.toUpperCase()}
+                          ↳ {s.pasillo_nombre && s.pasillo_nombre !== "Sin pasillo" ? `${s.pasillo_nombre.toUpperCase()} > ` : ""}{s.nombre.toUpperCase()}
                         </option>
                       ))}
                   </optgroup>

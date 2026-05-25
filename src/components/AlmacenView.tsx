@@ -120,7 +120,7 @@ const EAN13Barcode = ({ code }: { code: string }) => {
 };
 
 export default function AlmacenView() {
-  const [activeTab, setActiveTab] = useState<"zonas" | "secciones" | "inventario">("zonas");
+  const [activeTab, setActiveTab] = useState<"zonas" | "pasillos" | "secciones" | "inventario">("zonas");
   
   // Tag states for new section
   const [newSectionTipo, setNewSectionTipo] = useState<string>("todos");
@@ -131,7 +131,8 @@ export default function AlmacenView() {
   
   // Data lists
   const [zones, setZones] = useState<WarehouseZone[]>([]);
-  const [sections, setSections] = useState<SectionZone[]>([]);
+  const [pasillos, setPasillos] = useState<any[]>([]);
+  const [sections, setSections] = useState<any[]>([]);
   const [boxes, setBoxes] = useState<any[]>([]);
   
   // Report states
@@ -145,26 +146,38 @@ export default function AlmacenView() {
 
   // Loading states
   const [loadingZones, setLoadingZones] = useState(false);
+  const [loadingPasillos, setLoadingPasillos] = useState(false);
   const [loadingSections, setLoadingSections] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   
   // Form states - Add Zone
   const [newZoneName, setNewZoneName] = useState("");
   
+  // Form states - Add Pasillo
+  const [newPasilloName, setNewPasilloName] = useState("");
+  const [selectedPasilloZoneId, setSelectedPasilloZoneId] = useState("");
+
   // Form states - Add Section
   const [newSectionName, setNewSectionName] = useState("");
   const [selectedZoneId, setSelectedZoneId] = useState("");
+  const [selectedPasilloId, setSelectedPasilloId] = useState("");
 
   // Editing states
   const [editingZoneId, setEditingZoneId] = useState<number | null>(null);
   const [editingZoneName, setEditingZoneName] = useState("");
   
+  const [editingPasilloId, setEditingPasilloId] = useState<number | null>(null);
+  const [editingPasilloName, setEditingPasilloName] = useState("");
+  const [editingPasilloZoneId, setEditingPasilloZoneId] = useState("");
+
   const [editingSectionId, setEditingSectionId] = useState<number | null>(null);
   const [editingSectionName, setEditingSectionName] = useState("");
   const [editingSectionZoneId, setEditingSectionZoneId] = useState("");
+  const [editingSectionPasilloId, setEditingSectionPasilloId] = useState("");
 
   useEffect(() => {
     fetchZones();
+    fetchPasillos();
     fetchSections();
     fetchBoxes();
   }, []);
@@ -694,6 +707,23 @@ export default function AlmacenView() {
     }
   };
 
+  const fetchPasillos = async () => {
+    setLoadingPasillos(true);
+    try {
+      const resp = await fetch("/api/almacen/pasillos");
+      if (resp.ok) {
+        const data = await resp.json();
+        setPasillos(data);
+      } else {
+        toast.error("Error al cargar pasillos");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    } finally {
+      setLoadingPasillos(false);
+    }
+  };
+
   // Add Zone
   const handleAddZone = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -720,6 +750,36 @@ export default function AlmacenView() {
     }
   };
 
+  // Add Pasillo
+  const handleAddPasillo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPasilloName.trim() || !selectedPasilloZoneId) return;
+    setSubmitting(true);
+    try {
+      const resp = await fetch("/api/almacen/pasillos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          nombre: newPasilloName, 
+          id_zona_almacen: parseInt(selectedPasilloZoneId) 
+        })
+      });
+      if (resp.ok) {
+        toast.success("Pasillo / Zona intermedia agregada");
+        setNewPasilloName("");
+        setSelectedPasilloZoneId("");
+        fetchPasillos();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "No se pudo agregar el pasillo");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // Add Section
   const handleAddSection = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -732,6 +792,7 @@ export default function AlmacenView() {
         body: JSON.stringify({ 
           nombre: newSectionName, 
           id_zona_almacen: parseInt(selectedZoneId),
+          id_zona_pasillo: selectedPasilloId ? parseInt(selectedPasilloId) : null,
           tags: {
             tipo_producto: newSectionTipo,
             genero: newSectionGenero,
@@ -743,6 +804,7 @@ export default function AlmacenView() {
         toast.success("Sección agregada y asociada");
         setNewSectionName("");
         setSelectedZoneId("");
+        setSelectedPasilloId("");
         setNewSectionTipo("todos");
         setNewSectionGenero("todos");
         setNewSectionMarca("todos");
@@ -760,15 +822,33 @@ export default function AlmacenView() {
 
   // Delete Zone
   const handleDeleteZone = async (id: number) => {
-    if (!window.confirm("¿Seguro que deseas eliminar esta zona? Se eliminarán todas las secciones asociadas.")) return;
+    if (!window.confirm("¿Seguro que deseas eliminar esta zona? Se eliminarán todas las secciones y pasillos asociados.")) return;
     try {
       const resp = await fetch(`/api/almacen/zonas/${id}`, { method: "DELETE" });
       if (resp.ok) {
         toast.success("Zona eliminada con éxito");
         fetchZones();
-        fetchSections(); // Sections will be cascades-deleted
+        fetchPasillos();
+        fetchSections();
       } else {
         toast.error("Error al eliminar la zona");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    }
+  };
+
+  // Delete Pasillo
+  const handleDeletePasillo = async (id: number) => {
+    if (!window.confirm("¿Seguro que deseas eliminar este pasillo? Las secciones asociadas se desvincularán.")) return;
+    try {
+      const resp = await fetch(`/api/almacen/pasillos/${id}`, { method: "DELETE" });
+      if (resp.ok) {
+        toast.success("Pasillo eliminado con éxito");
+        fetchPasillos();
+        fetchSections();
+      } else {
+        toast.error("Error al eliminar el pasillo");
       }
     } catch (e) {
       toast.error("Error de conexión");
@@ -809,7 +889,8 @@ export default function AlmacenView() {
         toast.success("Zona actualizada");
         setEditingZoneId(null);
         fetchZones();
-        fetchSections(); // Update section tables which display zone names
+        fetchPasillos();
+        fetchSections();
       } else {
         toast.error("Error al actualizar la zona");
       }
@@ -818,11 +899,43 @@ export default function AlmacenView() {
     }
   };
 
+  // Edit Pasillo Inline
+  const startEditPasillo = (pasillo: any) => {
+    setEditingPasilloId(pasillo.id_zona_pasillo);
+    setEditingPasilloName(pasillo.nombre);
+    setEditingPasilloZoneId(pasillo.id_zona_almacen.toString());
+  };
+
+  const handleUpdatePasillo = async (id: number) => {
+    if (!editingPasilloName.trim() || !editingPasilloZoneId) return;
+    try {
+      const resp = await fetch(`/api/almacen/pasillos/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          nombre: editingPasilloName, 
+          id_zona_almacen: parseInt(editingPasilloZoneId) 
+        })
+      });
+      if (resp.ok) {
+        toast.success("Pasillo actualizado");
+        setEditingPasilloId(null);
+        fetchPasillos();
+        fetchSections();
+      } else {
+        toast.error("Error al actualizar el pasillo");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    }
+  };
+
   // Edit Section Inline
-  const startEditSection = (section: SectionZone) => {
+  const startEditSection = (section: any) => {
     setEditingSectionId(section.id_zona_seccion);
     setEditingSectionName(section.nombre);
-    setEditingSectionZoneId(section.id_zona_almacen.toString());
+    setEditingSectionZoneId(section.id_zona_almacen ? section.id_zona_almacen.toString() : "");
+    setEditingSectionPasilloId(section.id_zona_pasillo ? section.id_zona_pasillo.toString() : "");
   };
 
   const handleUpdateSection = async (id: number) => {
@@ -833,12 +946,14 @@ export default function AlmacenView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           nombre: editingSectionName, 
-          id_zona_almacen: parseInt(editingSectionZoneId) 
+          id_zona_almacen: parseInt(editingSectionZoneId),
+          id_zona_pasillo: editingSectionPasilloId ? parseInt(editingSectionPasilloId) : null
         })
       });
       if (resp.ok) {
         toast.success("Sección actualizada");
         setEditingSectionId(null);
+        setEditingSectionPasilloId("");
         fetchSections();
       } else {
         toast.error("Error al actualizar la sección");
@@ -868,6 +983,17 @@ export default function AlmacenView() {
           >
             <Home size={14} />
             Zonas de Almacén
+          </button>
+          <button
+            onClick={() => setActiveTab("pasillos")}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+              activeTab === "pasillos" 
+                ? "bg-white text-neutral-950 shadow-md" 
+                : "text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            <Network size={14} />
+            Pasillos / Zonas
           </button>
           <button
             onClick={() => setActiveTab("secciones")}
@@ -1313,6 +1439,60 @@ export default function AlmacenView() {
                   </CardContent>
                 </Card>
               </motion.div>
+            ) : activeTab === "pasillos" ? (
+              <motion.div
+                key="form-pasillos"
+                initial={{ opacity: 0, x: -15 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 15 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Card className="border border-neutral-100 shadow-lg rounded-[2rem] overflow-hidden bg-white">
+                  <CardHeader className="pb-3 bg-neutral-50/50">
+                    <CardTitle className="text-lg font-bold flex items-center gap-2">
+                      <Plus size={18} className="text-neutral-500" />
+                      Nuevo Pasillo / Zona
+                    </CardTitle>
+                    <CardDescription>Crea un pasillo o zona intermedia dentro de un almacén</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-5">
+                    <form onSubmit={handleAddPasillo} className="space-y-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Nombre del Pasillo / Zona</label>
+                        <Input 
+                          placeholder="Ej: pasillo A, estante 1" 
+                          value={newPasilloName}
+                          onChange={e => setNewPasilloName(e.target.value)}
+                          className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Zona Almacén Asociada</label>
+                        <select
+                          value={selectedPasilloZoneId}
+                          onChange={e => setSelectedPasilloZoneId(e.target.value)}
+                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                        >
+                          <option value="">Selecciona una zona...</option>
+                          {zones.map(z => (
+                            <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                              {z.nombre.toUpperCase()}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <Button 
+                        type="submit" 
+                        disabled={submitting || !newPasilloName.trim() || !selectedPasilloZoneId}
+                        className="w-full rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 text-white font-bold"
+                      >
+                        {submitting ? <Loader2 className="animate-spin" size={18} /> : "Crear Pasillo / Zona"}
+                      </Button>
+                    </form>
+                  </CardContent>
+                </Card>
+              </motion.div>
             ) : (
               <motion.div
                 key="form-secciones"
@@ -1334,7 +1514,7 @@ export default function AlmacenView() {
                       <div className="space-y-1.5">
                         <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Nombre de Sección</label>
                         <Input 
-                          placeholder="Ej: estante a1, pasillo 4" 
+                          placeholder="Ej: anaquel 1, mesa 2" 
                           value={newSectionName}
                           onChange={e => setNewSectionName(e.target.value)}
                           className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
@@ -1345,7 +1525,10 @@ export default function AlmacenView() {
                         <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Zona Almacén Asociada</label>
                         <select
                           value={selectedZoneId}
-                          onChange={e => setSelectedZoneId(e.target.value)}
+                          onChange={e => {
+                            setSelectedZoneId(e.target.value);
+                            setSelectedPasilloId(""); // Reset pasillo selection on zone change
+                          }}
                           className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
                         >
                           <option value="">Selecciona una zona...</option>
@@ -1354,6 +1537,26 @@ export default function AlmacenView() {
                               {z.nombre.toUpperCase()}
                             </option>
                           ))}
+                        </select>
+                      </div>
+
+                      {/* PASILLO / ZONA INTERMEDIA SELECT */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Pasillo / Zona Intermedia</label>
+                        <select
+                          value={selectedPasilloId}
+                          onChange={e => setSelectedPasilloId(e.target.value)}
+                          disabled={!selectedZoneId}
+                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                        >
+                          <option value="">Selecciona un pasillo (opcional)...</option>
+                          {pasillos
+                            .filter(p => p.id_zona_almacen === parseInt(selectedZoneId))
+                            .map(p => (
+                              <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                {p.nombre.toUpperCase()}
+                              </option>
+                            ))}
                         </select>
                       </div>
 
@@ -1427,7 +1630,7 @@ export default function AlmacenView() {
             <CardHeader className="bg-neutral-50/40 pb-3 border-b">
               <CardTitle className="text-lg font-bold">Conceptos Registrados</CardTitle>
               <CardDescription>
-                {activeTab === "zonas" ? "Zonas principales de almacenamiento" : "Secciones y pasillos asignados a almacenes"}
+                {activeTab === "zonas" ? "Zonas principales de almacenamiento" : activeTab === "pasillos" ? "Pasillos y zonas intermedias del almacén" : "Secciones y pasillos asignados a almacenes"}
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
@@ -1515,6 +1718,107 @@ export default function AlmacenView() {
                 )
               )}
 
+              {/* PASILLOS TABLE */}
+              {activeTab === "pasillos" && (
+                loadingPasillos ? (
+                  <div className="flex justify-center items-center py-16 text-neutral-400">
+                    <Loader2 className="animate-spin" size={24} />
+                  </div>
+                ) : pasillos.length === 0 ? (
+                  <div className="text-center py-16 text-neutral-400 flex flex-col items-center">
+                    <Network size={36} strokeWidth={1} className="opacity-40 mb-2" />
+                    <p className="text-sm font-bold">No hay pasillos registrados</p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader className="bg-neutral-50/20">
+                      <TableRow>
+                        <TableHead>Nombre Pasillo</TableHead>
+                        <TableHead>Almacén Principal</TableHead>
+                        <TableHead className="text-right w-[150px]">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pasillos.map((pasillo) => (
+                        <TableRow key={pasillo.id_zona_pasillo}>
+                          <TableCell className="font-extrabold text-sm uppercase">
+                            {editingPasilloId === pasillo.id_zona_pasillo ? (
+                              <Input 
+                                value={editingPasilloName}
+                                onChange={e => setEditingPasilloName(e.target.value)}
+                                className="h-8 max-w-[250px] uppercase text-xs font-bold"
+                              />
+                            ) : (
+                              pasillo.nombre
+                            )}
+                          </TableCell>
+                          <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                            {editingPasilloId === pasillo.id_zona_pasillo ? (
+                              <select
+                                value={editingPasilloZoneId}
+                                onChange={e => setEditingPasilloZoneId(e.target.value)}
+                                className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none"
+                              >
+                                {zones.map(z => (
+                                  <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                                    {z.nombre.toUpperCase()}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              pasillo.almacen_nombre
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right pr-6">
+                            <div className="flex justify-end gap-1.5">
+                              {editingPasilloId === pasillo.id_zona_pasillo ? (
+                                <>
+                                  <Button 
+                                    size="icon" 
+                                    variant="ghost" 
+                                    onClick={() => handleUpdatePasillo(pasillo.id_zona_pasillo)}
+                                    className="h-8 w-8 text-green-600 hover:bg-green-50 rounded-lg"
+                                  >
+                                    <Check size={14} />
+                                  </Button>
+                                  <Button 
+                                    size="icon" 
+                                    variant="ghost" 
+                                    onClick={() => setEditingPasilloId(null)}
+                                    className="h-8 w-8 text-red-500 hover:bg-red-50 rounded-lg"
+                                  >
+                                    <X size={14} />
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button 
+                                    size="icon" 
+                                    variant="ghost" 
+                                    onClick={() => startEditPasillo(pasillo)}
+                                    className="h-8 w-8 text-neutral-400 hover:text-neutral-800 hover:bg-neutral-100 rounded-lg"
+                                  >
+                                    <Edit2 size={14} />
+                                  </Button>
+                                  <Button 
+                                    size="icon" 
+                                    variant="ghost" 
+                                    onClick={() => handleDeletePasillo(pasillo.id_zona_pasillo)}
+                                    className="h-8 w-8 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                                  >
+                                    <Trash2 size={14} />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )
+              )}
+
               {/* SECCIONES TABLE */}
               {activeTab === "secciones" && (
                 loadingSections ? (
@@ -1532,6 +1836,7 @@ export default function AlmacenView() {
                       <TableRow>
                         <TableHead>Nombre Sección</TableHead>
                         <TableHead>Almacén Principal</TableHead>
+                        <TableHead>Pasillo / Subzona</TableHead>
                         <TableHead>Etiquetas (Tags)</TableHead>
                         <TableHead className="text-right w-[180px]">Acciones</TableHead>
                       </TableRow>
@@ -1555,9 +1860,13 @@ export default function AlmacenView() {
                             {editingSectionId === section.id_zona_seccion ? (
                               <select
                                 value={editingSectionZoneId}
-                                onChange={e => setEditingSectionZoneId(e.target.value)}
+                                onChange={e => {
+                                  setEditingSectionZoneId(e.target.value);
+                                  setEditingSectionPasilloId(""); // Reset pasillo selection when zone changes
+                                }}
                                 className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none"
                               >
+                                <option value="">Selecciona zona...</option>
                                 {zones.map(z => (
                                   <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
                                     {z.nombre.toUpperCase()}
@@ -1566,6 +1875,28 @@ export default function AlmacenView() {
                               </select>
                             ) : (
                               section.almacen_nombre
+                            )}
+                          </TableCell>
+
+                          <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                            {editingSectionId === section.id_zona_seccion ? (
+                              <select
+                                value={editingSectionPasilloId}
+                                onChange={e => setEditingSectionPasilloId(e.target.value)}
+                                disabled={!editingSectionZoneId}
+                                className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none disabled:opacity-50"
+                              >
+                                <option value="">Selecciona pasillo...</option>
+                                {pasillos
+                                  .filter(p => p.id_zona_almacen === parseInt(editingSectionZoneId))
+                                  .map(p => (
+                                    <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                      {p.nombre.toUpperCase()}
+                                    </option>
+                                  ))}
+                              </select>
+                            ) : (
+                              section.pasillo_nombre || "Sin pasillo"
                             )}
                           </TableCell>
 
