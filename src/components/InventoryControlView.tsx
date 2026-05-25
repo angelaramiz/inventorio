@@ -7,9 +7,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { 
   ClipboardList, Calendar, Bell, ShieldCheck, User, CheckCircle2, 
   XCircle, Loader2, AlertCircle, FileText, Download, Scan, Plus, MapPin,
-  RefreshCw
+  RefreshCw, X, Camera, Power
 } from "lucide-react";
 import { toast } from "sonner";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
 interface Props {
   userRole: "operator" | "manager";
@@ -29,6 +30,13 @@ export default function InventoryControlView({ userRole }: Props) {
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [countedQuantities, setCountedQuantities] = useState<Record<number, number>>({}); // id_producto -> qty
   const [sendingCount, setSendingCount] = useState(false);
+
+  // New Operator barcode scanning states
+  const [scannedBarcode, setScannedBarcode] = useState("");
+  const [activeSection, setActiveSection] = useState<any | null>(null);
+  const [sections, setSections] = useState<any[]>([]);
+  const [isScannerActive, setIsScannerActive] = useState(false);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
 
   // Manager states
   const [newEventDesc, setNewEventDesc] = useState("");
@@ -59,8 +67,22 @@ export default function InventoryControlView({ userRole }: Props) {
       };
     } else {
       fetchZones();
+      fetchOperatorSections();
     }
   }, [userRole]);
+
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current) {
+        try {
+          if (scannerRef.current.isScanning) {
+            scannerRef.current.stop();
+          }
+          scannerRef.current.clear();
+        } catch (e) {}
+      }
+    };
+  }, []);
 
   const fetchEvents = async () => {
     setLoadingEvents(true);
@@ -87,6 +109,120 @@ export default function InventoryControlView({ userRole }: Props) {
         setZones(data);
       }
     } catch (e) {}
+  };
+
+  const fetchOperatorSections = async () => {
+    try {
+      const resp = await fetch("/api/almacen/secciones");
+      if (resp.ok) {
+        const data = await resp.json();
+        setSections(data);
+      }
+    } catch (e) {
+      console.error("Error fetching sections for operator:", e);
+    }
+  };
+
+  const handleBarcodeSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!scannedBarcode.trim()) return;
+
+    processScannedCode(scannedBarcode.trim());
+    setScannedBarcode("");
+  };
+
+  const processScannedCode = (code: string) => {
+    const sectionMatch = code.match(/^SEC-(\d+)$/i);
+    if (sectionMatch) {
+      const sectionId = parseInt(sectionMatch[1]);
+      const sectionObj = sections.find(s => s.id_zona_seccion === sectionId);
+      if (sectionObj) {
+        setActiveSection(sectionObj);
+        setSelectedZone(null); // Reset active box
+        setBoxProducts([]);
+        toast.success(`Sección escaneada: ${sectionObj.nombre.toUpperCase()}`);
+      } else {
+        toast.error(`No se encontró la sección con ID: ${sectionId}`);
+      }
+      return;
+    }
+
+    // Otherwise, check if it's a box SKU or box number
+    const boxObj = zones.find(
+      b => b.sku?.toLowerCase() === code.toLowerCase() || 
+           b.numero_caja?.toLowerCase() === code.toLowerCase() ||
+           b.numero_caja?.toLowerCase().includes(code.toLowerCase())
+    );
+
+    if (boxObj) {
+      // Find the section this box belongs to
+      if (boxObj.id_zona_seccion) {
+        const sectionObj = sections.find(s => s.id_zona_seccion === boxObj.id_zona_seccion);
+        if (sectionObj) {
+          setActiveSection(sectionObj);
+        }
+      }
+      handleSelectZone(boxObj);
+      toast.success(`Caja escaneada y seleccionada: ${boxObj.numero_caja}`);
+    } else {
+      toast.error(`No se encontró caja o sección con código: "${code}"`);
+    }
+  };
+
+  const startCameraScanner = async () => {
+    try {
+      let html5QrCode = scannerRef.current;
+      if (!html5QrCode) {
+        html5QrCode = new Html5Qrcode("operator-reader");
+        scannerRef.current = html5QrCode;
+      }
+
+      if (html5QrCode.isScanning) {
+        await html5QrCode.stop();
+      }
+
+      setIsScannerActive(true);
+
+      await html5QrCode.start(
+        { facingMode: "environment" },
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 150 },
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.EAN_13
+          ]
+        },
+        (decodedText) => {
+          processScannedCode(decodedText);
+          stopCameraScanner();
+        },
+        (errorMessage) => {}
+      );
+      toast.success("Cámara de escaneo activada");
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Error al acceder a la cámara");
+      setIsScannerActive(false);
+    }
+  };
+
+  const stopCameraScanner = async () => {
+    if (scannerRef.current) {
+      try {
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
+        }
+        scannerRef.current.clear();
+        setIsScannerActive(false);
+        scannerRef.current = null;
+      } catch (err) {
+        console.error(err);
+        setIsScannerActive(false);
+      }
+    } else {
+      setIsScannerActive(false);
+    }
   };
 
   const fetchCountRequests = async () => {
@@ -285,6 +421,46 @@ export default function InventoryControlView({ userRole }: Props) {
     }
   };
 
+  const getProductGroup = (item: any) => {
+    const tipo = (item.productos?.tipo || "").toLowerCase();
+    const marca = (item.productos?.marca_sub || "").toLowerCase();
+    
+    if (tipo === "calzado") {
+      if (marca === "guess") {
+        return "calzado_guess";
+      } else if (marca === "marciano") {
+        return "calzado_marciano";
+      } else {
+        return "calzado_otros";
+      }
+    } else if (tipo === "ropa") {
+      return "ropa";
+    } else {
+      return "otros";
+    }
+  };
+
+  const groupedProducts = (() => {
+    const groups: Record<string, { label: string; items: any[] }> = {
+      calzado_guess: { label: "Calzado - Guess", items: [] },
+      calzado_marciano: { label: "Calzado - Marciano", items: [] },
+      calzado_otros: { label: "Calzado - Otras Marcas", items: [] },
+      ropa: { label: "Ropa", items: [] },
+      otros: { label: "Otros / Sin Categoría", items: [] }
+    };
+
+    boxProducts.forEach(item => {
+      const g = getProductGroup(item);
+      groups[g].items.push(item);
+    });
+
+    return Object.entries(groups).filter(([_, group]) => group.items.length > 0);
+  })();
+
+  const filteredZones = activeSection
+    ? zones.filter(box => box.id_zona_seccion === activeSection.id_zona_seccion)
+    : zones;
+
   return (
     <div className="space-y-6">
       {/* Operador Layout */}
@@ -318,131 +494,217 @@ export default function InventoryControlView({ userRole }: Props) {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-              {/* Select Zone Section */}
-              <div className="md:col-span-2 space-y-4">
-                <Card className="border-none shadow-lg rounded-3xl bg-white overflow-hidden">
-                  <CardHeader className="bg-neutral-50 border-b pb-4">
-                    <CardTitle className="text-sm font-bold flex items-center gap-1.5 uppercase text-neutral-800">
-                      <MapPin size={16} /> Selecciona Caja / Estante a Contar
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-4 max-h-[450px] overflow-y-auto custom-scrollbar">
-                    <div className="space-y-2">
-                      {zones.map((box) => (
-                        <button
-                          key={box.id_caja}
-                          onClick={() => handleSelectZone(box)}
-                          className={`w-full text-left p-4 rounded-2xl border text-xs font-bold flex flex-col gap-1 transition-all ${
-                            selectedZone?.id_caja === box.id_caja
-                              ? "border-neutral-950 bg-neutral-950 text-white shadow-md scale-[1.01]"
-                              : "border-neutral-100 bg-white hover:border-neutral-300 text-neutral-700"
-                          }`}
-                        >
-                          <div className="flex justify-between w-full">
-                            <span>CAJA: {box.numero_caja}</span>
-                            <Badge className={`${selectedZone?.id_caja === box.id_caja ? "bg-amber-400 text-black border-none" : "bg-neutral-100 text-neutral-700"}`}>
-                              {box.estado.toUpperCase()}
-                            </Badge>
-                          </div>
-                          <span className={`text-[10px] ${selectedZone?.id_caja === box.id_caja ? "text-neutral-400" : "text-neutral-400"}`}>
-                            📍 {box.almacen_nombre || "Sin ubicación"} {box.seccion_nombre ? `| ${box.seccion_nombre}` : ""}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+            <div className="space-y-6">
+              {/* Scanner & Manual Barcode Input Bar */}
+              <Card className="border border-neutral-100 shadow-md rounded-3xl bg-white overflow-hidden p-4">
+                <form onSubmit={handleBarcodeSubmit} className="flex flex-col sm:flex-row gap-3 items-center">
+                  <div className="flex-1 w-full relative">
+                    <Scan size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+                    <Input
+                      type="text"
+                      placeholder="Escanea o escribe código de Sección (SEC-X) o Caja (CJ-X)..."
+                      value={scannedBarcode}
+                      onChange={e => setScannedBarcode(e.target.value)}
+                      className="pl-10 rounded-xl h-11 bg-neutral-50 border-neutral-200 text-xs font-semibold focus-visible:ring-neutral-400 w-full"
+                    />
+                  </div>
+                  <div className="flex gap-2 w-full sm:w-auto shrink-0">
+                    <Button 
+                      type="submit" 
+                      className="rounded-xl h-11 bg-neutral-900 text-white font-bold text-xs px-5 shadow-sm hover:bg-neutral-800"
+                    >
+                      Buscar
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={isScannerActive ? stopCameraScanner : startCameraScanner}
+                      className={`rounded-xl h-11 text-xs font-bold px-4 flex items-center gap-1.5 shadow-sm ${
+                        isScannerActive 
+                          ? "bg-rose-600 hover:bg-rose-500 text-white" 
+                          : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                      }`}
+                    >
+                      {isScannerActive ? <Power size={14} /> : <Camera size={14} />}
+                      {isScannerActive ? "Apagar Cámara" : "Iniciar Cámara"}
+                    </Button>
+                  </div>
+                </form>
 
-              {/* Counting Form Section */}
-              <div className="md:col-span-3">
-                {selectedZone ? (
-                  <Card className="border-none shadow-lg rounded-3xl bg-white overflow-hidden">
-                    <CardHeader className="bg-neutral-950 text-white pb-6">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Scan size={20} className="text-amber-400" />
-                        Conteo en: Caja {selectedZone.numero_caja}
-                      </CardTitle>
-                      <CardDescription className="text-neutral-400 font-bold text-xs uppercase pt-1">
-                        📍 {selectedZone.almacen_nombre || "Sin ubicación"} {selectedZone.seccion_nombre ? `| ${selectedZone.seccion_nombre}` : ""}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="pt-6 space-y-6">
-                      {loadingProducts ? (
-                        <div className="py-12 flex flex-col items-center justify-center text-neutral-400">
-                          <Loader2 className="animate-spin mb-2" />
-                          <p>Obteniendo prendas asociadas...</p>
-                        </div>
-                      ) : boxProducts.length === 0 ? (
-                        <div className="py-12 text-center text-neutral-400 space-y-2">
-                          <p className="font-semibold text-sm">Este contenedor no registra prendas en sistema.</p>
-                          <p className="text-xs">¿Registrar prendas físicas de todos modos? Registra primero prendas en el inventario.</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-4">
-                          <div className="border rounded-2xl overflow-hidden">
-                            <Table>
-                              <TableHeader className="bg-neutral-50">
-                                <TableRow>
-                                  <TableHead>Prenda (SKU)</TableHead>
-                                  <TableHead className="w-[120px] text-right">Cant. Física</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {boxProducts.map((item) => (
-                                  <TableRow key={item.id_producto}>
-                                    <TableCell>
-                                      <div className="flex flex-col">
-                                        <span className="font-bold text-neutral-900">{item.productos.sku}</span>
-                                        <span className="text-[10px] text-neutral-400 font-mono">Talla: {item.productos.talla} | Tipo: {item.productos.tipo}</span>
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                      <Input 
-                                        type="number"
-                                        min={0}
-                                        value={countedQuantities[item.id_producto] ?? 0}
-                                        onChange={(e) => setCountedQuantities({
-                                          ...countedQuantities,
-                                          [item.id_producto]: parseInt(e.target.value) || 0
-                                        })}
-                                        className="w-20 text-center font-bold h-9 border-neutral-200 focus-visible:ring-neutral-400 rounded-lg ml-auto"
-                                      />
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
-
-                          <div className="flex gap-2 pt-2">
-                            <Button 
-                              variant="outline" 
-                              onClick={() => setSelectedZone(null)} 
-                              className="flex-1 rounded-xl h-11"
-                            >
-                              Cancelar
-                            </Button>
-                            <Button 
-                              disabled={sendingCount}
-                              onClick={handleSendCounts} 
-                              className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold"
-                            >
-                              {sendingCount ? <Loader2 className="animate-spin" size={16} /> : "Enviar a Gerencia"}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <div className="h-full border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-neutral-400 text-center p-8 py-24 bg-neutral-50/50">
-                    <Scan size={44} strokeWidth={1} className="opacity-30 mb-4" />
-                    <p className="font-bold text-sm">Esperando Selección de Zona</p>
-                    <p className="text-xs max-w-xs mt-1">Selecciona un contenedor a la izquierda para cargar los productos y realizar el conteo físico.</p>
+                {/* Camera View Finder */}
+                {isScannerActive && (
+                  <div className="mt-4 flex flex-col items-center justify-center p-4 bg-neutral-50 rounded-2xl border border-dashed border-neutral-200">
+                    <div id="operator-reader" className="w-full max-w-sm rounded-xl overflow-hidden shadow-md border bg-black"></div>
+                    <p className="text-[10px] text-neutral-400 mt-2 font-bold uppercase tracking-wider">
+                      Coloca el código de barras (SEC-X o CJ-X) dentro de la zona de escaneo
+                    </p>
                   </div>
                 )}
+              </Card>
+
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+                {/* Select Zone Section */}
+                <div className="md:col-span-2 space-y-4">
+                  <Card className="border-none shadow-lg rounded-3xl bg-white overflow-hidden">
+                    <CardHeader className="bg-neutral-50 border-b pb-4">
+                      <CardTitle className="text-sm font-bold flex items-center gap-1.5 uppercase text-neutral-800">
+                        <MapPin size={16} /> Selecciona Caja / Estante a Contar
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-4 max-h-[450px] overflow-y-auto custom-scrollbar">
+                      {/* Active Section Filter Badge */}
+                      {activeSection && (
+                        <div className="mb-3 px-4 py-2.5 bg-neutral-100 border border-neutral-200 rounded-2xl flex items-center justify-between text-xs font-bold text-neutral-700">
+                          <span className="flex items-center gap-1.5 uppercase">
+                            <MapPin size={14} className="text-neutral-500" />
+                            Filtrado: {activeSection.nombre}
+                          </span>
+                          <button 
+                            onClick={() => {
+                              setActiveSection(null);
+                              setSelectedZone(null);
+                              setBoxProducts([]);
+                            }}
+                            className="text-neutral-400 hover:text-neutral-900 transition-colors"
+                          >
+                            <XCircle size={15} />
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        {filteredZones.length === 0 ? (
+                          <div className="text-center py-8 text-neutral-400 text-xs">
+                            No hay cajas en esta ubicación.
+                          </div>
+                        ) : (
+                          filteredZones.map((box) => (
+                            <button
+                              key={box.id_caja}
+                              onClick={() => handleSelectZone(box)}
+                              className={`w-full text-left p-4 rounded-2xl border text-xs font-bold flex flex-col gap-1 transition-all ${
+                                selectedZone?.id_caja === box.id_caja
+                                  ? "border-neutral-950 bg-neutral-950 text-white shadow-md scale-[1.01]"
+                                  : "border-neutral-100 bg-white hover:border-neutral-300 text-neutral-700"
+                              }`}
+                            >
+                              <div className="flex justify-between w-full">
+                                <span>CAJA: {box.numero_caja}</span>
+                                <Badge className={`${selectedZone?.id_caja === box.id_caja ? "bg-amber-400 text-black border-none" : "bg-neutral-100 text-neutral-700"}`}>
+                                  {box.estado.toUpperCase()}
+                                </Badge>
+                              </div>
+                              <span className={`text-[10px] ${selectedZone?.id_caja === box.id_caja ? "text-neutral-400" : "text-neutral-400"}`}>
+                                📍 {box.almacen_nombre || "Sin ubicación"} {box.seccion_nombre ? `| ${box.seccion_nombre}` : ""}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Counting Form Section */}
+                <div className="md:col-span-3">
+                  {selectedZone ? (
+                    <Card className="border-none shadow-lg rounded-3xl bg-white overflow-hidden">
+                      <CardHeader className="bg-neutral-950 text-white pb-6">
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          <Scan size={20} className="text-amber-400" />
+                          Conteo en: Caja {selectedZone.numero_caja}
+                        </CardTitle>
+                        <CardDescription className="text-neutral-400 font-bold text-xs uppercase pt-1">
+                          📍 {selectedZone.almacen_nombre || "Sin ubicación"} {selectedZone.seccion_nombre ? `| ${selectedZone.seccion_nombre}` : ""}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="pt-6 space-y-6">
+                        {loadingProducts ? (
+                          <div className="py-12 flex flex-col items-center justify-center text-neutral-400">
+                            <Loader2 className="animate-spin mb-2" />
+                            <p>Obteniendo prendas asociadas...</p>
+                          </div>
+                        ) : boxProducts.length === 0 ? (
+                          <div className="py-12 text-center text-neutral-400 space-y-2">
+                            <p className="font-semibold text-sm">Este contenedor no registra prendas en sistema.</p>
+                            <p className="text-xs">¿Registrar prendas físicas de todos modos? Registra primero prendas en el inventario.</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            <div className="border rounded-2xl overflow-hidden">
+                              <Table>
+                                <TableHeader className="bg-neutral-50">
+                                  <TableRow>
+                                    <TableHead>Prenda (SKU)</TableHead>
+                                    <TableHead className="w-[120px] text-right">Cant. Física</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {groupedProducts.map(([groupKey, group]) => (
+                                    <React.Fragment key={groupKey}>
+                                      {/* Header row for group */}
+                                      <TableRow className="bg-neutral-100/50 hover:bg-neutral-100/50 border-y">
+                                        <TableCell colSpan={2} className="py-2 pl-4 font-black uppercase text-[10px] tracking-wider text-neutral-500">
+                                          {group.label} ({group.items.length})
+                                        </TableCell>
+                                      </TableRow>
+                                      {group.items.map((item: any) => (
+                                        <TableRow key={item.id_producto} className="hover:bg-neutral-50/30">
+                                          <TableCell className="pl-6 py-2.5">
+                                            <div className="flex flex-col">
+                                              <span className="font-extrabold text-neutral-900 text-xs">{item.productos.sku}</span>
+                                              <span className="text-[9px] text-neutral-400 font-mono mt-0.5">
+                                                Talla: {item.productos.talla} | Temporada: {item.productos.temporada} | Marca: {item.productos.marca_sub}
+                                              </span>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell className="text-right pr-4 py-2.5">
+                                            <Input 
+                                              type="number"
+                                              min={0}
+                                              value={countedQuantities[item.id_producto] ?? 0}
+                                              onChange={(e) => setCountedQuantities({
+                                                ...countedQuantities,
+                                                [item.id_producto]: parseInt(e.target.value) || 0
+                                              })}
+                                              className="w-20 text-center font-black h-9 border-neutral-200 focus-visible:ring-neutral-400 rounded-lg ml-auto text-xs"
+                                            />
+                                          </TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </React.Fragment>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+
+                            <div className="flex gap-2 pt-2">
+                              <Button 
+                                variant="outline" 
+                                onClick={() => setSelectedZone(null)} 
+                                className="flex-1 rounded-xl h-11"
+                              >
+                                Cancelar
+                              </Button>
+                              <Button 
+                                disabled={sendingCount}
+                                onClick={handleSendCounts} 
+                                className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold"
+                              >
+                                {sendingCount ? <Loader2 className="animate-spin" size={16} /> : "Enviar a Gerencia"}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="h-full border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-neutral-400 text-center p-8 py-24 bg-neutral-50/50">
+                      <Scan size={44} strokeWidth={1} className="opacity-30 mb-4" />
+                      <p className="font-bold text-sm">Esperando Selección de Zona</p>
+                      <p className="text-xs max-w-xs mt-1">Escanea la sección, luego selecciona un contenedor a la izquierda para iniciar el conteo físico.</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

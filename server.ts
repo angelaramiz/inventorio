@@ -273,7 +273,7 @@ app.get("/api/cajas", async (req, res) => {
 app.post("/api/cajas", async (req, res) => {
   try {
     const supabase = getSupabase();
-    let { numero_caja, id_zona_seccion, id_zona_almacen, temporada_default } = req.body;
+    let { numero_caja, id_zona_seccion, id_zona_almacen, temporada_default, tags } = req.body;
     
     numero_caja = sanitizeIdentifier(numero_caja, 50);
     if (!numero_caja) {
@@ -302,6 +302,8 @@ app.post("/api/cajas", async (req, res) => {
       insertData.temporada_default = sanitizeIdentifier(temporada_default, 100).toLowerCase();
     }
     
+    insertData.tags = tags || { tipo_producto: "todos", genero: "todos", marca: "todos" };
+    
     const { data, error } = await supabase
       .from("cajas")
       .insert([insertData])
@@ -322,7 +324,7 @@ app.put("/api/cajas/:id", async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: "ID de caja inválido" });
     }
-    const { estado, sku, id_zona_seccion, id_zona_almacen, temporada_default } = req.body;
+    const { estado, sku, id_zona_seccion, id_zona_almacen, temporada_default, tags } = req.body;
     
     const updateData: any = {};
     if (estado !== undefined) {
@@ -341,6 +343,9 @@ app.put("/api/cajas/:id", async (req, res) => {
       } else {
         updateData.temporada_default = sanitizeIdentifier(temporada_default, 100).toLowerCase();
       }
+    }
+    if (tags !== undefined) {
+      updateData.tags = tags;
     }
     if (id_zona_seccion !== undefined) {
       if (id_zona_seccion === "" || id_zona_seccion === null) {
@@ -2092,7 +2097,7 @@ app.get("/api/almacen/secciones", async (req, res) => {
 app.post("/api/almacen/secciones", async (req, res) => {
   try {
     const supabase = getSupabase();
-    let { nombre, id_zona_almacen } = req.body;
+    let { nombre, id_zona_almacen, tags } = req.body;
     nombre = sanitizeIdentifier(nombre, 50);
     if (!nombre) {
       return res.status(400).json({ error: "El nombre de sección es requerido y debe ser válido" });
@@ -2106,7 +2111,11 @@ app.post("/api/almacen/secciones", async (req, res) => {
     const cleanNombre = nombre.toLowerCase();
     const { data, error } = await supabase
       .from("zonas_seccion")
-      .insert([{ nombre: cleanNombre, id_zona_almacen: parsedAlm }])
+      .insert([{ 
+        nombre: cleanNombre, 
+        id_zona_almacen: parsedAlm,
+        tags: tags || { tipo_producto: "todos", genero: "todos", marca: "todos" }
+      }])
       .select();
       
     if (error) throw error;
@@ -2124,7 +2133,7 @@ app.put("/api/almacen/secciones/:id", async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: "ID de sección inválido" });
     }
-    let { nombre, id_zona_almacen } = req.body;
+    let { nombre, id_zona_almacen, tags } = req.body;
     
     const updateData: any = {};
     if (nombre !== undefined) {
@@ -2138,6 +2147,9 @@ app.put("/api/almacen/secciones/:id", async (req, res) => {
         return res.status(400).json({ error: "La zona de almacén debe ser válida" });
       }
       updateData.id_zona_almacen = parsedAlm;
+    }
+    if (tags !== undefined) {
+      updateData.tags = tags;
     }
     
     const { data, error } = await supabase

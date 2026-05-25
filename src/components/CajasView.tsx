@@ -46,6 +46,10 @@ export default function CajasView() {
   const [skuValidationResult, setSkuValidationResult] = useState<any>(null);
   const [showAddCjxModal, setShowAddCjxModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showAddCajaModal, setShowAddCajaModal] = useState(false);
+  const [cajaTipo, setCajaTipo] = useState("todos");
+  const [cajaGenero, setCajaGenero] = useState("todos");
+  const [cajaMarca, setCajaMarca] = useState("todos");
 
   // Transfer form state
   const [transferOriginId, setTransferOriginId] = useState("");
@@ -165,7 +169,12 @@ export default function CajasView() {
           numero_caja: newCajaNumber,
           id_zona_seccion,
           id_zona_almacen,
-          temporada_default: newCajaTemporada || null
+          temporada_default: newCajaTemporada || null,
+          tags: {
+            tipo_producto: cajaTipo,
+            genero: cajaGenero,
+            marca: cajaMarca
+          }
         })
       });
       if (resp.ok) {
@@ -173,6 +182,10 @@ export default function CajasView() {
         setNewCajaNumber("");
         setSelectedValue("");
         setNewCajaTemporada("");
+        setCajaTipo("todos");
+        setCajaGenero("todos");
+        setCajaMarca("todos");
+        setShowAddCajaModal(false);
         fetchCajas();
       } else {
         const err = await resp.json();
@@ -382,51 +395,10 @@ export default function CajasView() {
       {activeSubTab === "standard" ? (
         <div className="space-y-6">
           <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-neutral-100 shadow-sm">
-            <span className="font-extrabold text-sm text-neutral-700">Crear Caja Estándar:</span>
-            <form onSubmit={handleCreateCaja} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-              <Input 
-                placeholder="Nº de Caja (ej: 001)" 
-                value={newCajaNumber}
-                onChange={e => setNewCajaNumber(e.target.value)}
-                className="border-none bg-neutral-50 focus-visible:ring-neutral-400 w-full sm:w-36 h-10 text-sm font-semibold rounded-xl"
-              />
-              <select
-                value={selectedValue}
-                onChange={e => setSelectedValue(e.target.value)}
-                className="bg-neutral-50 px-3 py-2 rounded-xl text-xs font-bold border border-neutral-100 outline-none w-full sm:w-48 h-10"
-              >
-                <option value="">Sin Ubicación</option>
-                {zones.map((zone) => {
-                  const zoneSections = sections.filter(s => s.id_zona_almacen === zone.id_zona_almacen);
-                  return (
-                    <React.Fragment key={zone.id_zona_almacen}>
-                      <option value={`zone_${zone.id_zona_almacen}`} className="font-extrabold bg-neutral-100 text-neutral-950">
-                        {zone.nombre.toUpperCase()} (SOLO ALMACÉN)
-                      </option>
-                      {zoneSections.map((sec) => (
-                        <option key={sec.id_zona_seccion} value={`section_${sec.id_zona_seccion}`}>
-                          &nbsp;&nbsp;↳ {sec.nombre.toUpperCase()}
-                        </option>
-                      ))}
-                    </React.Fragment>
-                  );
-                })}
-              </select>
-              <select
-                value={newCajaTemporada}
-                onChange={e => setNewCajaTemporada(e.target.value)}
-                className="bg-neutral-50 px-3 py-2 rounded-xl text-xs font-bold border border-neutral-100 outline-none w-full sm:w-40 h-10"
-              >
-                <option value="">Sin temporada</option>
-                {temporadasOpts.map(t => (
-                  <option key={t} value={t}>{t.toUpperCase()}</option>
-                ))}
-              </select>
-              <Button disabled={isCreating} type="submit" className="rounded-xl h-10 bg-neutral-900 text-white px-5 font-bold">
-                {isCreating ? <Loader2 className="animate-spin" size={16} /> : <Plus className="mr-2" size={18} />}
-                Crear
-              </Button>
-            </form>
+            <span className="font-extrabold text-sm text-neutral-700">Gestión de Cajas del Inventario</span>
+            <Button onClick={() => setShowAddCajaModal(true)} className="rounded-xl h-10 bg-neutral-900 hover:bg-neutral-850 text-white font-bold text-xs shadow-md">
+              <Plus className="mr-1.5" size={16} /> Nueva Caja Estándar
+            </Button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -491,6 +463,25 @@ export default function CajasView() {
                       <span className="italic text-neutral-400 bg-neutral-50 px-2.5 py-1 rounded-lg text-[9px] border">
                         📍 Sin ubicación
                       </span>
+                    )}
+                  </div>
+
+                  {/* TAGS */}
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {caja.tags?.tipo_producto && caja.tags.tipo_producto !== "todos" && (
+                      <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 capitalize text-[9px] px-1.5 py-0">
+                        {caja.tags.tipo_producto}
+                      </Badge>
+                    )}
+                    {caja.tags?.genero && caja.tags.genero !== "todos" && (
+                      <Badge className="bg-blue-50 text-blue-800 border border-blue-100 text-[9px] px-1.5 py-0 font-extrabold">
+                        {caja.tags.genero === "H" ? "H" : "M"}
+                      </Badge>
+                    )}
+                    {caja.tags?.marca && caja.tags.marca !== "todos" && (
+                      <Badge className="bg-purple-50 text-purple-800 border border-purple-100 text-[9px] px-1.5 py-0 font-extrabold">
+                        {caja.tags.marca}
+                      </Badge>
                     )}
                   </div>
 
@@ -701,6 +692,127 @@ export default function CajasView() {
               </Button>
               <Button type="submit" disabled={transferLoading || !transferOriginId || !transferDestId} className="rounded-xl flex-1 bg-neutral-900 text-white font-bold">
                 {transferLoading ? <Loader2 className="animate-spin" size={16} /> : "Ejecutar Transferencia"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Nueva Caja Estándar */}
+      <Dialog open={showAddCajaModal} onOpenChange={setShowAddCajaModal}>
+        <DialogContent className="rounded-3xl max-w-md p-6 bg-white border border-neutral-100 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black uppercase flex items-center gap-2 text-neutral-900">
+              <Plus /> Crear Nueva Caja Estándar
+            </DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateCaja} className="space-y-4 pt-4">
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Identificador / Número de Caja</label>
+              <Input
+                placeholder="Ej: CJ-15 o Estante Superior A"
+                value={newCajaNumber}
+                onChange={e => setNewCajaNumber(e.target.value)}
+                className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Ubicación (Almacén / Sección)</label>
+              <select
+                value={selectedValue}
+                onChange={e => setSelectedValue(e.target.value)}
+                className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                required
+              >
+                <option value="">Seleccione una ubicación...</option>
+                {zones.map(z => (
+                  <optgroup key={z.id_zona_almacen} label={z.nombre.toUpperCase()}>
+                    <option value={`zone_${z.id_zona_almacen}`}>
+                      {z.nombre.toUpperCase()} (SIN SECCIÓN ESPECÍFICA)
+                    </option>
+                    {sections
+                      .filter(s => s.id_zona_almacen === z.id_zona_almacen)
+                      .map(s => (
+                        <option key={s.id_zona_seccion} value={`section_${s.id_zona_seccion}`}>
+                          ↳ {s.nombre.toUpperCase()}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Temporada Default (Opcional)</label>
+              <select
+                value={newCajaTemporada}
+                onChange={e => setNewCajaTemporada(e.target.value)}
+                className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+              >
+                <option value="">Seleccione temporada...</option>
+                {temporadasOpts.map((t, idx) => (
+                  <option key={idx} value={t}>
+                    {t.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo de Producto</label>
+              <select
+                value={cajaTipo}
+                onChange={e => {
+                  setCajaTipo(e.target.value);
+                  if (e.target.value !== "calzado") {
+                    setCajaMarca("todos");
+                  }
+                }}
+                className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+              >
+                <option value="todos">TODOS / AMBOS</option>
+                <option value="ropa">ROPA</option>
+                <option value="calzado">CALZADO</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Género Destinado</label>
+              <select
+                value={cajaGenero}
+                onChange={e => setCajaGenero(e.target.value)}
+                className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+              >
+                <option value="todos">UNISEX / TODOS</option>
+                <option value="H">HOMBRE (H)</option>
+                <option value="M">MUJER (M)</option>
+              </select>
+            </div>
+
+            {cajaTipo === "calzado" && (
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Marca de Calzado</label>
+                <select
+                  value={cajaMarca}
+                  onChange={e => setCajaMarca(e.target.value)}
+                  className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                >
+                  <option value="todos">TODAS / AMBAS</option>
+                  <option value="Marciano">MARCIANO (M)</option>
+                  <option value="Guess">GUESS (G)</option>
+                </select>
+              </div>
+            )}
+
+            <DialogFooter className="pt-4 border-t flex gap-2">
+              <Button type="button" variant="outline" onClick={() => setShowAddCajaModal(false)} className="rounded-xl flex-1">
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isCreating || !newCajaNumber.trim() || !selectedValue} className="rounded-xl flex-1 bg-neutral-900 text-white font-bold">
+                {isCreating ? <Loader2 className="animate-spin" size={16} /> : "Crear Caja"}
               </Button>
             </DialogFooter>
           </form>

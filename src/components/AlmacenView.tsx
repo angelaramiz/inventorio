@@ -3,12 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import JsBarcode from "jsbarcode";
 import { 
   Plus, Edit2, Trash2, Home, MapPin, 
   Loader2, Check, X, AlertTriangle, FileText, Printer, Download,
   Network
 } from "lucide-react";
-import HierarchyView from "./HierarchyView";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -118,7 +120,14 @@ const EAN13Barcode = ({ code }: { code: string }) => {
 };
 
 export default function AlmacenView() {
-  const [activeTab, setActiveTab] = useState<"zonas" | "secciones" | "inventario" | "jerarquia">("zonas");
+  const [activeTab, setActiveTab] = useState<"zonas" | "secciones" | "inventario">("zonas");
+  
+  // Tag states for new section
+  const [newSectionTipo, setNewSectionTipo] = useState<string>("todos");
+  const [newSectionGenero, setNewSectionGenero] = useState<string>("todos");
+  const [newSectionMarca, setNewSectionMarca] = useState<string>("todos");
+  
+  const [activeBarcodeSection, setActiveBarcodeSection] = useState<any | null>(null);
   
   // Data lists
   const [zones, setZones] = useState<WarehouseZone[]>([]);
@@ -159,6 +168,28 @@ export default function AlmacenView() {
     fetchSections();
     fetchBoxes();
   }, []);
+
+  useEffect(() => {
+    if (activeBarcodeSection) {
+      const timer = setTimeout(() => {
+        try {
+          const element = document.getElementById("section-barcode-svg");
+          if (element) {
+            JsBarcode(element, `SEC-${activeBarcodeSection.id_zona_seccion}`, {
+              format: "CODE128",
+              lineColor: "#000",
+              width: 2.2,
+              height: 60,
+              displayValue: false
+            });
+          }
+        } catch (err) {
+          console.error("Error generating section barcode:", err);
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [activeBarcodeSection]);
 
   const fetchBoxes = async () => {
     try {
@@ -700,13 +731,21 @@ export default function AlmacenView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           nombre: newSectionName, 
-          id_zona_almacen: parseInt(selectedZoneId) 
+          id_zona_almacen: parseInt(selectedZoneId),
+          tags: {
+            tipo_producto: newSectionTipo,
+            genero: newSectionGenero,
+            marca: newSectionMarca
+          }
         })
       });
       if (resp.ok) {
         toast.success("Sección agregada y asociada");
         setNewSectionName("");
         setSelectedZoneId("");
+        setNewSectionTipo("todos");
+        setNewSectionGenero("todos");
+        setNewSectionMarca("todos");
         fetchSections();
       } else {
         const err = await resp.json();
@@ -856,25 +895,10 @@ export default function AlmacenView() {
             <FileText size={14} />
             Inventario (Reporte)
           </button>
-          <button
-            onClick={() => {
-              setActiveTab("jerarquia");
-            }}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-              activeTab === "jerarquia" 
-                ? "bg-white text-neutral-950 shadow-md" 
-                : "text-neutral-500 hover:text-neutral-800"
-            }`}
-          >
-            <Network size={14} />
-            Jerarquía (Árbol)
-          </button>
         </div>
       </div>
 
-      {activeTab === "jerarquia" ? (
-        <HierarchyView />
-      ) : activeTab === "inventario" ? (
+      {activeTab === "inventario" ? (
         <div className="space-y-6">
           <Card className="border border-neutral-100 shadow-xl rounded-[2rem] overflow-hidden bg-white">
             <CardHeader className="bg-neutral-50/50 pb-4 border-b">
@@ -1333,6 +1357,55 @@ export default function AlmacenView() {
                         </select>
                       </div>
 
+                      {/* TIPO PRODUCTO TAG */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo de Producto</label>
+                        <select
+                          value={newSectionTipo}
+                          onChange={e => {
+                            setNewSectionTipo(e.target.value);
+                            if (e.target.value !== "calzado") {
+                              setNewSectionMarca("todos"); // Reset brand if not footwear
+                            }
+                          }}
+                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                        >
+                          <option value="todos">TODOS / AMBOS</option>
+                          <option value="ropa">ROPA</option>
+                          <option value="calzado">CALZADO</option>
+                        </select>
+                      </div>
+
+                      {/* GÉNERO TAG */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Género Destinado</label>
+                        <select
+                          value={newSectionGenero}
+                          onChange={e => setNewSectionGenero(e.target.value)}
+                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                        >
+                          <option value="todos">UNISEX / TODOS</option>
+                          <option value="H">HOMBRE (H)</option>
+                          <option value="M">MUJER (M)</option>
+                        </select>
+                      </div>
+
+                      {/* MARCA TAG (Condicional para Calzado) */}
+                      {newSectionTipo === "calzado" && (
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Marca de Calzado</label>
+                          <select
+                            value={newSectionMarca}
+                            onChange={e => setNewSectionMarca(e.target.value)}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">TODAS / AMBAS</option>
+                            <option value="Marciano">MARCIANO (M)</option>
+                            <option value="Guess">GUESS (G)</option>
+                          </select>
+                        </div>
+                      )}
+
                       <Button 
                         type="submit" 
                         disabled={submitting || !newSectionName.trim() || !selectedZoneId}
@@ -1459,11 +1532,12 @@ export default function AlmacenView() {
                       <TableRow>
                         <TableHead>Nombre Sección</TableHead>
                         <TableHead>Almacén Principal</TableHead>
-                        <TableHead className="text-right w-[150px]">Acciones</TableHead>
+                        <TableHead>Etiquetas (Tags)</TableHead>
+                        <TableHead className="text-right w-[180px]">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {sections.map((section) => (
+                      {sections.map((section: any) => (
                         <TableRow key={section.id_zona_seccion}>
                           <TableCell className="font-extrabold text-sm uppercase">
                             {editingSectionId === section.id_zona_seccion ? (
@@ -1495,6 +1569,34 @@ export default function AlmacenView() {
                             )}
                           </TableCell>
 
+                          {/* TAGS COLUMN */}
+                          <TableCell className="py-2">
+                            {section.tags ? (
+                              <div className="flex flex-wrap gap-1">
+                                {section.tags.tipo_producto && section.tags.tipo_producto !== "todos" && (
+                                  <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 capitalize text-[9px] px-1.5 py-0">
+                                    {section.tags.tipo_producto}
+                                  </Badge>
+                                )}
+                                {section.tags.genero && section.tags.genero !== "todos" && (
+                                  <Badge className="bg-blue-50 text-blue-800 border border-blue-100 text-[9px] px-1.5 py-0 font-extrabold">
+                                    {section.tags.genero === "H" ? "H" : "M"}
+                                  </Badge>
+                                )}
+                                {section.tags.marca && section.tags.marca !== "todos" && (
+                                  <Badge className="bg-purple-50 text-purple-800 border border-purple-100 text-[9px] px-1.5 py-0 font-extrabold">
+                                    {section.tags.marca}
+                                  </Badge>
+                                )}
+                                {(!section.tags.tipo_producto || (section.tags.tipo_producto === "todos" && section.tags.genero === "todos" && section.tags.marca === "todos")) && (
+                                  <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
+                            )}
+                          </TableCell>
+
                           <TableCell className="text-right pr-6">
                             <div className="flex justify-end gap-1.5">
                               {editingSectionId === section.id_zona_seccion ? (
@@ -1518,6 +1620,21 @@ export default function AlmacenView() {
                                 </>
                               ) : (
                                 <>
+                                  <Button 
+                                    size="icon" 
+                                    variant="ghost" 
+                                    onClick={() => {
+                                      setActiveBarcodeSection({
+                                        id_zona_seccion: section.id_zona_seccion,
+                                        nombre: section.nombre,
+                                        almacen_nombre: section.almacen_nombre
+                                      });
+                                    }}
+                                    className="h-8 w-8 text-neutral-400 hover:text-neutral-800 hover:bg-neutral-100 rounded-lg"
+                                    title="Imprimir código de barras de sección"
+                                  >
+                                    <Printer size={14} />
+                                  </Button>
                                   <Button 
                                     size="icon" 
                                     variant="ghost" 
@@ -1550,6 +1667,48 @@ export default function AlmacenView() {
         </div>
       </div>
       )}
+
+      {/* Barcode Print Dialog for Section (Jerarquía 2) */}
+      <Dialog open={!!activeBarcodeSection} onOpenChange={(open) => !open && setActiveBarcodeSection(null)}>
+        <DialogContent className="max-w-md rounded-3xl p-6 bg-white border border-neutral-100 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase text-neutral-950 flex items-center gap-2">
+              <Printer size={20} className="text-neutral-700" />
+              Imprimir Código de Sección
+            </DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">
+              Usa este código de barras para iniciar el conteo físico del operador
+            </DialogDescription>
+          </DialogHeader>
+
+          {activeBarcodeSection && (
+            <div className="flex flex-col items-center justify-center p-6 bg-neutral-50 rounded-2xl border border-neutral-100 space-y-4 my-2">
+              <div className="bg-white p-6 rounded-xl border shadow-sm flex flex-col items-center select-none" id="section-barcode-print-area">
+                <svg id="section-barcode-svg" className="max-w-full"></svg>
+                <span className="text-[10px] font-black uppercase text-neutral-500 mt-2 font-mono tracking-widest">
+                  {`SEC-${activeBarcodeSection.id_zona_seccion}`}
+                </span>
+                <span className="text-xs font-black text-neutral-800 uppercase mt-0.5">
+                  SECCIÓN: {activeBarcodeSection.nombre}
+                </span>
+                <span className="text-[9px] font-extrabold text-neutral-400 uppercase mt-0.5">
+                  ALMACÉN: {activeBarcodeSection.almacen_nombre}
+                </span>
+              </div>
+
+              <div className="flex gap-2 w-full">
+                <Button variant="outline" onClick={() => setActiveBarcodeSection(null)} className="flex-1 rounded-xl h-10 text-xs font-bold">
+                  Cerrar
+                </Button>
+                <Button onClick={() => window.print()} className="flex-1 rounded-xl h-10 bg-neutral-950 hover:bg-neutral-850 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md">
+                  <Printer size={14} />
+                  Imprimir Etiqueta
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
