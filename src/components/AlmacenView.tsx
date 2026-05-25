@@ -306,9 +306,9 @@ export default function AlmacenView() {
     try {
       // Create canvases and render barcodes at 300 DPI target for crisp PDF output
       const dpi = 300;
-      // Label size: 3.3cm x 1.7cm -> convert to inches
-      const widthIn = 3.3 / 2.54; // ~1.299 in
-      const heightIn = 1.7 / 2.54; // ~0.669 in
+      // Label size: 3.6cm x 1.8cm -> convert to inches
+      const widthIn = 3.6 / 2.54; // ~1.417 in
+      const heightIn = 1.8 / 2.54; // ~0.709 in
       const canvasW = Math.round(widthIn * dpi);
       const canvasH = Math.round(heightIn * dpi);
 
@@ -353,12 +353,12 @@ export default function AlmacenView() {
 
           // Draw only the human-readable alphanumeric code below the barcode (centered)
           ctx.fillStyle = '#000000';
-          // font size relative to canvas height
-          const codeFontSize = Math.round(canvasH * 0.18);
+          // font size relative to canvas height - increased for better readability
+          const codeFontSize = Math.round(canvasH * 0.22);
           ctx.font = `${codeFontSize}px monospace`;
           ctx.textAlign = 'center';
           // position text slightly below the barcode
-          const textY = by + barcodeCanvas.height + Math.round(canvasH * 0.12);
+          const textY = by + barcodeCanvas.height + Math.round(canvasH * 0.14);
           ctx.fillText(it.codigo, canvas.width / 2, textY);
         }
 
@@ -392,12 +392,12 @@ export default function AlmacenView() {
       const doc = printWindow.document;
       const style = `
         <style>
-          @page { size: letter; margin: 5mm; }
-          body{ font-family: Arial, Helvetica, sans-serif; margin:0; padding:4mm; }
-          /* Force 4 labels per row: each label 3.3cm width + minimal gap */
+          @page { size: letter; margin: 4mm; }
+          body{ font-family: Arial, Helvetica, sans-serif; margin:0; padding:3mm; }
+          /* Force 4 labels per row: each label 3.6cm width + minimal gap */
           .sheet{ width:100%; display:flex; flex-wrap:wrap; justify-content:flex-start; align-items:flex-start; }
-          .label{ width: 3.3cm; height: 1.7cm; display:inline-block; margin: 0.08cm; box-sizing:border-box; }
-          .label img{ width: 3.3cm; height: 1.7cm; object-fit:contain; display:block; }
+          .label{ width: 3.6cm; height: 1.8cm; display:inline-block; margin: 0.05cm; box-sizing:border-box; }
+          .label img{ width: 3.6cm; height: 1.8cm; object-fit:contain; display:block; }
         </style>
       `;
 
