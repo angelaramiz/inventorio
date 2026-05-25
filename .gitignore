@@ -31,6 +31,7 @@ Thumbs.db
 .vs/
 .vscode/
 *.code-workspace
+agent_context/
 
 # Optional npm cache directory
 .npm
@@ -40,3 +41,7 @@ Thumbs.db
 
 # Ignore compiled output
 *.tsbuildinfo
+
+# Scratch files
+scratch/
+test_db.ts

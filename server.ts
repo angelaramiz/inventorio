@@ -5,9 +5,27 @@ import { createServer as createViteServer } from "vite";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import multer from "multer";
+import { EventEmitter } from "events";
 
-// Load env vars based on NODE_ENV
-if (process.env.NODE_ENV !== 'production') {
+// In-memory event emitter for real-time stock updates
+const stockEvents = new EventEmitter();
+stockEvents.setMaxListeners(100);
+
+// In-memory logs for manager notifications
+const managerNotifications: any[] = [];
+
+// In-memory image jobs map for background processing queue
+const imageJobs = new Map<string, {
+  taskId: string;
+  productoId: number;
+  progress: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  error?: string;
+}>();
+
+
+// Load env vars based on NODE_ENV, fallback to loading .env if variables are missing
+if (process.env.NODE_ENV !== 'production' || !process.env.SUPABASE_URL) {
   dotenv.config();
 }
 
@@ -1175,6 +1193,779 @@ app.post("/api/transferir-producto", async (req, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+
+// --- FASE 1: JERARQUÍA DE ALMACENAMIENTO, AJUSTES Y SSE ---
+
+// GET /api/hierarchy - List all hierarchical containers
+app.get("/api/hierarchy", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("storage_hierarchy")
+      .select("*")
+      .order("id", { ascending: true });
+    
+    if (error) throw error;
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/hierarchy/settings - Get settings
+app.get("/api/hierarchy/settings", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("warehouse_settings")
+      .select("*");
+    
+    if (error) throw error;
+    
+    const settings: Record<string, any> = {};
+    data?.forEach((s: any) => {
+      settings[s.clave] = s.valor;
+    });
+    res.json(settings);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/hierarchy/settings - Update settings
+app.put("/api/hierarchy/settings", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { prefijos, secuencias, tipos_contenedor } = req.body;
+    
+    if (prefijos) {
+      await supabase.from("warehouse_settings").upsert({ clave: "prefijos", valor: prefijos });
+    }
+    if (secuencias) {
+      await supabase.from("warehouse_settings").upsert({ clave: "secuencias", valor: secuencias });
+    }
+    if (tipos_contenedor) {
+      await supabase.from("warehouse_settings").upsert({ clave: "tipos_contenedor", valor: tipos_contenedor });
+    }
+    
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/hierarchy - Create a new container
+app.post("/api/hierarchy", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    let { parent_id, tipo_almacen, sku_asociado, stock_real = 0, codigo_barras } = req.body;
+    
+    // Auto-generate barcode if not provided
+    if (!codigo_barras) {
+      // Get settings
+      const { data: settingsData } = await supabase
+        .from("warehouse_settings")
+        .select("*");
+      
+      const prefijos = settingsData?.find((s: any) => s.clave === "prefijos")?.valor || {};
+      const secuencias = settingsData?.find((s: any) => s.clave === "secuencias")?.valor || {};
+      
+      const prefix = prefijos[tipo_almacen] || "CON";
+      const seq = parseInt(secuencias[tipo_almacen] || "1");
+      
+      // Auto-increment sequence in settings
+      const nextSeq = seq + 1;
+      const updatedSecuencias = { ...secuencias, [tipo_almacen]: nextSeq };
+      await supabase.from("warehouse_settings").upsert({ clave: "secuencias", valor: updatedSecuencias });
+      
+      // Format code: PREFIX-0000X
+      codigo_barras = `${prefix}-${String(seq).padStart(5, '0')}`;
+    }
+    
+    const insertData = {
+      parent_id: parent_id ? parseInt(parent_id) : null,
+      tipo_almacen,
+      sku_asociado: sku_asociado || null,
+      codigo_barras,
+      stock_real: parseInt(stock_real) || 0
+    };
+    
+    const { data, error } = await supabase
+      .from("storage_hierarchy")
+      .insert([insertData])
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/hierarchy/:id - Update node in hierarchy
+app.put("/api/hierarchy/:id", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const id = parseInt(req.params.id);
+    const { parent_id, tipo_almacen, sku_asociado, stock_real, codigo_barras } = req.body;
+    
+    const updateData: any = {};
+    if (parent_id !== undefined) updateData.parent_id = parent_id ? parseInt(parent_id) : null;
+    if (tipo_almacen !== undefined) updateData.tipo_almacen = tipo_almacen;
+    if (sku_asociado !== undefined) updateData.sku_asociado = sku_asociado || null;
+    if (stock_real !== undefined) updateData.stock_real = parseInt(stock_real) || 0;
+    if (codigo_barras !== undefined) updateData.codigo_barras = codigo_barras;
+    
+    const { data, error } = await supabase
+      .from("storage_hierarchy")
+      .update(updateData)
+      .eq("id", id)
+      .select();
+      
+    if (error) throw error;
+    
+    // Emit stock update event if stock was changed
+    if (stock_real !== undefined) {
+      stockEvents.emit("stock-change", { id, stock_real: parseInt(stock_real) || 0 });
+    }
+    
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/hierarchy/:id - Delete node in hierarchy
+app.delete("/api/hierarchy/:id", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const id = parseInt(req.params.id);
+    
+    const { error } = await supabase
+      .from("storage_hierarchy")
+      .delete()
+      .eq("id", id);
+      
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/hierarchy/:id/stock-live - SSE Stream for real-time stock
+app.get("/api/hierarchy/:id/stock-live", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    return res.status(400).json({ error: "ID inválido" });
+  }
+  
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({ connected: true })}\n\n`);
+  
+  // Listen to stock-change events
+  const onStockChange = (data: any) => {
+    if (data.id === id) {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+  
+  stockEvents.on("stock-change", onStockChange);
+  
+  // Keep connection alive with periodic pings
+  const intervalId = setInterval(() => {
+    res.write(': ping\n\n');
+  }, 15000);
+  
+  req.on("close", () => {
+    stockEvents.off("stock-change", onStockChange);
+    clearInterval(intervalId);
+  });
+});
+
+
+// --- FASE 2: GESTIÓN DE CAJAS CJ-X Y POS ---
+
+// POST /api/containers - Create a box CJ-X
+app.post("/api/containers", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { sku_validado } = req.body;
+    
+    if (!sku_validado) {
+      return res.status(400).json({ error: "El SKU es obligatorio" });
+    }
+    
+    // 1. Validar que SKU existe
+    const { data: prod, error: pErr } = await supabase
+      .from("productos")
+      .select("sku")
+      .eq("sku", sku_validado)
+      .maybeSingle();
+      
+    if (pErr || !prod) {
+      return res.status(400).json({ error: "El SKU no existe en la base de datos de productos" });
+    }
+    
+    // 2. Validar que no exista un contenedor activo con este SKU
+    const { data: existing, error: exErr } = await supabase
+      .from("containers")
+      .select("id")
+      .eq("sku_validado", sku_validado)
+      .in("estado", ["vacia", "activa", "llena"])
+      .maybeSingle();
+      
+    if (existing) {
+      return res.status(409).json({ error: "Ya existe un contenedor activo para este SKU de producto" });
+    }
+    
+    // 3. Obtener el máximo sequence_number + 1
+    const { data: maxSeqData, error: maxErr } = await supabase
+      .from("containers")
+      .select("secuencia")
+      .eq("prefijo", "CJ")
+      .order("secuencia", { ascending: false })
+      .limit(1);
+      
+    let nextSeq = 1;
+    if (maxSeqData && maxSeqData.length > 0) {
+      nextSeq = maxSeqData[0].secuencia + 1;
+    }
+    
+    // 4. Crear el contenedor
+    const { data: newContainer, error: cErr } = await supabase
+      .from("containers")
+      .insert([{
+        prefijo: "CJ",
+        secuencia: nextSeq,
+        sku_validado,
+        estado: "vacia"
+      }])
+      .select();
+      
+    if (cErr) throw cErr;
+    res.json(newContainer[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/containers/transfer - Transfer box stock and inherit prefix
+app.post("/api/containers/transfer", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id_caja_origen, id_caja_destino } = req.body;
+    
+    if (!id_caja_origen || !id_caja_destino) {
+      return res.status(400).json({ error: "IDs de origen y destino requeridos" });
+    }
+    
+    // 1. Obtener cajas
+    const { data: origBox, error: oErr } = await supabase
+      .from("cajas")
+      .select("*")
+      .eq("id_caja", id_caja_origen)
+      .single();
+      
+    const { data: destBox, error: dErr } = await supabase
+      .from("cajas")
+      .select("*")
+      .eq("id_caja", id_caja_destino)
+      .single();
+      
+    if (oErr || dErr || !origBox || !destBox) {
+      return res.status(404).json({ error: "Una o ambas cajas no existen" });
+    }
+    
+    // 2. Mover todos los productos de la caja origen a la caja destino
+    const { data: origProducts } = await supabase
+      .from("caja_productos")
+      .select("*")
+      .eq("id_caja", id_caja_origen);
+      
+    if (origProducts && origProducts.length > 0) {
+      for (const item of origProducts) {
+        // Buscar si ya existe en destino
+        const { data: destItem } = await supabase
+          .from("caja_productos")
+          .select("*")
+          .eq("id_caja", id_caja_destino)
+          .eq("id_producto", item.id_producto)
+          .maybeSingle();
+          
+        if (destItem) {
+          await supabase
+            .from("caja_productos")
+            .update({ cantidad: destItem.cantidad + item.cantidad })
+            .eq("id_relacion", destItem.id_relacion);
+        } else {
+          await supabase
+            .from("caja_productos")
+            .insert([{
+              id_caja: id_caja_destino,
+              id_producto: item.id_producto,
+              cantidad: item.cantidad
+            }]);
+        }
+      }
+      
+      // Eliminar de origen
+      await supabase
+        .from("caja_productos")
+        .delete()
+        .eq("id_caja", id_caja_origen);
+    }
+    
+    // 3. Heredar prefijo y SKU
+    const originalSku = origBox.sku;
+    const originalNumero = origBox.numero_caja;
+    
+    // Actualizar destino con los datos heredados y estado
+    await supabase
+      .from("cajas")
+      .update({
+        sku: originalSku,
+        estado: origBox.estado,
+        temporada_default: origBox.temporada_default
+      })
+      .eq("id_caja", id_caja_destino);
+      
+    // 4. Marcar origen como rota/vieja
+    await supabase
+      .from("cajas")
+      .update({
+        estado: "vacia",
+        sku: `OLD-${originalSku || id_caja_origen}`,
+        numero_caja: `${originalNumero} (ROTA)`
+      })
+      .eq("id_caja", id_caja_origen);
+      
+    res.json({ success: true, message: "Transferencia completada e identificadores heredados" });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/pos/sell - Checkout items in POS
+app.post("/api/pos/sell", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { items, vendedor_id = "Vendedor General" } = req.body;
+    
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "El carrito está vacío" });
+    }
+    
+    // Calcular total
+    let total = 0;
+    for (const item of items) {
+      total += (item.cantidad * item.precio_unitario);
+    }
+    
+    // 1. Crear Venta
+    const { data: sale, error: sErr } = await supabase
+      .from("ventas")
+      .insert([{ vendedor_id, total }])
+      .select();
+      
+    if (sErr || !sale) throw sErr;
+    const saleId = sale[0].id;
+    
+    // 2. Guardar Detalles y descontar stock
+    for (const item of items) {
+      await supabase
+        .from("venta_detalles")
+        .insert([{
+          venta_id: saleId,
+          producto_id: item.producto_id,
+          cantidad: item.cantidad,
+          precio_unitario: item.precio_unitario
+        }]);
+        
+      // Intentar descontar de la caja activa del producto
+      const { data: boxItems } = await supabase
+        .from("caja_productos")
+        .select("*")
+        .eq("id_producto", item.producto_id)
+        .order("cantidad", { ascending: false });
+        
+      let qtyToDeduct = item.cantidad;
+      if (boxItems && boxItems.length > 0) {
+        for (const boxItem of boxItems) {
+          if (qtyToDeduct <= 0) break;
+          
+          if (boxItem.cantidad <= qtyToDeduct) {
+            qtyToDeduct -= boxItem.cantidad;
+            // Eliminar relación
+            await supabase
+              .from("caja_productos")
+              .delete()
+              .eq("id_relacion", boxItem.id_relacion);
+              
+            // Actualizar estado de caja a vacía si no queda nada
+            const { data: rem } = await supabase.from("caja_productos").select("id_relacion").eq("id_caja", boxItem.id_caja);
+            if (!rem || rem.length === 0) {
+              await supabase.from("cajas").update({ estado: "vacia" }).eq("id_caja", boxItem.id_caja);
+            }
+          } else {
+            await supabase
+              .from("caja_productos")
+              .update({ cantidad: boxItem.cantidad - qtyToDeduct })
+              .eq("id_relacion", boxItem.id_relacion);
+            qtyToDeduct = 0;
+          }
+        }
+      }
+      
+      // Descontar también en la jerarquía (si hay un nodo asociado al SKU)
+      const { data: prod } = await supabase.from("productos").select("sku").eq("id_producto", item.producto_id).single();
+      if (prod) {
+        const { data: node } = await supabase
+          .from("storage_hierarchy")
+          .select("*")
+          .eq("sku_asociado", prod.sku)
+          .maybeSingle();
+          
+        if (node) {
+          const newStock = Math.max(0, node.stock_real - item.cantidad);
+          await supabase
+            .from("storage_hierarchy")
+            .update({ stock_real: newStock })
+            .eq("id", node.id);
+            
+          stockEvents.emit("stock-change", { id: node.id, stock_real: newStock });
+        }
+      }
+    }
+    
+    res.json({ success: true, saleId });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+// --- FASE 3: INVENTARIO, NOTIFICACIONES Y CARGA ASÍNCRONA ---
+
+// GET /api/inventory/events - List inventory events
+app.get("/api/inventory/events", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("inventory_events")
+      .select("*")
+      .order("fecha", { ascending: false });
+      
+    if (error) throw error;
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/inventory/events - Create inventory event
+app.post("/api/inventory/events", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { descripcion, fecha } = req.body;
+    
+    const { data, error } = await supabase
+      .from("inventory_events")
+      .insert([{
+        descripcion,
+        fecha: fecha ? new Date(fecha) : new Date(),
+        estado: "programado"
+      }])
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/inventory/notifications - Fetch manager notifications
+app.get("/api/inventory/notifications", (req, res) => {
+  res.json(managerNotifications);
+});
+
+// GET /api/inventory/notifications/sse - SSE Stream for Manager Notifications
+app.get("/api/inventory/notifications/sse", (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  
+  res.write(`data: ${JSON.stringify({ connected: true })}\n\n`);
+  
+  const listener = (notification: any) => {
+    res.write(`data: ${JSON.stringify(notification)}\n\n`);
+  };
+  
+  stockEvents.on("manager-notification", listener);
+  
+  const pingId = setInterval(() => {
+    res.write(': ping\n\n');
+  }, 15000);
+  
+  req.on("close", () => {
+    stockEvents.off("manager-notification", listener);
+    clearInterval(pingId);
+  });
+});
+
+// POST /api/inventory/count-request - Submit counts from operator
+app.post("/api/inventory/count-request", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { event_id, operator_id, zone_id, cantidades, zone_name } = req.body;
+    
+    const { data, error } = await supabase
+      .from("count_requests")
+      .insert([{
+        event_id: parseInt(event_id),
+        operator_id,
+        zone_id: parseInt(zone_id) || null,
+        cantidades,
+        estado: "pendiente"
+      }])
+      .select();
+      
+    if (error) throw error;
+    
+    // Register notification
+    const newNotification = {
+      id: Date.now(),
+      tipo: "conteo_enviado",
+      operator_id,
+      zone_name: zone_name || `Zona ${zone_id}`,
+      request_id: data[0].id,
+      timestamp: new Date().toISOString()
+    };
+    managerNotifications.push(newNotification);
+    stockEvents.emit("manager-notification", newNotification);
+    
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/inventory/operator-active - Notification when operator enters a zone
+app.post("/api/inventory/operator-active", (req, res) => {
+  const { operator_id, zone_name } = req.body;
+  const newNotification = {
+    id: Date.now(),
+    tipo: "operador_activo",
+    operator_id,
+    zone_name,
+    timestamp: new Date().toISOString()
+  };
+  managerNotifications.push(newNotification);
+  stockEvents.emit("manager-notification", newNotification);
+  res.json({ success: true });
+});
+
+// GET /api/inventory/count-requests - List all count requests
+app.get("/api/inventory/count-requests", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("count_requests")
+      .select("*")
+      .order("created_at", { ascending: false });
+      
+    if (error) throw error;
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/inventory/approvals - Manager approves/rejects counts
+app.post("/api/inventory/approvals", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { request_id, manager_id, status, comentarios } = req.body;
+    
+    // 1. Save approval record
+    const { data: approval, error: aErr } = await supabase
+      .from("approvals")
+      .insert([{ request_id, manager_id, status, comentarios }])
+      .select();
+      
+    if (aErr) throw aErr;
+    
+    // 2. Update count request status
+    const { data: request } = await supabase
+      .from("count_requests")
+      .update({ estado: status })
+      .eq("id", request_id)
+      .select()
+      .single();
+      
+    if (status === "aprobado" && request) {
+      const cantidades = request.cantidades;
+      const event_id = request.event_id;
+      const zone_id = request.zone_id;
+      
+      for (const [prodIdStr, qty] of Object.entries(cantidades)) {
+        const prodId = parseInt(prodIdStr);
+        const quantity = parseInt(qty as any);
+        
+        await supabase
+          .from("counts")
+          .insert([{
+            event_id,
+            producto_id: prodId,
+            zona_id: zone_id,
+            cantidad_final: quantity
+          }]);
+          
+        // 4. Update actual stock inside the zone/box
+        const { data: box } = await supabase.from("cajas").select("id_caja").eq("id_caja", zone_id).maybeSingle();
+        if (box) {
+          if (quantity === 0) {
+            await supabase.from("caja_productos").delete().eq("id_caja", zone_id).eq("id_producto", prodId);
+          } else {
+            await supabase.from("caja_productos").upsert({
+              id_caja: zone_id,
+              id_producto: prodId,
+              cantidad: quantity
+            }, { onConflict: "id_caja,id_producto" });
+          }
+        }
+      }
+      
+      // Update inventory event status to completed
+      await supabase
+        .from("inventory_events")
+        .update({ estado: "completado" })
+        .eq("id", event_id);
+    }
+    
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/inventory/reports - Compile final consolidated report
+app.get("/api/inventory/reports", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("counts")
+      .select(`
+        id,
+        event_id,
+        producto_id,
+        zona_id,
+        cantidad_final,
+        created_at,
+        productos (
+          id_producto,
+          sku,
+          ean_13,
+          talla,
+          tipo,
+          marca_sub
+        )
+      `)
+      .order("created_at", { ascending: false });
+      
+    if (error) throw error;
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/productos/:id/async-image - Asynchronous image processor
+app.post("/api/productos/:id/async-image", upload.single('foto'), async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const productoId = parseInt(req.params.id);
+    
+    if (isNaN(productoId)) {
+      return res.status(400).json({ error: "ID de producto inválido" });
+    }
+    
+    if (!req.file) {
+      return res.status(400).json({ error: "No se recibió ninguna imagen" });
+    }
+    
+    const taskId = Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+    
+    // Save job state
+    imageJobs.set(taskId, {
+      taskId,
+      productoId,
+      progress: 0,
+      status: 'pending'
+    });
+    
+    // Trigger background process
+    const fileBuffer = req.file.buffer;
+    const processImageJob = async () => {
+      try {
+        const job = imageJobs.get(taskId);
+        if (!job) return;
+        
+        job.status = 'processing';
+        job.progress = 25;
+        await new Promise(r => setTimeout(r, 400));
+        
+        job.progress = 50;
+        await new Promise(r => setTimeout(r, 400));
+        
+        job.progress = 75;
+        await new Promise(r => setTimeout(r, 400));
+        
+        const fotoHex = '\\x' + fileBuffer.toString('hex');
+        
+        const { error: updErr } = await supabase
+          .from("productos")
+          .update({ foto: fotoHex })
+          .eq("id_producto", productoId);
+          
+        if (updErr) throw updErr;
+        
+        job.progress = 100;
+        job.status = 'completed';
+      } catch (err: any) {
+        console.error("Async upload failed:", err);
+        const job = imageJobs.get(taskId);
+        if (job) {
+          job.status = 'failed';
+          job.error = err.message;
+        }
+      }
+    };
+    
+    processImageJob();
+    res.json({ success: true, taskId });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/image-tasks/:taskId - Check background image task status
+app.get("/api/image-tasks/:taskId", (req, res) => {
+  const { taskId } = req.params;
+  const job = imageJobs.get(taskId);
+  if (!job) {
+    return res.status(404).json({ error: "Tarea no encontrada" });
+  }
+  res.json(job);
 });
 
 // --- WAREHOUSE LOCATIONS ENDPOINTS ---
