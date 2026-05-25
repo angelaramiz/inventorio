@@ -369,7 +369,22 @@ export default function AlmacenView() {
       }
 
       // Open a new window and write printable HTML with images sized in inches
-      const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+      let printWindow = window.open('', '_blank', 'noopener,noreferrer');
+      const useIframeFallback = !printWindow;
+      if (useIframeFallback) {
+        // Create a hidden iframe fallback when popups are blocked
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0px';
+        iframe.style.height = '0px';
+        iframe.style.border = '0';
+        iframe.id = 'print-fallback-iframe';
+        document.body.appendChild(iframe);
+        printWindow = iframe.contentWindow as Window | null;
+      }
+
       if (!printWindow) {
         toast.error('No se pudo abrir la ventana de impresión (bloqueador?)');
         return;
@@ -409,8 +424,20 @@ export default function AlmacenView() {
       // Give window a moment to render
       setTimeout(() => {
         try {
-          printWindow.focus();
-          printWindow.print();
+          printWindow && printWindow.focus && printWindow.focus();
+          // If we used the iframe fallback, call print on the iframe's window
+          if (useIframeFallback) {
+            const iframeEl = document.getElementById('print-fallback-iframe') as HTMLIFrameElement | null;
+            if (iframeEl && iframeEl.contentWindow) {
+              iframeEl.contentWindow.print();
+              // clean up iframe after printing
+              setTimeout(() => {
+                try { iframeEl.remove(); } catch (e) { /* ignore */ }
+              }, 1000);
+            }
+          } else {
+            printWindow.print();
+          }
         } catch (err) {
           console.error('Error printing window:', err);
         }

@@ -18,6 +18,7 @@ extras/
 # Production
 dist/
 build/
+docs/
 
 # Testing
 coverage/
