@@ -275,19 +275,151 @@ export default function AlmacenView() {
   }, [showBatchPrintModal, sections]);
 
   const handlePrintSingleLabel = () => {
-    setIsPrintingLabels(true);
-    document.body.classList.add("print-single-label");
-    setTimeout(() => {
-      window.print();
-    }, 150);
+    // Generate a high-resolution canvas for the single label and open print window
+    if (!activeBarcodeSection) return;
+    const barcodeVal = (activeBarcodeSection.nombre || `SEC-${activeBarcodeSection.id_zona_seccion}`).toUpperCase();
+    generatePrintableWindow([{
+      codigo: barcodeVal,
+      nombre: activeBarcodeSection.nombre,
+      almacen: activeBarcodeSection.almacen_nombre
+    }]);
   };
 
   const handlePrintBatchLabels = () => {
-    setIsPrintingLabels(true);
-    document.body.classList.add("print-batch-labels");
-    setTimeout(() => {
-      window.print();
-    }, 150);
+    // Generate high-resolution canvases for batch labels and open print window
+    if (!sections || sections.length === 0) {
+      toast.error("No hay secciones para imprimir");
+      return;
+    }
+
+    const payload = sections.map((section) => ({
+      codigo: (/^[A-Z0-9]+$/i.test(section.nombre) ? section.nombre.toUpperCase() : `SEC-${section.id_zona_seccion}`),
+      nombre: section.nombre,
+      almacen: section.almacen_nombre
+    }));
+
+    generatePrintableWindow(payload);
+  };
+
+  // Build a printable window with high-res barcode images rendered on canvas.
+  const generatePrintableWindow = async (items: Array<{codigo:string,nombre?:string,almacen?:string}>) => {
+    try {
+      // Create canvases and render barcodes at 300 DPI target for crisp PDF output
+      const dpi = 300;
+      const widthIn = 4; // inches
+      const heightIn = 1.5; // inches
+      const canvasW = Math.round(widthIn * dpi);
+      const canvasH = Math.round(heightIn * dpi);
+
+      const images: string[] = [];
+
+      for (const it of items) {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasW;
+        canvas.height = canvasH;
+        // White background
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0,0,canvas.width,canvas.height);
+        }
+
+        // Create an inner canvas for barcode drawing at higher scale to control module width
+        const barcodeCanvas = document.createElement('canvas');
+        // width in pixels set to canvasW minus paddings
+        barcodeCanvas.width = Math.round(canvasW * 0.9);
+        barcodeCanvas.height = Math.round(canvasH * 0.6);
+
+        try {
+          JsBarcode(barcodeCanvas, it.codigo, {
+            format: 'CODE128',
+            // calculate module width so barcode fits the canvas width
+            width: Math.max(1, Math.floor(barcodeCanvas.width / (it.codigo.length * 24))),
+            height: Math.floor(barcodeCanvas.height * 0.9),
+            displayValue: false,
+            margin: 0
+          });
+        } catch (err) {
+          console.error('JsBarcode error for', it.codigo, err);
+        }
+
+        // Draw barcodeCanvas into final canvas centered
+        if (ctx) {
+          const bx = Math.round((canvas.width - barcodeCanvas.width) / 2);
+          const by = Math.round(canvas.height * 0.12);
+          ctx.drawImage(barcodeCanvas, bx, by, barcodeCanvas.width, barcodeCanvas.height);
+
+          // Draw human-readable code below barcode
+          ctx.fillStyle = '#000000';
+          ctx.font = `${Math.round(dpi * 0.12)}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.fillText(it.codigo, canvas.width / 2, by + barcodeCanvas.height + Math.round(dpi * 0.04));
+
+          // Draw labels (nombre / almacen)
+          ctx.font = `${Math.round(dpi * 0.07)}px sans-serif`;
+          ctx.fillText((it.nombre || '').toUpperCase(), canvas.width / 2, canvas.height - Math.round(dpi * 0.12));
+          if (it.almacen) {
+            ctx.fillText((`ALM: ${it.almacen}`).toUpperCase(), canvas.width / 2, canvas.height - Math.round(dpi * 0.03));
+          }
+        }
+
+        // Convert to data URL (PNG) for printing
+        const dataUrl = canvas.toDataURL('image/png');
+        images.push(dataUrl);
+      }
+
+      // Open a new window and write printable HTML with images sized in inches
+      const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+      if (!printWindow) {
+        toast.error('No se pudo abrir la ventana de impresión (bloqueador?)');
+        return;
+      }
+
+      const doc = printWindow.document;
+      const style = `
+        <style>
+          @page { size: letter; margin: 6mm; }
+          body{ font-family: Arial, Helvetica, sans-serif; margin:0; padding:0; }
+          .label{ width: ${widthIn}in; height: ${heightIn}in; display:inline-block; margin:0.08in; box-sizing:border-box; border:1px solid #fff; }
+          .label img{ width: ${widthIn}in; height: ${heightIn}in; object-fit:contain; display:block; }
+          .sheet{ width:100%; display:flex; flex-wrap:wrap; justify-content:flex-start; align-items:flex-start; }
+        </style>
+      `;
+
+      const bodyHtml = `
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          ${style}
+        </head>
+        <body>
+          <div class="sheet">
+            ${images.map(img => `<div class="label"><img src="${img}" /></div>`).join('')}
+          </div>
+        </body>
+        </html>
+      `;
+
+      doc.open();
+      doc.write(bodyHtml);
+      doc.close();
+
+      // Give window a moment to render
+      setTimeout(() => {
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } catch (err) {
+          console.error('Error printing window:', err);
+        }
+      }, 500);
+
+    } catch (err) {
+      console.error('Error generating printable window:', err);
+      toast.error('Error al generar el PDF de etiquetas');
+    }
   };
 
   const fetchBoxes = async () => {
