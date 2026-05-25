@@ -306,9 +306,9 @@ export default function AlmacenView() {
     try {
       // Create canvases and render barcodes at 300 DPI target for crisp PDF output
       const dpi = 300;
-      // Label size: 3cm x 1.5cm -> convert to inches
-      const widthIn = 3 / 2.54; // ~1.1811 in
-      const heightIn = 1.5 / 2.54; // ~0.59055 in
+      // Label size: 3.3cm x 1.7cm -> convert to inches
+      const widthIn = 3.3 / 2.54; // ~1.299 in
+      const heightIn = 1.7 / 2.54; // ~0.669 in
       const canvasW = Math.round(widthIn * dpi);
       const canvasH = Math.round(heightIn * dpi);
 
@@ -392,12 +392,12 @@ export default function AlmacenView() {
       const doc = printWindow.document;
       const style = `
         <style>
-          @page { size: letter; margin: 6mm; }
-          body{ font-family: Arial, Helvetica, sans-serif; margin:0; padding:6mm; }
-          /* Force 4 labels per row: each label 3cm width + small gap */
+          @page { size: letter; margin: 5mm; }
+          body{ font-family: Arial, Helvetica, sans-serif; margin:0; padding:4mm; }
+          /* Force 4 labels per row: each label 3.3cm width + minimal gap */
           .sheet{ width:100%; display:flex; flex-wrap:wrap; justify-content:flex-start; align-items:flex-start; }
-          .label{ width: 3cm; height: 1.5cm; display:inline-block; margin: 0.2cm; box-sizing:border-box; }
-          .label img{ width: 3cm; height: 1.5cm; object-fit:contain; display:block; }
+          .label{ width: 3.3cm; height: 1.7cm; display:inline-block; margin: 0.08cm; box-sizing:border-box; }
+          .label img{ width: 3.3cm; height: 1.7cm; object-fit:contain; display:block; }
         </style>
       `;
 
@@ -1532,6 +1532,7 @@ export default function AlmacenView() {
               <style>{`
                 @media screen {
                   .print-only {
+                    display: none !important;
                     position: absolute !important;
                     left: -9999px !important;
                     top: -9999px !important;
