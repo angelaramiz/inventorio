@@ -147,6 +147,16 @@ export default function InventoryControlView({ userRole }: Props) {
       return;
     }
 
+    // Buscar sección directamente por nombre/código (ej: AN0RPA01)
+    const sectionObjByName = sections.find(s => s.nombre.toLowerCase() === code.toLowerCase().trim());
+    if (sectionObjByName) {
+      setActiveSection(sectionObjByName);
+      setSelectedZone(null); // Reset active box
+      setBoxProducts([]);
+      toast.success(`Sección escaneada: ${sectionObjByName.nombre.toUpperCase()}`);
+      return;
+    }
+
     // Otherwise, check if it's a box SKU or box number
     const boxObj = zones.find(
       b => b.sku?.toLowerCase() === code.toLowerCase() || 

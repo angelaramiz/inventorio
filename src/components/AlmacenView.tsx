@@ -128,6 +128,8 @@ export default function AlmacenView() {
   const [newSectionMarca, setNewSectionMarca] = useState<string>("todos");
   
   const [activeBarcodeSection, setActiveBarcodeSection] = useState<any | null>(null);
+  const [showBatchPrintModal, setShowBatchPrintModal] = useState(false);
+  const [isPrintingLabels, setIsPrintingLabels] = useState(false);
   
   // Data lists
   const [zones, setZones] = useState<WarehouseZone[]>([]);
@@ -188,7 +190,10 @@ export default function AlmacenView() {
         try {
           const element = document.getElementById("section-barcode-svg");
           if (element) {
-            JsBarcode(element, `SEC-${activeBarcodeSection.id_zona_seccion}`, {
+            const barcodeVal = /^[A-Z0-9]+$/i.test(activeBarcodeSection.nombre) 
+              ? activeBarcodeSection.nombre.toUpperCase() 
+              : `SEC-${activeBarcodeSection.id_zona_seccion}`;
+            JsBarcode(element, barcodeVal, {
               format: "CODE128",
               lineColor: "#000",
               width: 2.2,
@@ -203,6 +208,61 @@ export default function AlmacenView() {
       return () => clearTimeout(timer);
     }
   }, [activeBarcodeSection]);
+
+  // Clean up print classes on afterprint
+  useEffect(() => {
+    const handleAfterPrint = () => {
+      document.body.classList.remove("print-report", "print-single-label", "print-batch-labels");
+      setIsPrintingLabels(false);
+    };
+    window.addEventListener("afterprint", handleAfterPrint);
+    return () => window.removeEventListener("afterprint", handleAfterPrint);
+  }, []);
+
+  // Generate batch barcodes when showBatchPrintModal is true
+  useEffect(() => {
+    if (showBatchPrintModal && sections.length > 0) {
+      const timer = setTimeout(() => {
+        sections.forEach((section) => {
+          const element = document.getElementById(`batch-barcode-svg-${section.id_zona_seccion}`);
+          if (element) {
+            const barcodeVal = /^[A-Z0-9]+$/i.test(section.nombre) 
+              ? section.nombre.toUpperCase() 
+              : `SEC-${section.id_zona_seccion}`;
+            try {
+              JsBarcode(element, barcodeVal, {
+                format: "CODE128",
+                lineColor: "#000",
+                width: 2.2,
+                height: 45,
+                displayValue: false,
+                margin: 0
+              });
+            } catch (err) {
+              console.error(`Error generating batch barcode for ${section.nombre}:`, err);
+            }
+          }
+        });
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [showBatchPrintModal, sections]);
+
+  const handlePrintSingleLabel = () => {
+    setIsPrintingLabels(true);
+    document.body.classList.add("print-single-label");
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
+  const handlePrintBatchLabels = () => {
+    setIsPrintingLabels(true);
+    document.body.classList.add("print-batch-labels");
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
 
   const fetchBoxes = async () => {
     try {
@@ -1159,7 +1219,12 @@ export default function AlmacenView() {
                     Descargar PDF
                   </Button>
                   <Button
-                    onClick={() => window.print()}
+                    onClick={() => {
+                      document.body.classList.add("print-report");
+                      setTimeout(() => {
+                        window.print();
+                      }, 50);
+                    }}
                     className="rounded-xl h-10 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5"
                   >
                     <Printer size={14} />
@@ -1177,36 +1242,31 @@ export default function AlmacenView() {
 
                 @media print {
                   body * {
-                    visibility: hidden;
+                    visibility: hidden !important;
                   }
-                  #report-print-area, #report-print-area * {
-                    visibility: visible;
+                  
+                  /* Mode: Print Report */
+                  body.print-report #report-print-area, 
+                  body.print-report #report-print-area * {
+                    visibility: visible !important;
                   }
-                  #report-print-area {
-                    position: absolute;
-                    left: 0;
-                    top: 0;
-                    width: 100%;
+                  body.print-report #report-print-area {
+                    position: absolute !important;
+                    left: 0 !important;
+                    top: 0 !important;
+                    width: 100% !important;
                     padding: 0 !important;
                     margin: 0 !important;
                   }
-                  .print-only {
-                    display: block !important;
-                  }
-                  tr {
+                  body.print-report tr {
                     page-break-inside: avoid !important;
                     break-inside: avoid !important;
                   }
-                }
-
-                /* Styles for print output and direct pdf generation */
-                @media print {
-                  #report-print-area {
+                  body.print-report #report-print-area {
                     background-color: white !important;
                     color: black !important;
                   }
-                  /* Force light theme variables and overrides */
-                  :root, .dark, body {
+                  body.print-report :root, body.print-report .dark, body.print-report body {
                     --background: #ffffff !important;
                     --foreground: #252525 !important;
                     --card: #ffffff !important;
@@ -1215,22 +1275,114 @@ export default function AlmacenView() {
                     --muted-foreground: #8e8e8e !important;
                     --border: #ebebeb !important;
                   }
-                  #report-print-area .bg-white,
-                  #report-print-area .bg-neutral-50\/30,
-                  #report-print-area .bg-neutral-50\/50,
-                  #report-print-area table,
-                  #report-print-area tr,
-                  #report-print-area td {
+                  body.print-report #report-print-area .bg-white,
+                  body.print-report #report-print-area .bg-neutral-50\/30,
+                  body.print-report #report-print-area .bg-neutral-50\/50,
+                  body.print-report #report-print-area table,
+                  body.print-report #report-print-area tr,
+                  body.print-report #report-print-area td {
                     background-color: white !important;
                     color: black !important;
                     border-color: #e5e7eb !important;
                   }
-                  #report-print-area svg g,
-                  #report-print-area svg rect {
+                  body.print-report #report-print-area svg g,
+                  body.print-report #report-print-area svg rect {
                     fill: black !important;
                   }
-                  #report-print-area svg text {
+                  body.print-report #report-print-area svg text {
                     fill: black !important;
+                  }
+
+                  /* Mode: Single Label (4" x 1.5") */
+                  body.print-single-label #section-barcode-print-area,
+                  body.print-single-label #section-barcode-print-area * {
+                    visibility: visible !important;
+                  }
+                  body.print-single-label #section-barcode-print-area {
+                    position: absolute !important;
+                    left: 0 !important;
+                    top: 0 !important;
+                    width: 4in !important;
+                    height: 1.5in !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    background: white !important;
+                    color: black !important;
+                    box-sizing: border-box !important;
+                    border: none !important;
+                    box-shadow: none !important;
+                  }
+                  body.print-single-label #section-barcode-print-area svg {
+                    max-height: 0.65in !important;
+                    width: auto !important;
+                  }
+
+                  /* Mode: Batch Labels (4" x 1.5") */
+                  body.print-batch-labels #batch-barcodes-print-area,
+                  body.print-batch-labels #batch-barcodes-print-area * {
+                    visibility: visible !important;
+                  }
+                  body.print-batch-labels #batch-barcodes-print-area {
+                    position: absolute !important;
+                    left: 0 !important;
+                    top: 0 !important;
+                    width: 4in !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    display: block !important;
+                  }
+                  body.print-batch-labels .batch-print-label {
+                    width: 4in !important;
+                    height: 1.5in !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                    page-break-after: always !important;
+                    break-after: page !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    background: white !important;
+                    color: black !important;
+                    box-sizing: border-box !important;
+                    overflow: hidden !important;
+                    border: none !important;
+                  }
+                  body.print-batch-labels .batch-print-label svg {
+                    max-height: 0.65in !important;
+                    width: auto !important;
+                  }
+
+                  body.print-single-label #section-barcode-print-area span,
+                  body.print-batch-labels .batch-print-label span {
+                    font-family: monospace !important;
+                    line-height: 1.1 !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    display: block !important;
+                    color: black !important;
+                  }
+                  body.print-single-label #section-barcode-print-area .barcode-text,
+                  body.print-batch-labels .batch-print-label .barcode-text {
+                    font-size: 11pt !important;
+                    font-weight: 900 !important;
+                    letter-spacing: 0.1em !important;
+                    margin-top: 2px !important;
+                  }
+                  body.print-single-label #section-barcode-print-area .label-details,
+                  body.print-batch-labels .batch-print-label .label-details {
+                    font-size: 8pt !important;
+                    font-weight: 750 !important;
+                    text-transform: uppercase !important;
+                    margin-top: 1px !important;
+                  }
+
+                  .print-only {
+                    display: block !important;
                   }
                 }
 
@@ -1627,11 +1779,22 @@ export default function AlmacenView() {
         {/* Right Column: Tables */}
         <div className="lg:col-span-8">
           <Card className="border border-neutral-100 shadow-xl rounded-[2rem] overflow-hidden bg-white">
-            <CardHeader className="bg-neutral-50/40 pb-3 border-b">
-              <CardTitle className="text-lg font-bold">Conceptos Registrados</CardTitle>
-              <CardDescription>
-                {activeTab === "zonas" ? "Zonas principales de almacenamiento" : activeTab === "pasillos" ? "Pasillos y zonas intermedias del almacén" : "Secciones y pasillos asignados a almacenes"}
-              </CardDescription>
+            <CardHeader className="bg-neutral-50/40 pb-3 border-b flex flex-row items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg font-bold">Conceptos Registrados</CardTitle>
+                <CardDescription>
+                  {activeTab === "zonas" ? "Zonas principales de almacenamiento" : activeTab === "pasillos" ? "Pasillos y zonas intermedias del almacén" : "Secciones y pasillos asignados a almacenes"}
+                </CardDescription>
+              </div>
+              {activeTab === "secciones" && sections.length > 0 && (
+                <Button
+                  onClick={() => setShowBatchPrintModal(true)}
+                  className="rounded-xl h-9 bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shrink-0"
+                >
+                  <Printer size={14} />
+                  Imprimir Lote (4" x 1.5")
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="p-0">
               
@@ -2016,13 +2179,15 @@ export default function AlmacenView() {
             <div className="flex flex-col items-center justify-center p-6 bg-neutral-50 rounded-2xl border border-neutral-100 space-y-4 my-2">
               <div className="bg-white p-6 rounded-xl border shadow-sm flex flex-col items-center select-none" id="section-barcode-print-area">
                 <svg id="section-barcode-svg" className="max-w-full"></svg>
-                <span className="text-[10px] font-black uppercase text-neutral-500 mt-2 font-mono tracking-widest">
-                  {`SEC-${activeBarcodeSection.id_zona_seccion}`}
+                <span className="barcode-text text-[10px] font-black uppercase text-neutral-500 mt-2 font-mono tracking-widest">
+                  {/^[A-Z0-9]+$/i.test(activeBarcodeSection.nombre) 
+                    ? activeBarcodeSection.nombre.toUpperCase() 
+                    : `SEC-${activeBarcodeSection.id_zona_seccion}`}
                 </span>
-                <span className="text-xs font-black text-neutral-800 uppercase mt-0.5">
+                <span className="label-details text-xs font-black text-neutral-800 uppercase mt-0.5">
                   SECCIÓN: {activeBarcodeSection.nombre}
                 </span>
-                <span className="text-[9px] font-extrabold text-neutral-400 uppercase mt-0.5">
+                <span className="label-details text-[9px] font-extrabold text-neutral-400 uppercase mt-0.5">
                   ALMACÉN: {activeBarcodeSection.almacen_nombre}
                 </span>
               </div>
@@ -2031,7 +2196,7 @@ export default function AlmacenView() {
                 <Button variant="outline" onClick={() => setActiveBarcodeSection(null)} className="flex-1 rounded-xl h-10 text-xs font-bold">
                   Cerrar
                 </Button>
-                <Button onClick={() => window.print()} className="flex-1 rounded-xl h-10 bg-neutral-950 hover:bg-neutral-850 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md">
+                <Button onClick={handlePrintSingleLabel} className="flex-1 rounded-xl h-10 bg-neutral-950 hover:bg-neutral-850 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md">
                   <Printer size={14} />
                   Imprimir Etiqueta
                 </Button>
@@ -2040,6 +2205,87 @@ export default function AlmacenView() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Batch Barcode Print Dialog */}
+      <Dialog open={showBatchPrintModal} onOpenChange={setShowBatchPrintModal}>
+        <DialogContent className="max-w-md rounded-3xl p-6 bg-white border border-neutral-100 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase text-neutral-950 flex items-center gap-2">
+              <Printer size={20} className="text-neutral-700" />
+              Imprimir Lote de Secciones
+            </DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">
+              Se generarán e imprimirán etiquetas para las {sections.length} secciones registradas en formato 4" x 1.5".
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col space-y-4 my-2">
+            <div className="max-h-60 overflow-y-auto border border-neutral-100 rounded-xl p-3 bg-neutral-50/50 space-y-2">
+              {sections.map((section: any) => (
+                <div key={section.id_zona_seccion} className="flex justify-between items-center bg-white p-2 rounded-lg border text-xs shadow-sm">
+                  <span className="font-extrabold text-neutral-800 uppercase">{section.nombre}</span>
+                  <span className="font-mono text-[10px] text-neutral-500 font-bold bg-neutral-100 px-2 py-0.5 rounded">
+                    {/^[A-Z0-9]+$/i.test(section.nombre) 
+                      ? section.nombre.toUpperCase() 
+                      : `SEC-${section.id_zona_seccion}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-2 w-full">
+              <Button variant="outline" onClick={() => setShowBatchPrintModal(false)} className="flex-1 rounded-xl h-10 text-xs font-bold">
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handlePrintBatchLabels} 
+                className="flex-1 rounded-xl h-10 bg-neutral-950 hover:bg-neutral-850 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md"
+              >
+                <Printer size={14} />
+                Confirmar e Imprimir
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Batch Print Area (Hidden on screen, visible during print) */}
+      <div id="batch-barcodes-print-area" className="print-only">
+        {sections.map((section: any) => {
+          const barcodeVal = /^[A-Z0-9]+$/i.test(section.nombre) 
+            ? section.nombre.toUpperCase() 
+            : `SEC-${section.id_zona_seccion}`;
+          return (
+            <div 
+              key={section.id_zona_seccion} 
+              className="batch-print-label"
+            >
+              <svg id={`batch-barcode-svg-${section.id_zona_seccion}`}></svg>
+              <span className="barcode-text">
+                {barcodeVal}
+              </span>
+              <span className="label-details">
+                SECCIÓN: {section.nombre.toUpperCase()}
+              </span>
+              <span className="label-details">
+                ALMACÉN: {section.almacen_nombre.toUpperCase()}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Dynamic Style Injection for 4" x 1.5" Print Size */}
+      {isPrintingLabels && (
+        <style>{`
+          @media print {
+            @page {
+              size: 4in 1.5in !important;
+              margin: 0 !important;
+            }
+          }
+        `}</style>
+      )}
     </div>
   );
 }

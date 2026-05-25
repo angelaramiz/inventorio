@@ -30,7 +30,6 @@ export default function POSView() {
   
   const [selectedBox, setSelectedBox] = useState<any | null>(null);
   const [sellQty, setSellQty] = useState(1);
-  const [sellPrice, setSellPrice] = useState(500); // Default price for fashion items, fully editable
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [vendedorId, setVendedorId] = useState("Vendedor 1");
@@ -96,7 +95,7 @@ export default function POSView() {
       tipo: product.tipo,
       marca_sub: product.marca_sub,
       cantidad: sellQty,
-      precio_unitario: sellPrice,
+      precio_unitario: 0,
       caja_origen_id: selectedBox.cajas.id_caja,
       caja_origen_nombre: selectedBox.cajas.numero_caja,
       disponible: selectedBox.cantidad
@@ -110,18 +109,18 @@ export default function POSView() {
       setCart(prev => [...prev, cartItem]);
     }
 
-    toast.success("Producto agregado al carrito de venta");
+    toast.success("Producto agregado a la salida");
     setSearchResult(null);
     setSearchQuery("");
   };
 
   const removeFromCart = (index: number) => {
     setCart(prev => prev.filter((_, idx) => idx !== index));
-    toast.info("Producto eliminado del carrito");
+    toast.info("Producto eliminado de la lista");
   };
 
-  const calculateSubtotal = () => {
-    return cart.reduce((sum, item) => sum + (item.cantidad * item.precio_unitario), 0);
+  const calculateTotalUnits = () => {
+    return cart.reduce((sum, item) => sum + item.cantidad, 0);
   };
 
   const handleCheckout = async () => {
@@ -140,11 +139,11 @@ export default function POSView() {
 
       if (resp.ok) {
         const data = await resp.json();
-        toast.success(`Venta procesada con éxito! ID Transacción: #${data.saleId}`);
+        toast.success(`Salida procesada con éxito! ID Registro: #${data.saleId}`);
         setCart([]);
       } else {
         const err = await resp.json();
-        toast.error(err.error || "Error al realizar venta");
+        toast.error(err.error || "Error al realizar salida");
       }
     } catch (e) {
       toast.error("Error de conexión con el servidor");
@@ -159,8 +158,8 @@ export default function POSView() {
       <div className="lg:col-span-3 space-y-6">
         <div className="bg-white p-5 md:p-6 rounded-3xl border border-neutral-100 shadow-sm space-y-4">
           <div>
-            <h2 className="text-2xl font-black uppercase text-neutral-900 leading-none">PUNTO DE VENTA (POS)</h2>
-            <p className="text-xs text-neutral-500 font-medium mt-1">Registra transacciones de salida a piso de venta</p>
+            <h2 className="text-2xl font-black uppercase text-neutral-900 leading-none">REGISTRO DE SALIDAS (POS)</h2>
+            <p className="text-xs text-neutral-500 font-medium mt-1">Registra la salida física de prendas del almacén al piso de venta</p>
           </div>
 
           <div className="flex gap-2 items-center">
@@ -243,44 +242,34 @@ export default function POSView() {
                       onChange={e => setSelectedBox(e.target.value ? JSON.parse(e.target.value) : null)}
                       className="w-full rounded-2xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
                     >
-                      {searchResult.boxes.map((b: any) => (
-                        <option key={b.cajas.id_caja} value={JSON.stringify(b)}>
-                          Caja {b.cajas.numero_caja} - Ubicación: {b.cajas.almacen_nombre || "Sin almacén"} {b.cajas.seccion_nombre ? `| ${b.cajas.seccion_nombre}` : ""} (Disponible: {b.cantidad})
-                        </option>
-                      ))}
+                      {searchResult.boxes.map((b: any) => {
+                        const pathText = `${b.cajas.almacen_nombre || "Sin almacén"}${b.cajas.pasillo_nombre && b.cajas.pasillo_nombre !== "Sin pasillo" ? ` > ${b.cajas.pasillo_nombre}` : ""}${b.cajas.seccion_nombre ? ` > ${b.cajas.seccion_nombre}` : ""}`;
+                        return (
+                          <option key={b.cajas.id_caja} value={JSON.stringify(b)}>
+                            Caja {b.cajas.numero_caja} - Ubicación: {pathText} (Disponible: {b.cantidad})
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] uppercase font-bold text-neutral-400 block">Precio Unitario ($)</label>
-                      <Input 
-                        type="number"
-                        min={0}
-                        value={sellPrice}
-                        onChange={e => setSellPrice(parseFloat(e.target.value) || 0)}
-                        className="rounded-xl h-11 text-center font-bold"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] uppercase font-bold text-neutral-400 block">Cantidad a Vender</label>
-                      <Input 
-                        type="number"
-                        min={1}
-                        max={selectedBox ? selectedBox.cantidad : 1}
-                        value={sellQty}
-                        onChange={e => setSellQty(parseInt(e.target.value) || 1)}
-                        className="rounded-xl h-11 text-center font-bold"
-                      />
-                    </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-bold text-neutral-400 block">Cantidad a Retirar</label>
+                    <Input 
+                      type="number"
+                      min={1}
+                      max={selectedBox ? selectedBox.cantidad : 1}
+                      value={sellQty}
+                      onChange={e => setSellQty(parseInt(e.target.value) || 1)}
+                      className="rounded-xl h-11 text-center font-bold"
+                    />
                   </div>
 
                   <Button 
                     onClick={handleAddToCart}
                     className="w-full rounded-2xl h-12 bg-neutral-950 hover:bg-neutral-800 text-white font-bold text-sm gap-2"
                   >
-                    <ShoppingCart size={18} /> Agregar a Ticket
+                    <ShoppingCart size={18} /> Agregar a Lista de Salida
                   </Button>
                 </div>
               ) : (
@@ -300,7 +289,7 @@ export default function POSView() {
           <CardHeader className="bg-neutral-950 border-b border-neutral-800 pb-4 shrink-0">
             <CardTitle className="text-lg flex items-center gap-2 font-bold uppercase">
               <ShoppingCart size={20} className="text-amber-400" />
-              Ticket de Salida
+              Salida de Inventario
             </CardTitle>
             <CardDescription className="text-neutral-400">
               Resumen de prendas a retirar de inventario
@@ -311,8 +300,8 @@ export default function POSView() {
             {cart.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center py-20 text-neutral-500 text-center gap-3">
                 <ShoppingCart size={40} className="opacity-25" />
-                <p className="font-semibold text-sm">Carrito vacío</p>
-                <p className="text-[11px] max-w-[200px]">Busca un producto y agrégalo para armar el ticket de venta</p>
+                <p className="font-semibold text-sm">Lista de salida vacía</p>
+                <p className="text-[11px] max-w-[200px]">Busca un producto y agrégalo para armar el registro de salida</p>
               </div>
             ) : (
               cart.map((item, idx) => (
@@ -331,8 +320,9 @@ export default function POSView() {
 
                   <div className="flex items-center gap-4">
                     <div className="text-right shrink-0">
-                      <p className="text-xs text-neutral-400 font-bold">{item.cantidad} x ${item.precio_unitario}</p>
-                      <p className="text-sm font-black text-emerald-400">${item.cantidad * item.precio_unitario}</p>
+                      <Badge className="bg-amber-400/10 text-amber-400 border border-amber-400/20 font-black text-xs px-2.5 py-1 rounded-lg">
+                        {item.cantidad} {item.cantidad === 1 ? "unidad" : "unidades"}
+                      </Badge>
                     </div>
 
                     <button 
@@ -351,20 +341,20 @@ export default function POSView() {
           {/* Footer del Ticket */}
           <div className="bg-neutral-950 border-t border-neutral-800 p-5 space-y-4 shrink-0">
             <div className="flex justify-between items-center">
-              <span className="text-neutral-400 font-bold text-xs uppercase">Total Venta:</span>
-              <span className="text-2xl font-black text-emerald-400">${calculateSubtotal()}</span>
+              <span className="text-neutral-400 font-bold text-xs uppercase">Total Unidades:</span>
+              <span className="text-2xl font-black text-amber-400">{calculateTotalUnits()} {calculateTotalUnits() === 1 ? "prenda" : "prendas"}</span>
             </div>
 
             <Button
               disabled={cart.length === 0 || checkoutLoading}
               onClick={handleCheckout}
-              className="w-full rounded-2xl h-12 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-sm gap-2"
+              className="w-full rounded-2xl h-12 bg-amber-500 hover:bg-amber-600 text-neutral-950 font-black text-sm gap-2 shadow-lg shadow-amber-500/10"
             >
               {checkoutLoading ? (
                 <Loader2 className="animate-spin" size={18} />
               ) : (
                 <>
-                  <CreditCard size={18} /> Finalizar Salida
+                  <CheckCircle2 size={18} /> Finalizar Registro de Salida
                 </>
               )}
             </Button>

@@ -1558,7 +1558,7 @@ app.post("/api/containers/transfer", async (req, res) => {
   }
 });
 
-// POST /api/pos/sell - Checkout items in POS
+// POST /api/pos/sell - Checkout items in POS (Registro de Salida)
 app.post("/api/pos/sell", async (req, res) => {
   try {
     const supabase = getSupabase();
@@ -1568,16 +1568,10 @@ app.post("/api/pos/sell", async (req, res) => {
       return res.status(400).json({ error: "El carrito está vacío" });
     }
     
-    // Calcular total
-    let total = 0;
-    for (const item of items) {
-      total += (item.cantidad * item.precio_unitario);
-    }
-    
-    // 1. Crear Venta
+    // 1. Crear Registro de Salida (precio/total = 0.00 ya que no es venta comercial)
     const { data: sale, error: sErr } = await supabase
       .from("ventas")
-      .insert([{ vendedor_id, total }])
+      .insert([{ vendedor_id, total: 0.00 }])
       .select();
       
     if (sErr || !sale) throw sErr;
@@ -1591,40 +1585,83 @@ app.post("/api/pos/sell", async (req, res) => {
           venta_id: saleId,
           producto_id: item.producto_id,
           cantidad: item.cantidad,
-          precio_unitario: item.precio_unitario
+          precio_unitario: 0.00
         }]);
         
-      // Intentar descontar de la caja activa del producto
-      const { data: boxItems } = await supabase
-        .from("caja_productos")
-        .select("*")
-        .eq("id_producto", item.producto_id)
-        .order("cantidad", { ascending: false });
-        
       let qtyToDeduct = item.cantidad;
-      if (boxItems && boxItems.length > 0) {
-        for (const boxItem of boxItems) {
-          if (qtyToDeduct <= 0) break;
-          
-          if (boxItem.cantidad <= qtyToDeduct) {
-            qtyToDeduct -= boxItem.cantidad;
+      
+      // A. Intentar descontar primero de la caja específica seleccionada
+      if (item.caja_origen_id) {
+        const { data: specificBoxItem } = await supabase
+          .from("caja_productos")
+          .select("*")
+          .eq("id_producto", item.producto_id)
+          .eq("id_caja", item.caja_origen_id)
+          .maybeSingle();
+
+        if (specificBoxItem) {
+          if (specificBoxItem.cantidad <= qtyToDeduct) {
+            qtyToDeduct -= specificBoxItem.cantidad;
             // Eliminar relación
             await supabase
               .from("caja_productos")
               .delete()
-              .eq("id_relacion", boxItem.id_relacion);
+              .eq("id_relacion", specificBoxItem.id_relacion);
               
             // Actualizar estado de caja a vacía si no queda nada
-            const { data: rem } = await supabase.from("caja_productos").select("id_relacion").eq("id_caja", boxItem.id_caja);
+            const { data: rem } = await supabase
+              .from("caja_productos")
+              .select("id_relacion")
+              .eq("id_caja", specificBoxItem.id_caja);
             if (!rem || rem.length === 0) {
-              await supabase.from("cajas").update({ estado: "vacia" }).eq("id_caja", boxItem.id_caja);
+              await supabase.from("cajas").update({ estado: "vacia" }).eq("id_caja", specificBoxItem.id_caja);
             }
           } else {
             await supabase
               .from("caja_productos")
-              .update({ cantidad: boxItem.cantidad - qtyToDeduct })
-              .eq("id_relacion", boxItem.id_relacion);
+              .update({ cantidad: specificBoxItem.cantidad - qtyToDeduct })
+              .eq("id_relacion", specificBoxItem.id_relacion);
             qtyToDeduct = 0;
+          }
+        }
+      }
+
+      // B. Si todavía queda cantidad por descontar (o no se especificó caja), buscar en otras cajas
+      if (qtyToDeduct > 0) {
+        const { data: boxItems } = await supabase
+          .from("caja_productos")
+          .select("*")
+          .eq("id_producto", item.producto_id)
+          .order("cantidad", { ascending: false });
+          
+        if (boxItems && boxItems.length > 0) {
+          for (const boxItem of boxItems) {
+            if (qtyToDeduct <= 0) break;
+            
+            // Ignorar la caja ya procesada
+            if (item.caja_origen_id && boxItem.id_caja === item.caja_origen_id) continue;
+            
+            if (boxItem.cantidad <= qtyToDeduct) {
+              qtyToDeduct -= boxItem.cantidad;
+              await supabase
+                .from("caja_productos")
+                .delete()
+                .eq("id_relacion", boxItem.id_relacion);
+                
+              const { data: rem } = await supabase
+                .from("caja_productos")
+                .select("id_relacion")
+                .eq("id_caja", boxItem.id_caja);
+              if (!rem || rem.length === 0) {
+                await supabase.from("cajas").update({ estado: "vacia" }).eq("id_caja", boxItem.id_caja);
+              }
+            } else {
+              await supabase
+                .from("caja_productos")
+                .update({ cantidad: boxItem.cantidad - qtyToDeduct })
+                .eq("id_relacion", boxItem.id_relacion);
+              qtyToDeduct = 0;
+            }
           }
         }
       }

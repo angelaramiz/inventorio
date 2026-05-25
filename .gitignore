@@ -7,7 +7,7 @@ coverage/
 .env
 !.env.example
 !.env.production
-
+extras/
 # Development
 .vscode/
 .idea/
