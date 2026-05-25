@@ -4,13 +4,21 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { AlertCircle, CheckCircle2, Box, Package, Camera, Power, RefreshCw, Scan } from "lucide-react";
+import { AlertCircle, CheckCircle2, Box, Package, Camera, Power, RefreshCw, Scan, MapPin, Home } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ProductQuickRegister from "./ProductQuickRegister";
 import { Caja, Producto } from "../types";
 import { Input } from "@/components/ui/input";
 
 export default function ScannerView() {
+  const [activeMode, setActiveMode] = useState<"caja" | "seccion" | "almacen">("caja");
+  const [selectedSectionId, setSelectedSectionId] = useState("");
+  const [selectedAlmacenId, setSelectedAlmacenId] = useState("");
+  const [zones, setZones] = useState<any[]>([]);
+  const [sections, setSections] = useState<any[]>([]);
+  const [cajas, setCajas] = useState<any[]>([]);
+  const [resolvedTargetCaja, setResolvedTargetCaja] = useState<Caja | null>(null);
+
   const [isScannerActive, setIsScannerActive] = useState(false);
   const [scannedResult, setScannedResult] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
@@ -35,12 +43,57 @@ export default function ScannerView() {
     setManualQty(1);
   };
 
+  const fetchLocations = async () => {
+    try {
+      const [zonesResp, sectionsResp] = await Promise.all([
+        fetch("/api/almacen/zonas"),
+        fetch("/api/almacen/secciones")
+      ]);
+      if (zonesResp.ok && sectionsResp.ok) {
+        const [zonesData, sectionsData] = await Promise.all([
+          zonesResp.json(),
+          sectionsResp.json()
+        ]);
+        setZones(zonesData);
+        setSections(sectionsData);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchCajas = async () => {
+    try {
+      const resp = await fetch("/api/cajas");
+      if (resp.ok) {
+        const data = await resp.json();
+        setCajas(data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     // Cargar la caja seleccionada del localStorage si existe
     const savedCaja = localStorage.getItem("activeCaja");
     if (savedCaja) {
-      setActiveCaja(JSON.parse(savedCaja));
+      const parsed = JSON.parse(savedCaja);
+      setActiveCaja(parsed);
+      setResolvedTargetCaja(parsed);
     }
+
+    const savedSec = localStorage.getItem("activeScannerSectionId");
+    if (savedSec) {
+      setSelectedSectionId(savedSec);
+    }
+    const savedAlm = localStorage.getItem("activeScannerAlmacenId");
+    if (savedAlm) {
+      setSelectedAlmacenId(savedAlm);
+    }
+
+    fetchLocations();
+    fetchCajas();
 
     return () => {
       if (scannerRef.current) {
@@ -58,6 +111,51 @@ export default function ScannerView() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    const updateResolvedTarget = () => {
+      if (activeMode === "caja") {
+        setResolvedTargetCaja(activeCaja);
+      } else if (activeMode === "seccion") {
+        if (selectedSectionId && sections.length > 0) {
+          const secId = parseInt(selectedSectionId);
+          const sec = sections.find(s => s.id_zona_seccion === secId);
+          if (sec) {
+            const nameToMatch = `SECCIÓN: ${sec.nombre.toUpperCase()}`;
+            const existing = cajas.find(c => c.id_zona_seccion === secId && c.numero_caja === nameToMatch);
+            if (existing) {
+              setResolvedTargetCaja(existing);
+            } else {
+              setResolvedTargetCaja(null);
+            }
+          } else {
+            setResolvedTargetCaja(null);
+          }
+        } else {
+          setResolvedTargetCaja(null);
+        }
+      } else if (activeMode === "almacen") {
+        if (selectedAlmacenId && zones.length > 0) {
+          const zoneId = parseInt(selectedAlmacenId);
+          const zone = zones.find(z => z.id_zona_almacen === zoneId);
+          if (zone) {
+            const nameToMatch = `ALMACÉN: ${zone.nombre.toUpperCase()}`;
+            const existing = cajas.find(c => c.id_zona_almacen === zoneId && !c.id_zona_seccion && c.numero_caja === nameToMatch);
+            if (existing) {
+              setResolvedTargetCaja(existing);
+            } else {
+              setResolvedTargetCaja(null);
+            }
+          } else {
+            setResolvedTargetCaja(null);
+          }
+        } else {
+          setResolvedTargetCaja(null);
+        }
+      }
+    };
+    updateResolvedTarget();
+  }, [activeMode, activeCaja, selectedSectionId, selectedAlmacenId, sections, zones, cajas]);
 
   const startScanner = async () => {
     try {
@@ -141,12 +239,101 @@ export default function ScannerView() {
     // console.warn(errorMessage);
   };
 
+  const getOrCreateSectionCaja = async (secId: number) => {
+    const sec = sections.find(s => s.id_zona_seccion === secId);
+    if (!sec) throw new Error("Sección no encontrada");
+    
+    const nameToMatch = `SECCIÓN: ${sec.nombre.toUpperCase()}`;
+    const existing = cajas.find(c => c.id_zona_seccion === secId && c.numero_caja === nameToMatch);
+    if (existing) {
+      return existing;
+    }
+    
+    const resp = await fetch("/api/cajas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        numero_caja: nameToMatch,
+        id_zona_seccion: secId,
+        id_zona_almacen: null
+      })
+    });
+    if (resp.ok) {
+      const newCaja = await resp.json();
+      await fetchCajas();
+      return newCaja;
+    } else {
+      throw new Error("No se pudo crear la caja de sección");
+    }
+  };
+
+  const getOrCreateZoneCaja = async (zoneId: number) => {
+    const zone = zones.find(z => z.id_zona_almacen === zoneId);
+    if (!zone) throw new Error("Zona no encontrada");
+    
+    const nameToMatch = `ALMACÉN: ${zone.nombre.toUpperCase()}`;
+    const existing = cajas.find(c => c.id_zona_almacen === zoneId && !c.id_zona_seccion && c.numero_caja === nameToMatch);
+    if (existing) {
+      return existing;
+    }
+    
+    const resp = await fetch("/api/cajas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        numero_caja: nameToMatch,
+        id_zona_almacen: zoneId,
+        id_zona_seccion: null
+      })
+    });
+    if (resp.ok) {
+      const newCaja = await resp.json();
+      await fetchCajas();
+      return newCaja;
+    } else {
+      throw new Error("No se pudo crear la caja de almacén");
+    }
+  };
+
   const verifyProduct = async (ean: string, qty = 1) => {
-    if (!activeCaja) {
-      toast.error("Selecciona una caja activa primero en la pestaña de Cajas");
-      return;
+    let targetCaja = activeCaja;
+    
+    if (activeMode === "seccion") {
+      if (!selectedSectionId) {
+        toast.error("Selecciona una sección activa primero");
+        return;
+      }
+      setIsChecking(true);
+      try {
+        const box = await getOrCreateSectionCaja(parseInt(selectedSectionId));
+        targetCaja = box;
+      } catch (err: any) {
+        toast.error(err.message || "Error al obtener contenedor de sección");
+        setIsChecking(false);
+        return;
+      }
+    } else if (activeMode === "almacen") {
+      if (!selectedAlmacenId) {
+        toast.error("Selecciona un almacén activo primero");
+        return;
+      }
+      setIsChecking(true);
+      try {
+        const box = await getOrCreateZoneCaja(parseInt(selectedAlmacenId));
+        targetCaja = box;
+      } catch (err: any) {
+        toast.error(err.message || "Error al obtener contenedor de almacén");
+        setIsChecking(false);
+        return;
+      }
+    } else {
+      if (!activeCaja) {
+        toast.error("Selecciona una caja activa primero en la pestaña de Cajas");
+        return;
+      }
     }
 
+    setResolvedTargetCaja(targetCaja);
     setIsChecking(true);
     setPendingQty(qty);
     try {
@@ -158,12 +345,12 @@ export default function ScannerView() {
       if (!data.exists) {
         toast.warning("Producto no encontrado. ¿Registrar ahora?");
         setShowQuickRegister(true);
-      } else if (data.ubicacion && data.ubicacion.numero_caja !== activeCaja.numero_caja) {
+      } else if (data.ubicacion && data.ubicacion.numero_caja !== targetCaja?.numero_caja) {
         // Conflicto de ubicación
         setShowConflictDialog(true);
       } else {
         // Producto existe y no tiene conflicto o ya está en esta caja
-        asignarProducto(data.product.id_producto, false, qty);
+        asignarProducto(data.product.id_producto, false, qty, undefined, targetCaja);
       }
     } catch (error) {
       toast.error("Error al verificar producto");
@@ -182,22 +369,24 @@ export default function ScannerView() {
     }
   };
 
-  const asignarProducto = async (id_producto: number, force = false, qty = 1, accion?: 'mover' | 'agregar') => {
-    if (!activeCaja) return;
+  const asignarProducto = async (id_producto: number, force = false, qty = 1, accion?: 'mover' | 'agregar', customCaja?: Caja | null) => {
+    const targetCaja = customCaja !== undefined ? customCaja : (resolvedTargetCaja || activeCaja);
+    if (!targetCaja) return;
 
     try {
       preventReactivateRef.current = true;
-      const resp = await fetch(`/api/cajas/${activeCaja.id_caja}/asignar`, {
+      const resp = await fetch(`/api/cajas/${targetCaja.id_caja}/asignar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_producto, force, cantidad: qty, accion })
       });
       
       if (resp.ok) {
-        toast.success(accion === 'mover' ? "Producto movido a la caja" : "Producto asignado a la caja");
+        toast.success(accion === 'mover' ? "Producto movido de ubicación" : "Producto asignado correctamente");
         setVerificationResult(null);
         setScannedResult(null);
         setShowConflictDialog(false);
+        fetchCajas(); // Refresca cajas
       } else {
         const errorData = await resp.json();
         toast.error(errorData.error || "Error al asignar");
@@ -207,38 +396,174 @@ export default function ScannerView() {
     }
   };
 
+  const isTargetSelected = () => {
+    if (activeMode === "caja") return !!activeCaja;
+    if (activeMode === "seccion") return !!selectedSectionId;
+    if (activeMode === "almacen") return !!selectedAlmacenId;
+    return false;
+  };
+
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-28 md:pb-0">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 md:p-6 rounded-3xl shadow-sm border border-neutral-100">
         <div>
           <h2 className="text-2xl md:text-3xl font-black tracking-tight uppercase text-neutral-900 leading-none">ESCÁNER</h2>
-          <p className="text-xs md:text-sm text-neutral-500 font-medium mt-1">Sincroniza inventario físico con cajas</p>
+          <p className="text-xs md:text-sm text-neutral-500 font-medium mt-1">Asocia productos a cajas, secciones o almacenes</p>
         </div>
         
-        <div className="flex items-center gap-3 bg-neutral-50 px-4 py-3 rounded-2xl border border-neutral-200">
-          <div className="bg-neutral-900 p-2.5 rounded-xl text-white shadow-lg">
-            <Box size={22} />
-          </div>
-          <div>
-            <p className="text-[9px] uppercase font-black text-neutral-400 tracking-[0.2em]">Caja Receptora</p>
-            <p className="font-black text-neutral-900 leading-none text-xl tracking-tight">
-              {activeCaja ? activeCaja.numero_caja : "---"}
-            </p>
-          </div>
+        {/* Tab switcher for scanner modes */}
+        <div className="flex bg-neutral-100 p-2 md:p-1.5 rounded-2xl border overflow-x-auto max-w-full whitespace-nowrap scrollbar-none flex-row shrink-0 gap-2 md:gap-1 w-full md:w-auto justify-start">
+          <button
+            onClick={() => setActiveMode("caja")}
+            className={`flex items-center gap-2 px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
+              activeMode === "caja"
+                ? "bg-white text-neutral-950 shadow-md"
+                : "text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            <Box size={16} className="md:w-3.5 md:h-3.5" />
+            Cajas (Nivel 4)
+          </button>
+          <button
+            onClick={() => setActiveMode("seccion")}
+            className={`flex items-center gap-2 px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
+              activeMode === "seccion"
+                ? "bg-white text-neutral-950 shadow-md"
+                : "text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            <MapPin size={16} className="md:w-3.5 md:h-3.5" />
+            Secciones (Nivel 3)
+          </button>
+          <button
+            onClick={() => setActiveMode("almacen")}
+            className={`flex items-center gap-2 px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
+              activeMode === "almacen"
+                ? "bg-white text-neutral-950 shadow-md"
+                : "text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            <Home size={16} className="md:w-3.5 md:h-3.5" />
+            Almacenes (Nivel 1)
+          </button>
         </div>
       </div>
 
-      {!activeCaja ? (
+      {/* Target Container Banner */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-neutral-100 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="bg-neutral-900 p-3 rounded-2xl text-white shadow-lg shrink-0">
+            {activeMode === "caja" ? <Box size={24} /> : activeMode === "seccion" ? <MapPin size={24} /> : <Home size={24} />}
+          </div>
+          <div>
+            <p className="text-[10px] uppercase font-black text-neutral-400 tracking-[0.2em]">
+              {activeMode === "caja" ? "Caja Receptora" : activeMode === "seccion" ? "Sección Receptora" : "Almacén Receptor"}
+            </p>
+            <h3 className="font-black text-neutral-900 leading-none text-xl tracking-tight mt-1">
+              {activeMode === "caja" 
+                ? (activeCaja ? activeCaja.numero_caja : "Ninguna seleccionada") 
+                : activeMode === "seccion" 
+                  ? (selectedSectionId 
+                      ? (() => {
+                          const sec = sections.find(s => s.id_zona_seccion === parseInt(selectedSectionId));
+                          return sec ? sec.nombre.toUpperCase() : "No encontrada";
+                        })()
+                      : "Ninguna seleccionada"
+                    )
+                  : (selectedAlmacenId 
+                      ? (zones.find(z => z.id_zona_almacen === parseInt(selectedAlmacenId))?.nombre.toUpperCase() || "No encontrado")
+                      : "Ninguno seleccionado"
+                    )
+              }
+            </h3>
+            {activeMode === "caja" && activeCaja && (
+              <p className="text-[10px] text-neutral-500 font-medium mt-1">
+                📍 {activeCaja.almacen_nombre || "Sin almacén"} 
+                {activeCaja.pasillo_nombre && activeCaja.pasillo_nombre !== "Sin pasillo" ? ` | ${activeCaja.pasillo_nombre}` : ""} 
+                {activeCaja.seccion_nombre ? ` | ${activeCaja.seccion_nombre}` : ""}
+              </p>
+            )}
+            {activeMode === "seccion" && selectedSectionId && (() => {
+              const sec = sections.find(s => s.id_zona_seccion === parseInt(selectedSectionId));
+              return sec ? (
+                <p className="text-[10px] text-neutral-500 font-medium mt-1">
+                  📍 {sec.almacen_nombre || "Sin almacén"} {sec.pasillo_nombre && sec.pasillo_nombre !== "Sin pasillo" ? ` | ${sec.pasillo_nombre}` : ""}
+                </p>
+              ) : null;
+            })()}
+          </div>
+        </div>
+
+        {/* Dynamic Selectors depending on Active Mode */}
+        {activeMode === "seccion" && (
+          <div className="w-full sm:w-64">
+            <select
+              value={selectedSectionId}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedSectionId(val);
+                localStorage.setItem("activeScannerSectionId", val);
+              }}
+              className="w-full rounded-2xl h-11 px-4 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+            >
+              <option value="">Selecciona una sección...</option>
+              {zones.map((zone) => {
+                const zoneSections = sections.filter(s => s.id_zona_almacen === zone.id_zona_almacen);
+                return (
+                  <optgroup key={zone.id_zona_almacen} label={zone.nombre.toUpperCase()}>
+                    {zoneSections.map((sec) => (
+                      <option key={sec.id_zona_seccion} value={sec.id_zona_seccion}>
+                        ↳ {sec.pasillo_nombre && sec.pasillo_nombre !== "Sin pasillo" ? `${sec.pasillo_nombre.toUpperCase()} > ` : ""}{sec.nombre.toUpperCase()}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
+          </div>
+        )}
+
+        {activeMode === "almacen" && (
+          <div className="w-full sm:w-64">
+            <select
+              value={selectedAlmacenId}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedAlmacenId(val);
+                localStorage.setItem("activeScannerAlmacenId", val);
+              }}
+              className="w-full rounded-2xl h-11 px-4 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+            >
+              <option value="">Selecciona un almacén...</option>
+              {zones.map((zone) => (
+                <option key={zone.id_zona_almacen} value={zone.id_zona_almacen}>
+                  {zone.nombre.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {!isTargetSelected() ? (
         <Card className="border-dashed border-2 bg-neutral-50/50">
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <div className="bg-white p-4 rounded-full shadow-sm mb-4">
               <AlertCircle size={32} className="text-amber-500" />
             </div>
-            <h3 className="text-lg font-semibold">Caja no seleccionada</h3>
+            <h3 className="text-lg font-semibold">
+              {activeMode === "caja" ? "Caja no seleccionada" : activeMode === "seccion" ? "Sección no seleccionada" : "Almacén no seleccionado"}
+            </h3>
             <p className="text-neutral-500 max-w-xs mt-1 mb-6">
-              Debes seleccionar o crear una caja en la pestaña 'Cajas' antes de empezar a escanear.
+              {activeMode === "caja" 
+                ? "Debes seleccionar o crear una caja en la pestaña 'Cajas' antes de empezar a escanear."
+                : activeMode === "seccion"
+                  ? "Selecciona una sección activa arriba para asociar los productos directamente a ella."
+                  : "Selecciona un almacén activo arriba para asociar los productos directamente a él."}
             </p>
-            <Button variant="outline" className="rounded-full">Ir a Cajas</Button>
+            {activeMode === "caja" && (
+              <Button variant="outline" className="rounded-full">Ir a Cajas</Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -403,14 +728,14 @@ export default function ScannerView() {
         <ProductQuickRegister 
           ean={scannedResult || ""} 
           defaultQty={pendingQty}
-          defaultTemporada={activeCaja?.temporada_default || undefined}
+          defaultTemporada={resolvedTargetCaja?.temporada_default || undefined}
           onClose={() => {
             setShowQuickRegister(false);
             startScanner();
           }}
           onSuccess={(product, qty) => {
             preventReactivateRef.current = true;
-            asignarProducto(product.id_producto, false, qty);
+            asignarProducto(product.id_producto, false, qty, undefined, resolvedTargetCaja);
             setShowQuickRegister(false);
           }}
         />
@@ -426,29 +751,36 @@ export default function ScannerView() {
           </DialogHeader>
           <div className="py-4 space-y-4 text-center">
             <p className="text-neutral-600 text-sm">
-              Este producto ya se encuentra registrado en otra caja activa:
+              Este producto ya se encuentra registrado en otra caja o ubicación activa:
             </p>
             <div className="bg-neutral-100 p-5 rounded-2xl border border-neutral-200">
-              <p className="text-[10px] uppercase font-black text-neutral-400 tracking-[0.1em] mb-1">Caja Origen</p>
+              <p className="text-[10px] uppercase font-black text-neutral-400 tracking-[0.1em] mb-1">Ubicación Origen</p>
               <p className="text-2xl font-black text-neutral-900 leading-none">{verificationResult?.ubicacion?.numero_caja}</p>
               <Badge className="mt-2 bg-amber-500 border-none hover:bg-amber-600 uppercase text-[9px] font-bold">{verificationResult?.ubicacion?.estado}</Badge>
             </div>
             <p className="text-sm text-neutral-500">
-              ¿Deseas mover el producto a la caja actual <strong>{activeCaja?.numero_caja}</strong>?
+              ¿Deseas mover el producto a la ubicación actual{" "}
+              <strong>
+                {activeMode === "caja" 
+                  ? activeCaja?.numero_caja 
+                  : activeMode === "seccion" 
+                    ? `Sección: ${sections.find(s => s.id_zona_seccion === parseInt(selectedSectionId))?.nombre}` 
+                    : `Almacén: ${zones.find(z => z.id_zona_almacen === parseInt(selectedAlmacenId))?.nombre}`}
+              </strong>?
             </p>
           </div>
           <div className="flex flex-col gap-2 w-full pt-4 border-t border-neutral-100">
             <Button 
-              className="rounded-xl w-full bg-neutral-900 hover:bg-neutral-800 text-white h-11 text-sm font-extrabold transition-all"
-              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'mover')}
+              className="rounded-xl w-full bg-neutral-900 hover:bg-neutral-850 text-white h-11 text-sm font-extrabold transition-all"
+              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'mover', resolvedTargetCaja)}
             >
-              Mover a esta caja
+              Mover a {activeMode === "caja" ? "esta caja" : activeMode === "seccion" ? "esta sección" : "este almacén"}
             </Button>
             <Button 
               className="rounded-xl w-full bg-neutral-100 hover:bg-neutral-200 text-neutral-900 border border-neutral-200 h-11 text-sm font-bold transition-all"
-              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'agregar')}
+              onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'agregar', resolvedTargetCaja)}
             >
-              Agregar a caja actual
+              Agregar a {activeMode === "caja" ? "caja actual" : activeMode === "seccion" ? "sección actual" : "almacén actual"}
             </Button>
             <Button 
               variant="outline" 

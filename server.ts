@@ -347,29 +347,23 @@ app.put("/api/cajas/:id", async (req, res) => {
     if (tags !== undefined) {
       updateData.tags = tags;
     }
-    if (id_zona_seccion !== undefined) {
-      if (id_zona_seccion === "" || id_zona_seccion === null) {
-        updateData.id_zona_seccion = null;
-      } else {
-        const parsedSec = parseInt(id_zona_seccion);
-        if (isNaN(parsedSec) || parsedSec <= 0) {
-          return res.status(400).json({ error: "ID de sección inválido" });
-        }
-        updateData.id_zona_seccion = parsedSec;
-        updateData.id_zona_almacen = null;
+    if (id_zona_seccion !== undefined && id_zona_seccion !== null && id_zona_seccion !== "") {
+      const parsedSec = parseInt(id_zona_seccion);
+      if (isNaN(parsedSec) || parsedSec <= 0) {
+        return res.status(400).json({ error: "ID de sección inválido" });
       }
-    }
-    if (id_zona_almacen !== undefined) {
-      if (id_zona_almacen === "" || id_zona_almacen === null) {
-        updateData.id_zona_almacen = null;
-      } else {
-        const parsedAlm = parseInt(id_zona_almacen);
-        if (isNaN(parsedAlm) || parsedAlm <= 0) {
-          return res.status(400).json({ error: "ID de almacén inválido" });
-        }
-        updateData.id_zona_almacen = parsedAlm;
-        updateData.id_zona_seccion = null;
+      updateData.id_zona_seccion = parsedSec;
+      updateData.id_zona_almacen = null;
+    } else if (id_zona_almacen !== undefined && id_zona_almacen !== null && id_zona_almacen !== "") {
+      const parsedAlm = parseInt(id_zona_almacen);
+      if (isNaN(parsedAlm) || parsedAlm <= 0) {
+        return res.status(400).json({ error: "ID de almacén inválido" });
       }
+      updateData.id_zona_almacen = parsedAlm;
+      updateData.id_zona_seccion = null;
+    } else if (id_zona_seccion === null || id_zona_almacen === null) {
+      updateData.id_zona_seccion = null;
+      updateData.id_zona_almacen = null;
     }
     
     const { data, error } = await supabase

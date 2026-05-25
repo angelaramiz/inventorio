@@ -449,7 +449,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                         </option>
                         {zoneSections.map((sec) => (
                           <option key={sec.id_zona_seccion} value={`section_${sec.id_zona_seccion}`}>
-                            &nbsp;&nbsp;↳ {sec.nombre.toUpperCase()}
+                            &nbsp;&nbsp;↳ {sec.pasillo_nombre && sec.pasillo_nombre !== "Sin pasillo" ? `${sec.pasillo_nombre.toUpperCase()} > ` : ""}{sec.nombre.toUpperCase()}
                           </option>
                         ))}
                       </React.Fragment>

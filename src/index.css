@@ -158,3 +158,12 @@ img:not(.no-zoom):not(.fixed img):not([class*="cursor-default"]):hover {
   transform: scale(1.03);
   filter: brightness(1.04);
 }
+
+/* Hide scrollbars for chrome, safari, edge, firefox, IE */
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+}
+.scrollbar-none {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}

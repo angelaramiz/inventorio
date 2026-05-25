@@ -9,7 +9,7 @@ import JsBarcode from "jsbarcode";
 import { 
   Plus, Edit2, Trash2, Home, MapPin, 
   Loader2, Check, X, AlertTriangle, FileText, Printer, Download,
-  Network
+  Network, Box
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -120,7 +120,7 @@ const EAN13Barcode = ({ code }: { code: string }) => {
 };
 
 export default function AlmacenView() {
-  const [activeTab, setActiveTab] = useState<"zonas" | "pasillos" | "secciones" | "inventario">("zonas");
+  const [activeTab, setActiveTab] = useState<"zonas" | "pasillos" | "secciones" | "cajas" | "inventario">("zonas");
   
   // Tag states for new section
   const [newSectionTipo, setNewSectionTipo] = useState<string>("todos");
@@ -164,6 +164,15 @@ export default function AlmacenView() {
   const [selectedZoneId, setSelectedZoneId] = useState("");
   const [selectedPasilloId, setSelectedPasilloId] = useState("");
 
+  // Form states - Add Caja (Level 4)
+  const [newCajaName, setNewCajaName] = useState("");
+  const [selectedCajaZoneId, setSelectedCajaZoneId] = useState("");
+  const [selectedCajaPasilloId, setSelectedCajaPasilloId] = useState("");
+  const [selectedCajaSectionId, setSelectedCajaSectionId] = useState("");
+  const [newCajaTipo, setNewCajaTipo] = useState("todos");
+  const [newCajaGenero, setNewCajaGenero] = useState("todos");
+  const [newCajaMarca, setNewCajaMarca] = useState("todos");
+
   // Editing states
   const [editingZoneId, setEditingZoneId] = useState<number | null>(null);
   const [editingZoneName, setEditingZoneName] = useState("");
@@ -176,6 +185,13 @@ export default function AlmacenView() {
   const [editingSectionName, setEditingSectionName] = useState("");
   const [editingSectionZoneId, setEditingSectionZoneId] = useState("");
   const [editingSectionPasilloId, setEditingSectionPasilloId] = useState("");
+
+  // Editing states - Caja
+  const [editingCajaId, setEditingCajaId] = useState<number | null>(null);
+  const [editingCajaName, setEditingCajaName] = useState("");
+  const [editingCajaZoneId, setEditingCajaZoneId] = useState("");
+  const [editingCajaPasilloId, setEditingCajaPasilloId] = useState("");
+  const [editingCajaSectionId, setEditingCajaSectionId] = useState("");
 
   useEffect(() => {
     fetchZones();
@@ -1023,6 +1039,102 @@ export default function AlmacenView() {
     }
   };
 
+  // Add Caja (Level 4)
+  const handleAddCaja = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCajaName.trim()) return;
+    setSubmitting(true);
+    try {
+      let id_zona_seccion = selectedCajaSectionId ? parseInt(selectedCajaSectionId) : null;
+      let id_zona_almacen = selectedCajaZoneId ? parseInt(selectedCajaZoneId) : null;
+      
+      const resp = await fetch("/api/cajas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          numero_caja: newCajaName,
+          id_zona_seccion,
+          id_zona_almacen,
+          tags: {
+            tipo_producto: newCajaTipo,
+            genero: newCajaGenero,
+            marca: newCajaMarca
+          }
+        })
+      });
+      if (resp.ok) {
+        toast.success("Caja / Contenedor (Nivel 4) agregado");
+        setNewCajaName("");
+        setSelectedCajaZoneId("");
+        setSelectedCajaPasilloId("");
+        setSelectedCajaSectionId("");
+        setNewCajaTipo("todos");
+        setNewCajaGenero("todos");
+        setNewCajaMarca("todos");
+        fetchBoxes();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "No se pudo agregar la caja");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Delete Caja (Level 4)
+  const handleDeleteCaja = async (id: number) => {
+    if (!window.confirm("¿Seguro que deseas eliminar esta caja/contenedor (Nivel 4)?")) return;
+    try {
+      const resp = await fetch(`/api/cajas/${id}`, { method: "DELETE" });
+      if (resp.ok) {
+        toast.success("Caja eliminada con éxito");
+        fetchBoxes();
+      } else {
+        toast.error("Error al eliminar la caja");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    }
+  };
+
+  // Edit Caja
+  const startEditCaja = (caja: any) => {
+    setEditingCajaId(caja.id_caja);
+    setEditingCajaName(caja.numero_caja);
+    setEditingCajaZoneId(caja.id_zona_almacen ? caja.id_zona_almacen.toString() : "");
+    setEditingCajaPasilloId(caja.id_zona_pasillo ? caja.id_zona_pasillo.toString() : "");
+    setEditingCajaSectionId(caja.id_zona_seccion ? caja.id_zona_seccion.toString() : "");
+  };
+
+  const handleUpdateCaja = async (id: number) => {
+    if (!editingCajaName.trim()) return;
+    try {
+      let id_zona_seccion = editingCajaSectionId ? parseInt(editingCajaSectionId) : null;
+      let id_zona_almacen = editingCajaZoneId ? parseInt(editingCajaZoneId) : null;
+      
+      const resp = await fetch(`/api/cajas/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          numero_caja: editingCajaName,
+          id_zona_seccion,
+          id_zona_almacen
+        })
+      });
+      if (resp.ok) {
+        toast.success("Caja actualizada");
+        setEditingCajaId(null);
+        fetchBoxes();
+      } else {
+        toast.error("Error al actualizar la caja");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Tab Switcher & Header */}
@@ -1032,39 +1144,53 @@ export default function AlmacenView() {
           <p className="text-xs md:text-sm text-neutral-500 font-medium mt-1">Administra la distribución física de cajas en el inventario</p>
         </div>
         
-        <div className="flex bg-neutral-100 p-1.5 rounded-2xl border">
+        <div className="flex bg-neutral-100 p-2 md:p-1.5 rounded-2xl border overflow-x-auto max-w-full whitespace-nowrap scrollbar-none flex-row shrink-0 gap-2 md:gap-1 w-full md:w-auto">
           <button
             onClick={() => setActiveTab("zonas")}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+            className={`flex items-center gap-2 md:gap-1.5 px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
               activeTab === "zonas" 
                 ? "bg-white text-neutral-950 shadow-md" 
                 : "text-neutral-500 hover:text-neutral-800"
             }`}
           >
-            <Home size={14} />
+            <Home size={16} className="md:w-3.5 md:h-3.5" />
             Zonas de Almacén
           </button>
           <button
             onClick={() => setActiveTab("pasillos")}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+            className={`flex items-center gap-2 md:gap-1.5 px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
               activeTab === "pasillos" 
                 ? "bg-white text-neutral-950 shadow-md" 
                 : "text-neutral-500 hover:text-neutral-800"
             }`}
           >
-            <Network size={14} />
+            <Network size={16} className="md:w-3.5 md:h-3.5" />
             Pasillos / Zonas
           </button>
           <button
             onClick={() => setActiveTab("secciones")}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+            className={`flex items-center gap-2 md:gap-1.5 px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
               activeTab === "secciones" 
                 ? "bg-white text-neutral-950 shadow-md" 
                 : "text-neutral-500 hover:text-neutral-800"
             }`}
           >
-            <MapPin size={14} />
+            <MapPin size={16} className="md:w-3.5 md:h-3.5" />
             Secciones
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab("cajas");
+              fetchBoxes();
+            }}
+            className={`flex items-center gap-2 md:gap-1.5 px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
+              activeTab === "cajas" 
+                ? "bg-white text-neutral-950 shadow-md" 
+                : "text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            <Box size={16} className="md:w-3.5 md:h-3.5" />
+            Cajas / Niveles
           </button>
           <button
             onClick={() => {
@@ -1072,13 +1198,13 @@ export default function AlmacenView() {
               fetchBoxes();
               setShowPreview(false);
             }}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+            className={`flex items-center gap-2 md:gap-1.5 px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
               activeTab === "inventario" 
                 ? "bg-white text-neutral-950 shadow-md" 
                 : "text-neutral-500 hover:text-neutral-800"
             }`}
           >
-            <FileText size={14} />
+            <FileText size={16} className="md:w-3.5 md:h-3.5" />
             Inventario (Reporte)
           </button>
         </div>
@@ -1237,6 +1363,13 @@ export default function AlmacenView() {
                 @media screen {
                   .print-only {
                     display: none !important;
+                  }
+                  .scrollbar-none::-webkit-scrollbar {
+                    display: none;
+                  }
+                  .scrollbar-none {
+                    -ms-overflow-style: none;
+                    scrollbar-width: none;
                   }
                 }
 
@@ -1645,7 +1778,7 @@ export default function AlmacenView() {
                   </CardContent>
                 </Card>
               </motion.div>
-            ) : (
+            ) : activeTab === "secciones" ? (
               <motion.div
                 key="form-secciones"
                 initial={{ opacity: 0, x: -15 }}
@@ -1772,6 +1905,153 @@ export default function AlmacenView() {
                   </CardContent>
                 </Card>
               </motion.div>
+            ) : (
+              <motion.div
+                key="form-cajas"
+                initial={{ opacity: 0, x: -15 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 15 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Card className="border border-neutral-100 shadow-lg rounded-[2rem] overflow-hidden bg-white">
+                  <CardHeader className="pb-3 bg-neutral-50/50">
+                    <CardTitle className="text-lg font-bold flex items-center gap-2">
+                      <Plus size={18} className="text-neutral-500" />
+                      Nueva Caja / Nivel
+                    </CardTitle>
+                    <CardDescription>Crea un contenedor o subnivel de almacenamiento (Nivel 4)</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-5">
+                    <form onSubmit={handleAddCaja} className="space-y-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Identificador / Nombre</label>
+                        <Input 
+                          placeholder="Ej: Caja 1, Paquete A, CJ-123" 
+                          value={newCajaName}
+                          onChange={e => setNewCajaName(e.target.value)}
+                          className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Zona Almacén Asociada</label>
+                        <select
+                          value={selectedCajaZoneId}
+                          onChange={e => {
+                            setSelectedCajaZoneId(e.target.value);
+                            setSelectedCajaPasilloId("");
+                            setSelectedCajaSectionId("");
+                          }}
+                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                        >
+                          <option value="">Selecciona una zona...</option>
+                          {zones.map(z => (
+                            <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                              {z.nombre.toUpperCase()}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Pasillo / Zona Intermedia</label>
+                        <select
+                          value={selectedCajaPasilloId}
+                          onChange={e => {
+                            setSelectedCajaPasilloId(e.target.value);
+                            setSelectedCajaSectionId("");
+                          }}
+                          disabled={!selectedCajaZoneId}
+                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                        >
+                          <option value="">Selecciona un pasillo...</option>
+                          {pasillos
+                            .filter(p => p.id_zona_almacen === parseInt(selectedCajaZoneId))
+                            .map(p => (
+                              <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                {p.nombre.toUpperCase()}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Sección Física (Jerarquía 3)</label>
+                        <select
+                          value={selectedCajaSectionId}
+                          onChange={e => setSelectedCajaSectionId(e.target.value)}
+                          disabled={!selectedCajaPasilloId}
+                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                        >
+                          <option value="">Selecciona una sección...</option>
+                          {sections
+                            .filter(s => s.id_zona_pasillo === parseInt(selectedCajaPasilloId))
+                            .map(s => (
+                              <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
+                                {s.nombre.toUpperCase()}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      {/* TAGS */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo de Producto</label>
+                        <select
+                          value={newCajaTipo}
+                          onChange={e => {
+                            setNewCajaTipo(e.target.value);
+                            if (e.target.value !== "calzado") {
+                              setNewCajaMarca("todos");
+                            }
+                          }}
+                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                        >
+                          <option value="todos">TODOS / AMBOS</option>
+                          <option value="ropa">ROPA</option>
+                          <option value="calzado">CALZADO</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Género</label>
+                        <select
+                          value={newCajaGenero}
+                          onChange={e => setNewCajaGenero(e.target.value)}
+                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                        >
+                          <option value="todos">UNISEX / TODOS</option>
+                          <option value="H">HOMBRE (H)</option>
+                          <option value="M">MUJER (M)</option>
+                        </select>
+                      </div>
+
+                      {newCajaTipo === "calzado" && (
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Marca</label>
+                          <select
+                            value={newCajaMarca}
+                            onChange={e => setNewCajaMarca(e.target.value)}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">TODAS / AMBAS</option>
+                            <option value="Marciano">MARCIANO (M)</option>
+                            <option value="Guess">GUESS (G)</option>
+                          </select>
+                        </div>
+                      )}
+
+                      <Button 
+                        type="submit" 
+                        disabled={submitting || !newCajaName.trim()}
+                        className="w-full rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 text-white font-bold"
+                      >
+                        {submitting ? <Loader2 className="animate-spin" size={18} /> : "Crear Caja / Nivel"}
+                      </Button>
+                    </form>
+                  </CardContent>
+                </Card>
+              </motion.div>
             )}
           </AnimatePresence>
         </div>
@@ -1783,7 +2063,13 @@ export default function AlmacenView() {
               <div>
                 <CardTitle className="text-lg font-bold">Conceptos Registrados</CardTitle>
                 <CardDescription>
-                  {activeTab === "zonas" ? "Zonas principales de almacenamiento" : activeTab === "pasillos" ? "Pasillos y zonas intermedias del almacén" : "Secciones y pasillos asignados a almacenes"}
+                  {activeTab === "zonas" 
+                    ? "Zonas principales de almacenamiento" 
+                    : activeTab === "pasillos" 
+                    ? "Pasillos y zonas intermedias del almacén" 
+                    : activeTab === "secciones"
+                    ? "Secciones y pasillos asignados a almacenes"
+                    : "Cajas y niveles de almacenamiento (Nivel 4)"}
                 </CardDescription>
               </div>
               {activeTab === "secciones" && sections.length > 0 && (
@@ -2151,6 +2437,208 @@ export default function AlmacenView() {
                           </TableCell>
                         </TableRow>
                       ))}
+                    </TableBody>
+                  </Table>
+                )
+              )}
+
+              {/* CAJAS TABLE */}
+              {activeTab === "cajas" && (
+                boxes.length === 0 ? (
+                  <div className="text-center py-16 text-neutral-400 flex flex-col items-center">
+                    <Box size={36} strokeWidth={1} className="opacity-40 mb-2" />
+                    <p className="text-sm font-bold">No hay cajas registradas</p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader className="bg-neutral-50/20">
+                      <TableRow>
+                        <TableHead>Nombre / ID</TableHead>
+                        <TableHead>Almacén Principal</TableHead>
+                        <TableHead>Pasillo / Subzona</TableHead>
+                        <TableHead>Sección Física</TableHead>
+                        <TableHead>Etiquetas (Tags)</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead className="text-right w-[150px]">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {boxes.map((box: any) => {
+                        const isEditing = editingCajaId === box.id_caja;
+                        return (
+                          <TableRow key={box.id_caja}>
+                            <TableCell className="font-extrabold text-sm uppercase">
+                              {isEditing ? (
+                                <Input 
+                                  value={editingCajaName}
+                                  onChange={e => setEditingCajaName(e.target.value)}
+                                  className="h-8 max-w-[150px] uppercase text-xs font-bold"
+                                />
+                              ) : (
+                                <div className="flex flex-col">
+                                  <span>{box.numero_caja}</span>
+                                  {box.sku && (
+                                    <span className="text-[10px] text-neutral-400 font-mono font-bold mt-0.5">{box.sku}</span>
+                                  )}
+                                </div>
+                              )}
+                            </TableCell>
+                            
+                            <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                              {isEditing ? (
+                                <select
+                                  value={editingCajaZoneId}
+                                  onChange={e => {
+                                    setEditingCajaZoneId(e.target.value);
+                                    setEditingCajaPasilloId("");
+                                    setEditingCajaSectionId("");
+                                  }}
+                                  className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none"
+                                >
+                                  <option value="">Selecciona zona...</option>
+                                  {zones.map(z => (
+                                    <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                                      {z.nombre.toUpperCase()}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                box.almacen_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                              {isEditing ? (
+                                <select
+                                  value={editingCajaPasilloId}
+                                  onChange={e => {
+                                    setEditingCajaPasilloId(e.target.value);
+                                    setEditingCajaSectionId("");
+                                  }}
+                                  disabled={!editingCajaZoneId}
+                                  className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none disabled:opacity-50"
+                                >
+                                  <option value="">Selecciona pasillo...</option>
+                                  {pasillos
+                                    .filter(p => p.id_zona_almacen === parseInt(editingCajaZoneId))
+                                    .map(p => (
+                                      <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                        {p.nombre.toUpperCase()}
+                                      </option>
+                                    ))}
+                                </select>
+                              ) : (
+                                box.pasillo_nombre && box.pasillo_nombre !== "Sin pasillo" ? box.pasillo_nombre : <span className="text-neutral-300 italic text-[10px]">N/A</span>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                              {isEditing ? (
+                                <select
+                                  value={editingCajaSectionId}
+                                  onChange={e => setEditingCajaSectionId(e.target.value)}
+                                  disabled={!editingCajaPasilloId}
+                                  className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none disabled:opacity-50"
+                                >
+                                  <option value="">Selecciona sección...</option>
+                                  {sections
+                                    .filter(s => s.id_zona_pasillo === parseInt(editingCajaPasilloId))
+                                    .map(s => (
+                                      <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
+                                        {s.nombre.toUpperCase()}
+                                      </option>
+                                    ))}
+                                </select>
+                              ) : (
+                                box.seccion_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="py-2">
+                              {box.tags ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {box.tags.tipo_producto && box.tags.tipo_producto !== "todos" && (
+                                    <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 capitalize text-[9px] px-1.5 py-0">
+                                      {box.tags.tipo_producto}
+                                    </Badge>
+                                  )}
+                                  {box.tags.genero && box.tags.genero !== "todos" && (
+                                    <Badge className="bg-blue-50 text-blue-800 border border-blue-100 text-[9px] px-1.5 py-0 font-extrabold">
+                                      {box.tags.genero === "H" ? "H" : "M"}
+                                    </Badge>
+                                  )}
+                                  {box.tags.marca && box.tags.marca !== "todos" && (
+                                    <Badge className="bg-purple-50 text-purple-800 border border-purple-100 text-[9px] px-1.5 py-0 font-extrabold">
+                                      {box.tags.marca}
+                                    </Badge>
+                                  )}
+                                  {(!box.tags.tipo_producto || (box.tags.tipo_producto === "todos" && box.tags.genero === "todos" && box.tags.marca === "todos")) && (
+                                    <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="py-2">
+                              <Badge className={`text-[9px] px-2 py-0.5 capitalize font-black ${
+                                box.estado === 'vacia' 
+                                  ? 'bg-neutral-100 text-neutral-600 border'
+                                  : box.estado === 'activa'
+                                  ? 'bg-blue-50 text-blue-700 border border-blue-100'
+                                  : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                              }`}>
+                                {box.estado}
+                              </Badge>
+                            </TableCell>
+
+                            <TableCell className="text-right pr-6">
+                              <div className="flex justify-end gap-1.5">
+                                {isEditing ? (
+                                  <>
+                                    <Button 
+                                      size="icon" 
+                                      variant="ghost" 
+                                      onClick={() => handleUpdateCaja(box.id_caja)}
+                                      className="h-8 w-8 text-green-600 hover:bg-green-50 rounded-lg"
+                                    >
+                                      <Check size={14} />
+                                    </Button>
+                                    <Button 
+                                      size="icon" 
+                                      variant="ghost" 
+                                      onClick={() => setEditingCajaId(null)}
+                                      className="h-8 w-8 text-red-500 hover:bg-red-50 rounded-lg"
+                                    >
+                                      <X size={14} />
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Button 
+                                      size="icon" 
+                                      variant="ghost" 
+                                      onClick={() => startEditCaja(box)}
+                                      className="h-8 w-8 text-neutral-400 hover:text-neutral-800 hover:bg-neutral-100 rounded-lg"
+                                    >
+                                      <Edit2 size={14} />
+                                    </Button>
+                                    <Button 
+                                      size="icon" 
+                                      variant="ghost" 
+                                      onClick={() => handleDeleteCaja(box.id_caja)}
+                                      className="h-8 w-8 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                                    >
+                                      <Trash2 size={14} />
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 )
