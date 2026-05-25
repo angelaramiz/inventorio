@@ -306,8 +306,9 @@ export default function AlmacenView() {
     try {
       // Create canvases and render barcodes at 300 DPI target for crisp PDF output
       const dpi = 300;
-      const widthIn = 4; // inches
-      const heightIn = 1.5; // inches
+      // Label size: 3cm x 1.5cm -> convert to inches
+      const widthIn = 3 / 2.54; // ~1.1811 in
+      const heightIn = 1.5 / 2.54; // ~0.59055 in
       const canvasW = Math.round(widthIn * dpi);
       const canvasH = Math.round(heightIn * dpi);
 
@@ -327,8 +328,9 @@ export default function AlmacenView() {
         // Create an inner canvas for barcode drawing at higher scale to control module width
         const barcodeCanvas = document.createElement('canvas');
         // width in pixels set to canvasW minus paddings
-        barcodeCanvas.width = Math.round(canvasW * 0.9);
-        barcodeCanvas.height = Math.round(canvasH * 0.6);
+        barcodeCanvas.width = Math.round(canvasW * 0.92);
+        // give most of the height to the barcode, leaving small space for the code text below
+        barcodeCanvas.height = Math.round(canvasH * 0.72);
 
         try {
           JsBarcode(barcodeCanvas, it.codigo, {
@@ -346,21 +348,18 @@ export default function AlmacenView() {
         // Draw barcodeCanvas into final canvas centered
         if (ctx) {
           const bx = Math.round((canvas.width - barcodeCanvas.width) / 2);
-          const by = Math.round(canvas.height * 0.12);
+          const by = Math.round(canvas.height * 0.06);
           ctx.drawImage(barcodeCanvas, bx, by, barcodeCanvas.width, barcodeCanvas.height);
 
-          // Draw human-readable code below barcode
+          // Draw only the human-readable alphanumeric code below the barcode (centered)
           ctx.fillStyle = '#000000';
-          ctx.font = `${Math.round(dpi * 0.12)}px monospace`;
+          // font size relative to canvas height
+          const codeFontSize = Math.round(canvasH * 0.18);
+          ctx.font = `${codeFontSize}px monospace`;
           ctx.textAlign = 'center';
-          ctx.fillText(it.codigo, canvas.width / 2, by + barcodeCanvas.height + Math.round(dpi * 0.04));
-
-          // Draw labels (nombre / almacen)
-          ctx.font = `${Math.round(dpi * 0.07)}px sans-serif`;
-          ctx.fillText((it.nombre || '').toUpperCase(), canvas.width / 2, canvas.height - Math.round(dpi * 0.12));
-          if (it.almacen) {
-            ctx.fillText((`ALM: ${it.almacen}`).toUpperCase(), canvas.width / 2, canvas.height - Math.round(dpi * 0.03));
-          }
+          // position text slightly below the barcode
+          const textY = by + barcodeCanvas.height + Math.round(canvasH * 0.12);
+          ctx.fillText(it.codigo, canvas.width / 2, textY);
         }
 
         // Convert to data URL (PNG) for printing
@@ -394,10 +393,11 @@ export default function AlmacenView() {
       const style = `
         <style>
           @page { size: letter; margin: 6mm; }
-          body{ font-family: Arial, Helvetica, sans-serif; margin:0; padding:0; }
-          .label{ width: ${widthIn}in; height: ${heightIn}in; display:inline-block; margin:0.08in; box-sizing:border-box; border:1px solid #fff; }
-          .label img{ width: ${widthIn}in; height: ${heightIn}in; object-fit:contain; display:block; }
+          body{ font-family: Arial, Helvetica, sans-serif; margin:0; padding:6mm; }
+          /* Force 4 labels per row: each label 3cm width + small gap */
           .sheet{ width:100%; display:flex; flex-wrap:wrap; justify-content:flex-start; align-items:flex-start; }
+          .label{ width: 3cm; height: 1.5cm; display:inline-block; margin: 0.2cm; box-sizing:border-box; }
+          .label img{ width: 3cm; height: 1.5cm; object-fit:contain; display:block; }
         </style>
       `;
 
