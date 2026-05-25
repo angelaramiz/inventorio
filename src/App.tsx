@@ -47,6 +47,7 @@ export default function App() {
   if (pathMatches(["/pos"])) {
     return (
       <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-6">
+        <AppHeader subtitle="POS" actionLabel="Ir al Panel" actionUrl="/" />
         <main className="container mx-auto p-4 md:p-6 lg:p-8">
           <POSView />
         </main>
@@ -60,6 +61,7 @@ export default function App() {
   if (pathMatches(["/conteo_inv"])) {
     return (
       <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-6">
+        <AppHeader subtitle="CONTEO" actionLabel="Ir al Panel" actionUrl="/" />
         <main className="container mx-auto p-4 md:p-6 lg:p-8">
           <InventoryControlView userRole="operator" />
         </main>
@@ -73,6 +75,7 @@ export default function App() {
   if (pathMatches(["/admin"])) {
     return (
       <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-6">
+        <AppHeader subtitle="CONTEO ADMIN" actionLabel="Ir al Panel" actionUrl="/" />
         <main className="container mx-auto p-4 md:p-6 lg:p-8">
           <InventoryControlView userRole="manager" />
         </main>
@@ -250,5 +253,33 @@ function MobileNavButton({ active, onClick, icon, label }: { active: boolean, on
       {icon}
       <span className="text-[8px] font-black uppercase tracking-wider truncate max-w-full">{label}</span>
     </button>
+  );
+}
+
+function AppHeader({ subtitle, actionLabel, actionUrl }: { subtitle: string, actionLabel?: string, actionUrl?: string }) {
+  return (
+    <header className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-md no-print">
+      <div className="container mx-auto max-w-full flex h-16 items-center justify-between px-4">
+        <div className="flex items-center gap-2 font-bold text-xl tracking-tight cursor-pointer" onClick={() => window.location.href = "/"}>
+          <div className="bg-neutral-950 p-1.5 rounded-lg text-white">
+            <Boxes size={22} />
+          </div>
+          <span className="font-extrabold tracking-tight">
+            INVENTARIO <span className="text-neutral-400 font-medium text-sm ml-1">| {subtitle}</span>
+          </span>
+        </div>
+        
+        {actionLabel && actionUrl && (
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => window.location.href = actionUrl}
+              className="text-xs font-bold text-neutral-600 hover:text-neutral-900 px-3 py-1.5 rounded-lg hover:bg-neutral-100 transition-all border border-neutral-200"
+            >
+              {actionLabel}
+            </button>
+          </div>
+        )}
+      </div>
+    </header>
   );
 }
