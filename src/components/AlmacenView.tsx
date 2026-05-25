@@ -5,8 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   Plus, Edit2, Trash2, Home, MapPin, 
-  Loader2, Check, X, AlertTriangle, FileText, Printer, Download
+  Loader2, Check, X, AlertTriangle, FileText, Printer, Download,
+  Network
 } from "lucide-react";
+import HierarchyView from "./HierarchyView";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -116,7 +118,7 @@ const EAN13Barcode = ({ code }: { code: string }) => {
 };
 
 export default function AlmacenView() {
-  const [activeTab, setActiveTab] = useState<"zonas" | "secciones" | "inventario">("zonas");
+  const [activeTab, setActiveTab] = useState<"zonas" | "secciones" | "inventario" | "jerarquia">("zonas");
   
   // Data lists
   const [zones, setZones] = useState<WarehouseZone[]>([]);
@@ -854,10 +856,25 @@ export default function AlmacenView() {
             <FileText size={14} />
             Inventario (Reporte)
           </button>
+          <button
+            onClick={() => {
+              setActiveTab("jerarquia");
+            }}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+              activeTab === "jerarquia" 
+                ? "bg-white text-neutral-950 shadow-md" 
+                : "text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            <Network size={14} />
+            Jerarquía (Árbol)
+          </button>
         </div>
       </div>
 
-      {activeTab === "inventario" ? (
+      {activeTab === "jerarquia" ? (
+        <HierarchyView />
+      ) : activeTab === "inventario" ? (
         <div className="space-y-6">
           <Card className="border border-neutral-100 shadow-xl rounded-[2rem] overflow-hidden bg-white">
             <CardHeader className="bg-neutral-50/50 pb-4 border-b">
