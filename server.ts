@@ -97,11 +97,11 @@ app.get('/api/health', (req, res) => {
 
 // --- API ROUTES ---
 
-// GET /api/productos - EXCLUDING foto column for performance. Supports ?q, ?marca, ?talla, ?temporada filters
+// GET /api/productos - EXCLUDING foto column for performance. Supports ?q, ?marca, ?talla, ?temporada, ?tipo filters
 app.get("/api/productos", async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { q, marca, talla, temporada } = req.query as Record<string, string>;
+    const { q, marca, talla, temporada, tipo } = req.query as Record<string, string>;
     
     let query = supabase
       .from("productos")
@@ -120,6 +120,9 @@ app.get("/api/productos", async (req, res) => {
     }
     if (temporada) {
       query = query.ilike("temporada", temporada);
+    }
+    if (tipo) {
+      query = query.ilike("tipo", tipo);
     }
     
     const { data, error } = await query;

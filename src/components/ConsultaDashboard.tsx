@@ -58,8 +58,10 @@ export default function ConsultaDashboard() {
   const [filterMarca, setFilterMarca] = useState("");
   const [filterTalla, setFilterTalla] = useState("");
   const [filterTemporada, setFilterTemporada] = useState("");
+  const [filterTipo, setFilterTipo] = useState("");
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
   const [marcasOpts, setMarcasOpts] = useState<string[]>([]);
+  const [tiposOpts, setTiposOpts] = useState<string[]>([]);
   const [prodResults, setProdResults] = useState<ProductoQueryResult[]>([]);
 
   // Box filter by temporada
@@ -88,14 +90,17 @@ export default function ConsultaDashboard() {
 
   const loadFilterOptions = async () => {
     try {
-      const [respTemp, respMarcas] = await Promise.all([
+      const [respTemp, respMarcas, respTipos] = await Promise.all([
         fetch("/api/conceptos/temporadas"),
         fetch("/api/conceptos/marcas"),
+        fetch("/api/conceptos/tipos"),
       ]);
       const tempVals = await respTemp.json();
       const marcaVals = await respMarcas.json();
+      const tipoVals = await respTipos.json();
       setTemporadasOpts(tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
       setMarcasOpts(marcaVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
+      setTiposOpts(tipoVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
     } catch (err) {
       console.error("Error loading filter options", err);
     }
@@ -188,11 +193,11 @@ export default function ConsultaDashboard() {
   };
 
   const handleProdSearch = async (searchQuery: string) => {
-    if (!searchQuery.trim() && !filterMarca && !filterTalla && !filterTemporada) return;
+    if (!searchQuery.trim() && !filterMarca && !filterTalla && !filterTemporada && !filterTipo) return;
     setProdLoading(true);
     try {
       // Single product lookup by EAN/SKU (scanner or exact input)
-      if (searchQuery.trim() && !filterMarca && !filterTalla && !filterTemporada) {
+      if (searchQuery.trim() && !filterMarca && !filterTalla && !filterTemporada && !filterTipo) {
         const resp = await fetch(`/api/consultar-producto/${encodeURIComponent(searchQuery.trim())}`);
         if (resp.ok) {
           const data = await resp.json();
@@ -223,6 +228,7 @@ export default function ConsultaDashboard() {
       if (filterMarca) params.set("marca", filterMarca);
       if (filterTalla) params.set("talla", filterTalla);
       if (filterTemporada) params.set("temporada", filterTemporada);
+      if (filterTipo) params.set("tipo", filterTipo);
       
       const resp = await fetch(`/api/productos?${params.toString()}`);
       if (resp.ok) {
@@ -249,12 +255,13 @@ export default function ConsultaDashboard() {
     }
   };
 
-  const activeFilterCount = [filterMarca, filterTalla, filterTemporada].filter(Boolean).length;
+  const activeFilterCount = [filterMarca, filterTalla, filterTemporada, filterTipo].filter(Boolean).length;
 
   const clearProdFilters = () => {
     setFilterMarca("");
     setFilterTalla("");
     setFilterTemporada("");
+    setFilterTipo("");
     setProdResults([]);
     setCurrentProduct(null);
   };
@@ -538,6 +545,17 @@ export default function ConsultaDashboard() {
                             >
                               <option value="">Todas las temporadas</option>
                               {temporadasOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                            </select>
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <label className="text-[10px] font-bold text-neutral-500">TIPO</label>
+                            <select
+                              value={filterTipo}
+                              onChange={e => setFilterTipo(e.target.value)}
+                              className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 uppercase"
+                            >
+                              <option value="">Todos los tipos</option>
+                              {tiposOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
                             </select>
                           </div>
                         </div>

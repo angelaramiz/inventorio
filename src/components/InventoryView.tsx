@@ -18,11 +18,13 @@ export default function InventoryView() {
   const [filterMarca, setFilterMarca] = useState("");
   const [filterTalla, setFilterTalla] = useState("");
   const [filterTemporada, setFilterTemporada] = useState("");
+  const [filterTipo, setFilterTipo] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
   const [marcasOpts, setMarcasOpts] = useState<string[]>([]);
+  const [tiposOpts, setTiposOpts] = useState<string[]>([]);
 
   useEffect(() => {
     fetchProductos();
@@ -44,14 +46,17 @@ export default function InventoryView() {
 
   const fetchFilterOptions = async () => {
     try {
-      const [respTemp, respMarcas] = await Promise.all([
+      const [respTemp, respMarcas, respTipos] = await Promise.all([
         fetch("/api/conceptos/temporadas"),
         fetch("/api/conceptos/marcas"),
+        fetch("/api/conceptos/tipos"),
       ]);
       const tempVals = await respTemp.json();
       const marcaVals = await respMarcas.json();
+      const tipoVals = await respTipos.json();
       setTemporadasOpts(tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
       setMarcasOpts(marcaVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
+      setTiposOpts(tipoVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
     } catch (err) {
       console.error("Error loading filter options", err);
     }
@@ -78,7 +83,7 @@ export default function InventoryView() {
     }
   };
 
-  const activeFilterCount = [filterMarca, filterTalla, filterTemporada].filter(Boolean).length;
+  const activeFilterCount = [filterMarca, filterTalla, filterTemporada, filterTipo].filter(Boolean).length;
 
   const filtered = productos.filter(p => {
     const term = searchTerm.toLowerCase();
@@ -89,13 +94,15 @@ export default function InventoryView() {
     const matchesMarca = !filterMarca || p.marca_sub.toLowerCase() === filterMarca.toLowerCase();
     const matchesTalla = !filterTalla || p.talla.toLowerCase() === filterTalla.toLowerCase();
     const matchesTemporada = !filterTemporada || p.temporada.toLowerCase() === filterTemporada.toLowerCase();
-    return matchesSearch && matchesMarca && matchesTalla && matchesTemporada;
+    const matchesTipo = !filterTipo || (p.tipo && p.tipo.toLowerCase() === filterTipo.toLowerCase());
+    return matchesSearch && matchesMarca && matchesTalla && matchesTemporada && matchesTipo;
   });
 
   const clearFilters = () => {
     setFilterMarca("");
     setFilterTalla("");
     setFilterTemporada("");
+    setFilterTipo("");
   };
 
   return (
@@ -184,6 +191,17 @@ export default function InventoryView() {
                 >
                   <option value="">Todas las temporadas</option>
                   {temporadasOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1 min-w-[140px]">
+                <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo</label>
+                <select
+                  value={filterTipo}
+                  onChange={e => setFilterTipo(e.target.value)}
+                  className="bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2 text-sm font-semibold outline-none h-10 focus:ring-1 focus:ring-neutral-900 uppercase"
+                >
+                  <option value="">Todos los tipos</option>
+                  {tiposOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
                 </select>
               </div>
               {activeFilterCount > 0 && (
