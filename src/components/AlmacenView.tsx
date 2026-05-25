@@ -1539,6 +1539,14 @@ export default function AlmacenView() {
                     opacity: 0 !important;
                     pointer-events: none !important;
                   }
+                  #batch-barcodes-print-area,
+                  #section-barcode-print-area-portal {
+                    display: none !important;
+                    visibility: hidden !important;
+                    position: absolute !important;
+                    width: 0 !important;
+                    height: 0 !important;
+                  }
                   .scrollbar-none::-webkit-scrollbar {
                     display: none;
                   }
@@ -2935,9 +2943,8 @@ export default function AlmacenView() {
       </Dialog>
       </div>
 
-      {/* Batch Print Area (Hidden on screen, visible during print) */}
-      {/* Grid container: 4 labels per row, 1mm gap, all on one sheet */}
-      <div id="batch-barcodes-print-area" className="print-only">
+      {/* Batch Print Area - NO LONGER NEEDED (using canvas in new window) */}
+      {/* <div id="batch-barcodes-print-area" className="print-only">
         {sections.map((section: any) => {
           const barcodeVal = (section.nombre || `SEC-${section.id_zona_seccion}`).toUpperCase();
           return (
@@ -2954,10 +2961,10 @@ export default function AlmacenView() {
             </div>
           );
         })}
-      </div>
+      </div> */}
 
-      {/* Single Label Print Area (Hidden on screen, visible during print) */}
-      {activeBarcodeSection && (
+      {/* Single Label Print Area - NO LONGER NEEDED (using canvas in new window) */}
+      {/* {activeBarcodeSection && (
         <div id="section-barcode-print-area-portal" className="print-only">
           <svg id="section-barcode-svg-print"></svg>
           <span className="barcode-text">
@@ -2972,7 +2979,7 @@ export default function AlmacenView() {
             </span>
           )}
         </div>
-      )}
+      )} */}
 
       {/* Dynamic Style Injection: Carta paper, 4 labels per row */}
       {isPrintingLabels && (
