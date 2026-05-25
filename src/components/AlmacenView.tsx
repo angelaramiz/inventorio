@@ -249,8 +249,8 @@ export default function AlmacenView() {
               JsBarcode(element, barcodeVal, {
                 format: "CODE128",
                 lineColor: "#000",
-                width: 2.2,
-                height: 45,
+                width: 1,        // módulo estrecho para caber en 4cm
+                height: 22,      // barras bajas para caber en 1.5cm
                 displayValue: false,
                 margin: 0
               });
@@ -1454,7 +1454,7 @@ export default function AlmacenView() {
                     width: auto !important;
                   }
 
-                  /* Mode: Batch Labels (4" x 1.5") */
+                  /* Mode: Batch Labels — 4cm × 1.5cm por etiqueta, 1mm de gap, 4 por fila */
                   body.print-batch-labels #batch-barcodes-print-area,
                   body.print-batch-labels #batch-barcodes-print-area * {
                     visibility: visible !important;
@@ -1463,18 +1463,23 @@ export default function AlmacenView() {
                     position: absolute !important;
                     left: 0 !important;
                     top: 0 !important;
-                    width: 4in !important;
+                    width: 100% !important;
                     margin: 0 !important;
-                    padding: 0 !important;
-                    display: block !important;
+                    padding: 5mm !important;
+                    display: grid !important;
+                    grid-template-columns: repeat(4, 4cm) !important;
+                    gap: 1mm !important;
+                    box-sizing: border-box !important;
+                    background: white !important;
+                    align-content: start !important;
                   }
                   body.print-batch-labels .batch-print-label {
-                    width: 4in !important;
-                    height: 1.5in !important;
-                    padding: 0 !important;
+                    width: 4cm !important;
+                    height: 1.5cm !important;
+                    padding: 0.5mm !important;
                     margin: 0 !important;
-                    page-break-after: always !important;
-                    break-after: page !important;
+                    page-break-inside: avoid !important;
+                    break-inside: avoid !important;
                     display: flex !important;
                     flex-direction: column !important;
                     align-items: center !important;
@@ -1483,35 +1488,38 @@ export default function AlmacenView() {
                     color: black !important;
                     box-sizing: border-box !important;
                     overflow: hidden !important;
-                    border: none !important;
+                    border: 0.3pt solid #aaa !important;
                   }
                   body.print-batch-labels .batch-print-label svg {
-                    max-height: 0.65in !important;
-                    width: auto !important;
+                    width: 95% !important;
+                    height: auto !important;
+                    max-height: 7mm !important;
+                    display: block !important;
                   }
 
                   body.print-single-label #section-barcode-print-area span,
                   body.print-batch-labels .batch-print-label span {
                     font-family: monospace !important;
-                    line-height: 1.1 !important;
+                    line-height: 1mm !important;
                     margin: 0 !important;
                     padding: 0 !important;
                     display: block !important;
                     color: black !important;
+                    text-align: center !important;
                   }
                   body.print-single-label #section-barcode-print-area .barcode-text,
                   body.print-batch-labels .batch-print-label .barcode-text {
-                    font-size: 11pt !important;
+                    font-size: 5pt !important;
                     font-weight: 900 !important;
-                    letter-spacing: 0.1em !important;
-                    margin-top: 2px !important;
+                    letter-spacing: 0.05em !important;
+                    margin-top: 0.3mm !important;
                   }
                   body.print-single-label #section-barcode-print-area .label-details,
                   body.print-batch-labels .batch-print-label .label-details {
-                    font-size: 8pt !important;
-                    font-weight: 750 !important;
+                    font-size: 4pt !important;
+                    font-weight: 700 !important;
                     text-transform: uppercase !important;
-                    margin-top: 1px !important;
+                    margin-top: 0.2mm !important;
                   }
 
                   .print-only {
@@ -2738,6 +2746,7 @@ export default function AlmacenView() {
       </Dialog>
 
       {/* Batch Print Area (Hidden on screen, visible during print) */}
+      {/* Grid container: 4 labels per row, 1mm gap, all on one sheet */}
       <div id="batch-barcodes-print-area" className="print-only">
         {sections.map((section: any) => {
           const barcodeVal = /^[A-Z0-9]+$/i.test(section.nombre) 
@@ -2749,27 +2758,23 @@ export default function AlmacenView() {
               className="batch-print-label"
             >
               <svg id={`batch-barcode-svg-${section.id_zona_seccion}`}></svg>
-              <span className="barcode-text">
-                {barcodeVal}
-              </span>
-              <span className="label-details">
-                SECCIÓN: {section.nombre.toUpperCase()}
-              </span>
-              <span className="label-details">
-                ALMACÉN: {section.almacen_nombre.toUpperCase()}
-              </span>
+              <span className="barcode-text">{barcodeVal}</span>
+              <span className="label-details">SECCIÓN: {section.nombre.toUpperCase()}</span>
+              {section.almacen_nombre && (
+                <span className="label-details">ALM: {section.almacen_nombre.toUpperCase()}</span>
+              )}
             </div>
           );
         })}
       </div>
 
-      {/* Dynamic Style Injection for 4" x 1.5" Print Size */}
+      {/* Dynamic Style Injection: Carta paper, 4 labels per row */}
       {isPrintingLabels && (
         <style>{`
           @media print {
             @page {
-              size: 4in 1.5in !important;
-              margin: 0 !important;
+              size: letter portrait;
+              margin: 6mm 4mm;
             }
           }
         `}</style>
