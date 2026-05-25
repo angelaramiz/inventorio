@@ -84,9 +84,9 @@ export default function App() {
 
   // 5. Default Main App Layout (/ or /alpha)
   return (
-    <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-24 md:pb-6">
+    <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-24 md:pb-6 min-w-0 overflow-x-hidden">
       <header className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-md">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4">
+        <div className="container mx-auto max-w-full flex h-16 items-center justify-between px-4">
           <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
             <div className="bg-neutral-950 p-1.5 rounded-lg text-white">
               <Boxes size={22} />
@@ -165,7 +165,7 @@ export default function App() {
         </nav>
       </div>
 
-      <main className="container mx-auto p-4 md:p-6 lg:p-8">
+      <main className="container mx-auto max-w-full p-4 md:p-6 lg:p-8">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -184,7 +184,7 @@ export default function App() {
       </main>
 
       {/* Mobile Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around p-3 z-50 overflow-x-auto">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t flex gap-1 p-2 z-50 overflow-x-auto">
         <MobileNavButton 
           active={activeTab === "scanner"} 
           onClick={() => setActiveTab("scanner")}
@@ -243,12 +243,12 @@ function MobileNavButton({ active, onClick, icon, label }: { active: boolean, on
   return (
     <button
       onClick={onClick}
-      className={`flex flex-col items-center gap-1 transition-colors px-2 shrink-0 ${
+      className={`flex flex-col items-center gap-1 transition-colors px-2 min-w-0 flex-1 text-center ${
         active ? "text-neutral-900" : "text-neutral-400"
       }`}
     >
       {icon}
-      <span className="text-[8px] font-black uppercase tracking-wider">{label}</span>
+      <span className="text-[8px] font-black uppercase tracking-wider truncate max-w-full">{label}</span>
     </button>
   );
 }
