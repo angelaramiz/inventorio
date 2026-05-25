@@ -1024,6 +1024,87 @@ app.get("/api/consultar-caja/:query", async (req, res) => {
   }
 });
 
+// GET /api/consultar-seccion/:query - Fetch section levels, boxes, and products
+app.get("/api/consultar-seccion/:query", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { query } = req.params;
+    
+    let dbQuery = supabase.from("zonas_seccion").select(`
+      id_zona_seccion,
+      nombre,
+      id_zona_almacen,
+      id_zona_pasillo,
+      tags,
+      zonas_almacen (nombre),
+      zonas_pasillo (
+        nombre,
+        id_zona_almacen,
+        zonas_almacen (nombre)
+      )
+    `);
+    
+    const cleanQuery = query.trim();
+    const idMatch = cleanQuery.match(/^SEC-(\d+)$/i);
+    const numericId = idMatch ? parseInt(idMatch[1]) : parseInt(cleanQuery);
+    
+    if (!isNaN(numericId)) {
+      dbQuery = dbQuery.eq("id_zona_seccion", numericId);
+    } else {
+      dbQuery = dbQuery.ilike("nombre", cleanQuery);
+    }
+    
+    const { data: section, error: sErr } = await dbQuery.maybeSingle();
+    
+    if (sErr) throw sErr;
+    if (!section) {
+      return res.status(404).json({ error: "Sección no encontrada" });
+    }
+    
+    // Find all boxes inside this section
+    const { data: boxes, error: bErr } = await supabase
+      .from("vista_total_cajas")
+      .select("*")
+      .eq("id_zona_seccion", section.id_zona_seccion);
+      
+    if (bErr) throw bErr;
+    
+    const boxIds = (boxes || []).map(b => b.id_caja);
+    let productos: any[] = [];
+    
+    if (boxIds.length > 0) {
+      const { data: prodData, error: pErr } = await supabase
+        .from("caja_productos")
+        .select(`
+          id_caja,
+          id_producto,
+          cantidad,
+          productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto)
+        `)
+        .in("id_caja", boxIds);
+        
+      if (pErr) throw pErr;
+      productos = prodData || [];
+    }
+    
+    res.json({
+      section: {
+        id_zona_seccion: section.id_zona_seccion,
+        nombre: section.nombre,
+        tags: section.tags,
+        pasillo_nombre: section.zonas_pasillo ? section.zonas_pasillo.nombre : "Sin pasillo",
+        almacen_nombre: section.zonas_pasillo && section.zonas_pasillo.zonas_almacen 
+          ? section.zonas_pasillo.zonas_almacen.nombre 
+          : (section.zonas_almacen ? section.zonas_almacen.nombre : "Sin almacén")
+      },
+      boxes: boxes || [],
+      productos: productos
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/consultar-producto/:query - Query boxes containing a specific product by SKU or EAN-13
 app.get("/api/consultar-producto/:query", async (req, res) => {
   try {

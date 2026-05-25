@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { 
   Scan, Search, Package, Clock, ShieldAlert, Tag,
-  Trash2, ArrowLeftRight, Image as ImageIcon, Loader2, Sparkles, ChevronRight, SlidersHorizontal, X
+  Trash2, ArrowLeftRight, Image as ImageIcon, Loader2, Sparkles, ChevronRight, SlidersHorizontal, X, MapPin, Layers
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -41,13 +41,19 @@ interface ProductoQueryResult {
 }
 
 export default function ConsultaDashboard() {
-  const [activeTab, setActiveTab] = useState<"cajas" | "productos">("cajas");
+  const [activeTab, setActiveTab] = useState<"cajas" | "productos" | "secciones">("cajas");
   
   // Box States
   const [boxQuery, setBoxQuery] = useState("");
   const [boxLoading, setBoxLoading] = useState(false);
   const [currentBox, setCurrentBox] = useState<CajaHistorial | null>(null);
   const [isBoxScannerActive, setIsBoxScannerActive] = useState(false);
+
+  // Section States
+  const [sectionQuery, setSectionQuery] = useState("");
+  const [sectionLoading, setSectionLoading] = useState(false);
+  const [currentSection, setCurrentSection] = useState<any | null>(null);
+  const [isSectionScannerActive, setIsSectionScannerActive] = useState(false);
   
   // Product States
   const [prodQuery, setProdQuery] = useState("");
@@ -137,6 +143,61 @@ export default function ConsultaDashboard() {
     }
     setIsBoxScannerActive(false);
     setIsProdScannerActive(false);
+    setIsSectionScannerActive(false);
+  };
+
+  const handleSectionSearch = async (searchQuery: string) => {
+    if (!searchQuery.trim()) return;
+    setSectionLoading(true);
+    try {
+      const resp = await fetch(`/api/consultar-seccion/${encodeURIComponent(searchQuery.trim())}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setCurrentSection(data);
+        toast.success(`Sección ${data.section.nombre.toUpperCase()} encontrada`);
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Sección no encontrada");
+      }
+    } catch (err) {
+      toast.error("Error al conectar con el servidor");
+    } finally {
+      setSectionLoading(false);
+    }
+  };
+
+  const startSectionScanner = async () => {
+    await stopAnyScanner();
+    try {
+      let html5QrCode = new Html5Qrcode("dashboard-reader-section");
+      scannerRef.current = html5QrCode;
+      setIsSectionScannerActive(true);
+
+      await html5QrCode.start(
+        { facingMode: "environment" },
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 150 },
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.CODE_128
+          ]
+        } as any,
+        (decodedText) => {
+          stopAnyScanner();
+          setSectionQuery(decodedText);
+          handleSectionSearch(decodedText);
+        },
+        () => {}
+      );
+      toast.success("Cámara de secciones iniciada");
+    } catch (err) {
+      toast.error("No se pudo iniciar la cámara");
+      setIsSectionScannerActive(false);
+      scannerRef.current = null;
+    }
   };
 
   const handleBoxSearch = async (searchQuery: string) => {
@@ -362,6 +423,17 @@ export default function ConsultaDashboard() {
               Cajas
             </button>
             <button
+              onClick={() => setActiveTab("secciones")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${
+                activeTab === "secciones" 
+                  ? "bg-amber-400 text-neutral-950 shadow-md" 
+                  : "text-neutral-400 hover:text-white"
+              }`}
+            >
+              <MapPin size={14} />
+              Secciones
+            </button>
+            <button
               onClick={() => setActiveTab("productos")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${
                 activeTab === "productos" 
@@ -468,6 +540,68 @@ export default function ConsultaDashboard() {
                       </button>
                     )}
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* TAB 3: SECCIONES CONTROLS */}
+          {activeTab === "secciones" && (
+            <Card className="border border-neutral-100 shadow-lg rounded-[2rem] overflow-hidden bg-white">
+              <CardHeader className="pb-3 bg-neutral-50/50">
+                <CardTitle className="text-lg font-bold flex items-center gap-2">
+                  <Search size={18} className="text-neutral-500" />
+                  Buscar Sección
+                </CardTitle>
+                <CardDescription>Escanea o escribe el código alfanumérico (ej: AN01)</CardDescription>
+              </CardHeader>
+              <CardContent className="p-5 space-y-4">
+                {/* Scanner Container */}
+                <div className="relative rounded-2xl overflow-hidden border bg-neutral-900 aspect-[4/3] w-full flex flex-col shadow-inner justify-center items-center">
+                  <div 
+                    id="dashboard-reader-section" 
+                    className={`w-full h-full object-cover ${isSectionScannerActive ? "block" : "hidden"}`} 
+                  />
+                  {!isSectionScannerActive && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400 space-y-4 p-4 text-center">
+                      <Scan size={36} className="text-neutral-500" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-bold text-white">Escáner Desactivado</p>
+                        <p className="text-[11px] text-neutral-400 max-w-[200px]">Usa la cámara trasera para escanear el código de barra de la sección</p>
+                      </div>
+                      <Button onClick={startSectionScanner} variant="outline" size="sm" className="rounded-full bg-white text-black hover:bg-neutral-100 font-semibold border-none">
+                        Activar Cámara
+                      </Button>
+                    </div>
+                  )}
+                  {isSectionScannerActive && (
+                    <Button 
+                      onClick={stopAnyScanner}
+                      variant="destructive"
+                      size="sm"
+                      className="absolute bottom-3 right-3 rounded-xl text-xs font-bold shadow-lg"
+                    >
+                      Apagar Cámara
+                    </Button>
+                  )}
+                </div>
+
+                {/* Manual Input */}
+                <div className="flex gap-2">
+                  <Input 
+                    placeholder="Código de sección (ej: AN01)" 
+                    value={sectionQuery}
+                    onChange={e => setSectionQuery(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleSectionSearch(sectionQuery)}
+                    className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                  />
+                  <Button 
+                    onClick={() => handleSectionSearch(sectionQuery)}
+                    disabled={sectionLoading || !sectionQuery.trim()}
+                    className="rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 font-bold shrink-0 px-4"
+                  >
+                    {sectionLoading ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -870,6 +1004,174 @@ export default function ConsultaDashboard() {
                   <h3 className="text-xl font-bold text-neutral-800">Esperando Consulta de Caja</h3>
                   <p className="text-sm text-neutral-400 max-w-sm mt-1">
                     Inicia la cámara, escribe un número/SKU de caja, o filtra por temporada para ver las cajas asignadas.
+                  </p>
+                </motion.div>
+              )
+            )}
+
+            {/* SECCION RESULT RENDER */}
+            {activeTab === "secciones" && (
+              currentSection ? (
+                <motion.div
+                  key={`sec-${currentSection.section.id_zona_seccion}`}
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  className="space-y-6"
+                >
+                  <Card className="border border-neutral-100 shadow-xl rounded-[2rem] overflow-hidden bg-white">
+                    <div className="bg-neutral-900 text-white p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-amber-400 p-2.5 rounded-2xl text-black">
+                          <MapPin size={28} />
+                        </div>
+                        <div>
+                          <h2 className="text-2xl font-black leading-none uppercase">Sección: {currentSection.section.nombre}</h2>
+                          <div className="flex flex-wrap gap-2 items-center mt-1.5">
+                            <span className="text-[10px] font-black text-amber-400 bg-neutral-800 px-2.5 py-1 rounded border border-neutral-700 uppercase flex items-center gap-1">
+                              <span>📍 Almacén:</span> <strong>{currentSection.section.almacen_nombre}</strong>
+                            </span>
+                            <span className="text-[10px] font-black text-neutral-300 bg-neutral-800 px-2.5 py-1 rounded border border-neutral-700 uppercase flex items-center gap-1">
+                              <span>🚪 Pasillo/Zona:</span> <strong>{currentSection.section.pasillo_nombre}</strong>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-1.5 items-center bg-neutral-800 p-3 rounded-2xl border border-neutral-700 max-w-xs">
+                        <div className="w-full text-[9px] font-black uppercase text-neutral-400 tracking-wider mb-1">Etiquetas / Tags</div>
+                        <Badge variant="outline" className="text-[9px] font-extrabold uppercase border-neutral-700 text-neutral-200">
+                          Tipo: {currentSection.section.tags?.tipo_producto || "todos"}
+                        </Badge>
+                        <Badge variant="outline" className="text-[9px] font-extrabold uppercase border-neutral-700 text-neutral-200">
+                          Género: {currentSection.section.tags?.genero || "todos"}
+                        </Badge>
+                        <Badge variant="outline" className="text-[9px] font-extrabold uppercase border-neutral-700 text-neutral-200">
+                          Marca: {currentSection.section.tags?.marca || "todos"}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <CardContent className="p-6 space-y-6">
+                      {/* Sub-level 1: Cajas in this section */}
+                      <div>
+                        <h3 className="text-xs font-black uppercase text-neutral-400 tracking-wider mb-3">Cajas en esta Sección ({currentSection.boxes.length})</h3>
+                        {currentSection.boxes.length === 0 ? (
+                          <p className="text-xs text-neutral-400 italic bg-neutral-50/50 p-4 rounded-xl border border-neutral-100">
+                            No hay cajas ubicadas físicamente en esta sección.
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {currentSection.boxes.map((b: any) => (
+                              <div
+                                key={b.id_caja}
+                                className="bg-neutral-50/50 border border-neutral-100 rounded-xl p-3 flex gap-3 items-center"
+                              >
+                                <div className={`p-2 rounded-lg text-white ${
+                                  b.estado === 'llena' ? 'bg-rose-500' : b.estado === 'activa' ? 'bg-amber-400 text-neutral-900' : 'bg-neutral-700'
+                                }`}>
+                                  <Package size={16} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-extrabold text-xs text-neutral-950">Caja {b.numero_caja}</p>
+                                  <p className="text-[9px] font-mono text-neutral-400 truncate">{b.sku || "Sin SKU"}</p>
+                                  <div className="flex gap-1.5 mt-0.5">
+                                    <span className="text-[9px] font-extrabold text-neutral-500 uppercase">{b.estado}</span>
+                                    <span className="text-[9px] text-neutral-300">|</span>
+                                    <span className="text-[9px] font-extrabold text-neutral-500">{b.total_unidades || 0} uds</span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Sub-level 2: Products in this section */}
+                      <div>
+                        <h3 className="text-xs font-black uppercase text-neutral-400 tracking-wider mb-3">Productos en esta Sección</h3>
+                        {currentSection.productos.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-10 text-neutral-400 border border-dashed rounded-2xl bg-neutral-50/20">
+                            <ShieldAlert size={28} className="mb-2 text-neutral-300" />
+                            <p className="font-bold text-xs">No hay productos en esta sección</p>
+                          </div>
+                        ) : (
+                          <div className="border rounded-2xl overflow-hidden overflow-x-auto w-full">
+                            <Table>
+                              <TableHeader className="bg-neutral-50/50">
+                                <TableRow>
+                                  <TableHead className="w-[60px]">Foto</TableHead>
+                                  <TableHead>Producto (SKU)</TableHead>
+                                  <TableHead>Detalles</TableHead>
+                                  <TableHead>Caja Contenedora</TableHead>
+                                  <TableHead className="text-right">Cantidad</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {currentSection.productos.map((item: any) => {
+                                  const box = currentSection.boxes.find((b: any) => b.id_caja === item.id_caja);
+                                  return (
+                                    <TableRow key={`${item.id_caja}-${item.id_producto}`} className="bg-white hover:bg-neutral-50/20">
+                                      <TableCell className="py-2">
+                                        {item.productos.has_foto ? (
+                                          <img 
+                                            src={`/api/productos/${item.id_producto}/image`}
+                                            alt="Producto"
+                                            loading="lazy"
+                                            className="w-10 h-10 object-cover rounded-lg shadow-sm border"
+                                          />
+                                        ) : (
+                                          <div className="w-10 h-10 bg-neutral-100 flex items-center justify-center rounded-lg border text-neutral-400">
+                                            <ImageIcon size={14} />
+                                          </div>
+                                        )}
+                                      </TableCell>
+                                      <TableCell className="py-2">
+                                        <div className="flex flex-col">
+                                          <span className="font-extrabold text-neutral-900 text-xs">{item.productos.sku}</span>
+                                          <span className="text-[9px] text-neutral-500 font-mono">{item.productos.ean_13 || "Sin EAN"}</span>
+                                        </div>
+                                      </TableCell>
+                                      <TableCell className="py-2">
+                                        <div className="flex flex-wrap gap-1">
+                                          <Badge variant="secondary" className="text-[9px] py-0 px-1 font-bold uppercase">{item.productos.tipo}</Badge>
+                                          <Badge variant="outline" className="text-[9px] py-0 px-1 font-bold uppercase bg-white">{item.productos.talla}</Badge>
+                                          {item.productos.marca_sub && (
+                                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-bold uppercase bg-white text-neutral-500">{item.productos.marca_sub}</Badge>
+                                          )}
+                                        </div>
+                                      </TableCell>
+                                      <TableCell className="py-2 font-bold text-xs text-neutral-700">
+                                        {box ? `Caja ${box.numero_caja}` : `ID Caja: ${item.id_caja}`}
+                                      </TableCell>
+                                      <TableCell className="text-right font-mono font-black text-xs pr-6 py-2 text-neutral-800">
+                                        {item.cantidad}
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="empty-section"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex flex-col items-center justify-center text-center p-12 border-2 border-dashed rounded-[2.5rem] bg-white border-neutral-200 min-h-[400px]"
+                >
+                  <div className="bg-neutral-50 p-4 rounded-full border mb-4 text-neutral-400">
+                    <MapPin size={48} strokeWidth={1} />
+                  </div>
+                  <h3 className="text-xl font-bold text-neutral-800">Esperando Consulta de Sección</h3>
+                  <p className="text-sm text-neutral-400 max-w-sm mt-1">
+                    Inicia la cámara o escribe el código de la sección para ver sus niveles y los productos almacenados.
                   </p>
                 </motion.div>
               )
