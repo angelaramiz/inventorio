@@ -11,6 +11,7 @@ interface Props {
   ean: string;
   defaultQty?: number;
   defaultTemporada?: string;
+  defaultTipo?: string;
   onClose: () => void;
   onSuccess: (product: Producto, qty: number) => void;
 }
@@ -18,7 +19,7 @@ interface Props {
 const TALLAS_LETRA = ["SinTalla", "XS", "S", "M", "L", "XL", "XXL"];
 const TALLAS_NUMERO = ["SinTalla", "38", "40", "42", "44", "46", "48"];
 
-export default function ProductQuickRegister({ ean, defaultQty = 1, defaultTemporada, onClose, onSuccess }: Props) {
+export default function ProductQuickRegister({ ean, defaultQty = 1, defaultTemporada, defaultTipo, onClose, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
@@ -33,8 +34,9 @@ export default function ProductQuickRegister({ ean, defaultQty = 1, defaultTempo
     ean_13: ean,
     talla: "SinTalla",
     temporada: (defaultTemporada || "todouso") as Temporada,
-    tipo: "otro" as TipoProducto,
-    marca_sub: "Guess"
+    tipo: (defaultTipo || "otro") as TipoProducto,
+    marca_sub: "Guess",
+    modelo_grupo: "sin modelo"
   });
 
   const [temporadas, setTemporadas] = useState<string[]>([]);
@@ -69,8 +71,12 @@ export default function ProductQuickRegister({ ean, defaultQty = 1, defaultTempo
         
         setFormData(prev => ({
           ...prev,
-          temporada: tempNames.includes("todouso") ? "todouso" : (tempNames[0] || ""),
-          tipo: tipoNames.includes("otro") ? "otro" : (tipoNames[0] || ""),
+          temporada: defaultTemporada && tempNames.includes(defaultTemporada) 
+            ? defaultTemporada 
+            : (tempNames.includes("todouso") ? "todouso" : (tempNames[0] || "")),
+          tipo: defaultTipo && tipoNames.includes(defaultTipo.toLowerCase()) 
+            ? defaultTipo.toLowerCase() 
+            : (tipoNames.includes("otro") ? "otro" : (tipoNames[0] || "")),
           marca_sub: prev.marca_sub || marcaNames[0] || "Guess"
         }));
       } catch (err) {
@@ -166,6 +172,7 @@ export default function ProductQuickRegister({ ean, defaultQty = 1, defaultTempo
       fd.append("temporada", formData.temporada);
       fd.append("tipo", formData.tipo);
       fd.append("marca_sub", formData.marca_sub);
+      fd.append("modelo_grupo", formData.modelo_grupo);
       
       if (photo) {
         const res = await fetch(photo);
@@ -244,8 +251,18 @@ export default function ProductQuickRegister({ ean, defaultQty = 1, defaultTempo
               <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">SKU / EAN-13</label>
               <Input 
                 value={formData.sku} 
-                onChange={e => setFormData({...formData, sku: e.target.value})}
+                onChange={e => setFormData({...formData, sku: e.target.value, ean_13: e.target.value})}
                 placeholder="Código de barras"
+                className="rounded-xl bg-neutral-50"
+              />
+            </div>
+            
+            <div className="space-y-1 col-span-2">
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Modelo de Grupo (Estilo/Color)</label>
+              <Input 
+                value={formData.modelo_grupo} 
+                onChange={e => setFormData({...formData, modelo_grupo: e.target.value})}
+                placeholder="Ej: M12345 (sin modelo por defecto)"
                 className="rounded-xl bg-neutral-50"
               />
             </div>

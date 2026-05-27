@@ -48,11 +48,13 @@ export default function InventoryControlView({ userRole }: Props) {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [reports, setReports] = useState<any[]>([]);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [simulatingCount, setSimulatingCount] = useState(false);
 
   const notificationsSSERef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     fetchEvents();
+    fetchZones(); // Always fetch zones/cajas for both roles to support count simulation
     if (userRole === "manager") {
       fetchCountRequests();
       fetchReports();
@@ -66,7 +68,6 @@ export default function InventoryControlView({ userRole }: Props) {
         if (notificationsSSERef.current) notificationsSSERef.current.close();
       };
     } else {
-      fetchZones();
       fetchOperatorSections();
     }
   }, [userRole]);
@@ -323,6 +324,113 @@ export default function InventoryControlView({ userRole }: Props) {
     }
   };
 
+  const handleCreateTestEvent = async () => {
+    try {
+      const resp = await fetch("/api/inventory/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          descripcion: "Evento de Prueba Simulado (Auto)",
+          fecha: new Date().toISOString().split("T")[0]
+        })
+      });
+      if (resp.ok) {
+        toast.success("Evento de prueba programado correctamente.");
+        fetchEvents();
+      } else {
+        toast.error("Error al programar evento de prueba.");
+      }
+    } catch (e) {
+      toast.error("Error de conexión al programar evento.");
+    }
+  };
+
+  const handleSimulateDiscrepancy = async () => {
+    if (!activeEvent) {
+      toast.error("No hay un evento de inventario activo.");
+      return;
+    }
+    if (zones.length === 0) {
+      toast.error("No hay contenedores cargados para simular.");
+      return;
+    }
+
+    setSimulatingCount(true);
+    try {
+      // 1. Pick a random box/caja
+      const randomBox = zones[Math.floor(Math.random() * zones.length)];
+      
+      // 2. Fetch products inside this box
+      const resp = await fetch(`/api/cajas/${randomBox.id_caja}/productos`);
+      let products = [];
+      if (resp.ok) {
+        products = await resp.json();
+      }
+      
+      const quantities: Record<number, number> = {};
+      const randomOperatorNames = ["Carlos", "Ana", "Luis", "Marta", "Sofia", "Pedro"];
+      const operatorName = `Simulado (${randomOperatorNames[Math.floor(Math.random() * randomOperatorNames.length)]})`;
+
+      if (products.length > 0) {
+        // Build quantities with random discrepancies
+        products.forEach((item: any) => {
+          const systemQty = item.cantidad;
+          // Introduce discrepancy (plus or minus, ensuring non-negative)
+          const discrepancy = Math.random() > 0.5 ? (Math.random() > 0.5 ? 2 : 1) : -1;
+          const physicalQty = Math.max(0, systemQty + discrepancy);
+          quantities[item.id_producto] = physicalQty;
+        });
+      } else {
+        // If box is empty, let's grab some random products from the catalog to simulate a discrepancy!
+        const prodResp = await fetch("/api/productos");
+        if (prodResp.ok) {
+          const allProducts = await prodResp.json();
+          if (allProducts.length > 0) {
+            // Pick 1-2 random products and report they were found in this box (which the system thinks is empty!)
+            const countToSimulate = Math.min(2, allProducts.length);
+            for (let i = 0; i < countToSimulate; i++) {
+              const p = allProducts[Math.floor(Math.random() * allProducts.length)];
+              quantities[p.id_producto] = Math.floor(Math.random() * 5) + 1; // 1-5 units
+            }
+          }
+        }
+      }
+
+      if (Object.keys(quantities).length === 0) {
+        toast.error("No se pudo simular: crea al menos un producto en el sistema.");
+        setSimulatingCount(false);
+        return;
+      }
+
+      // 3. Submit the count request
+      const zoneName = `Caja ${randomBox.numero_caja} (${randomBox.almacen_nombre || "Sin almacén"})`;
+      const submitResp = await fetch("/api/inventory/count-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event_id: activeEvent.id,
+          operator_id: operatorName,
+          zone_id: randomBox.id_caja,
+          zone_name: zoneName,
+          cantidades: quantities
+        })
+      });
+
+      if (submitResp.ok) {
+        toast.success(`Conteo simulado enviado con discrepancia para la Caja ${randomBox.numero_caja}`);
+        fetchCountRequests();
+        fetchNotifications();
+      } else {
+        toast.error("Error al enviar el conteo físico simulado.");
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Error de red al simular discrepancia.");
+    } finally {
+      setSimulatingCount(false);
+    }
+  };
+
   // Operator: Select Zone/Box
   const handleSelectZone = async (box: any) => {
     setSelectedZone(box);
@@ -494,15 +602,41 @@ export default function InventoryControlView({ userRole }: Props) {
           </div>
 
           {!activeEvent ? (
-            <Card className="border-dashed border-2 bg-neutral-50/50">
-              <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                <AlertCircle size={40} className="text-amber-500 mb-4" />
-                <h3 className="text-lg font-bold text-neutral-900">Sin Evento de Inventario Activo</h3>
-                <p className="text-neutral-500 text-sm max-w-xs mt-1">
-                  El Gerente debe crear y programar un evento de inventario antes de poder iniciar los conteos físicos.
-                </p>
-              </CardContent>
-            </Card>
+            <div className="space-y-4">
+              <Card className="border-dashed border-2 bg-neutral-50/50">
+                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                  <AlertCircle size={40} className="text-amber-500 mb-4" />
+                  <h3 className="text-lg font-bold text-neutral-900">Sin Evento de Inventario Activo</h3>
+                  <p className="text-neutral-500 text-sm max-w-xs mt-1">
+                    El Gerente debe crear y programar un evento de inventario antes de poder iniciar los conteos físicos.
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Simulation Panel for Operator when no event active */}
+              <Card className="border border-neutral-800 bg-neutral-950 text-white rounded-3xl overflow-hidden shadow-xl">
+                <CardHeader className="bg-neutral-900 pb-4 border-b border-neutral-800">
+                  <CardTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-wide text-amber-400">
+                    ⚡ Módulo de Simulación (Operador)
+                  </CardTitle>
+                  <CardDescription className="text-neutral-400 text-xs mt-0.5">
+                    Utilidades de prueba para simular eventos de conteo sin salir del rol.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-5 pb-6 flex flex-col sm:flex-row gap-4 items-center justify-between">
+                  <div className="text-left space-y-1">
+                    <p className="text-xs font-bold text-neutral-200 uppercase">Iniciar flujo de inventariado</p>
+                    <p className="text-[11px] text-neutral-400">Crea un evento de prueba programado en la base de datos para habilitar el conteo físico.</p>
+                  </div>
+                  <Button 
+                    onClick={handleCreateTestEvent}
+                    className="w-full sm:w-auto rounded-xl bg-amber-400 text-neutral-950 hover:bg-amber-300 font-extrabold text-xs px-6 py-2.5 h-11 shrink-0 shadow-lg border-none"
+                  >
+                    Crear Evento de Prueba
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
           ) : (
             <div className="space-y-6">
               {/* Scanner & Manual Barcode Input Bar */}
@@ -610,6 +744,23 @@ export default function InventoryControlView({ userRole }: Props) {
                           ))
                         )}
                       </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Operator active event simulation panel */}
+                  <Card className="border border-neutral-800 bg-neutral-950 text-white rounded-3xl overflow-hidden shadow-lg">
+                    <CardHeader className="bg-neutral-900 pb-3 border-b border-neutral-800">
+                      <CardTitle className="text-xs font-bold flex items-center gap-1.5 uppercase tracking-wider text-amber-400">
+                        ⚡ Módulo de Simulación
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-3 pb-4 space-y-2">
+                      <p className="text-[11px] text-neutral-400 leading-normal">
+                        El evento de inventario ya está activo. Usa la interfaz para ingresar conteos o cambia a Gerente para validar.
+                      </p>
+                      <Badge className="bg-emerald-500 text-neutral-950 font-bold uppercase text-[9px] hover:bg-emerald-500 border-none">
+                        Evento Activo
+                      </Badge>
                     </CardContent>
                   </Card>
                 </div>
@@ -770,6 +921,65 @@ export default function InventoryControlView({ userRole }: Props) {
                       {creatingEvent ? <Loader2 className="animate-spin" size={16} /> : "Programar Evento"}
                     </Button>
                   </form>
+                </CardContent>
+              </Card>
+
+              {/* Manager Simulation Panel */}
+              <Card className="border border-neutral-800 bg-neutral-950 text-white rounded-3xl overflow-hidden shadow-xl">
+                <CardHeader className="bg-neutral-900 pb-4 border-b border-neutral-800">
+                  <CardTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-wide text-amber-400">
+                    ⚡ Simulador de Eventos y Pruebas
+                  </CardTitle>
+                  <CardDescription className="text-neutral-400 text-xs mt-0.5">
+                    Simula la interacción de operadores y discrepancias de inventario.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-5 pb-5 space-y-4">
+                  <div className="flex flex-col gap-2">
+                    <Button 
+                      type="button"
+                      disabled={!!activeEvent}
+                      onClick={handleCreateTestEvent}
+                      className={`w-full rounded-xl font-extrabold text-xs h-10 border-none shadow-sm ${
+                        activeEvent 
+                          ? "bg-neutral-800 text-neutral-500 cursor-not-allowed" 
+                          : "bg-amber-400 text-neutral-950 hover:bg-amber-300"
+                      }`}
+                    >
+                      Crear Evento de Prueba
+                    </Button>
+                    
+                    <Button 
+                      type="button"
+                      disabled={!activeEvent || simulatingCount}
+                      onClick={handleSimulateDiscrepancy}
+                      className={`w-full rounded-xl font-extrabold text-xs h-10 border-none shadow-sm ${
+                        !activeEvent 
+                          ? "bg-neutral-800 text-neutral-500 cursor-not-allowed" 
+                          : "bg-white text-neutral-950 hover:bg-neutral-100"
+                      }`}
+                    >
+                      {simulatingCount ? (
+                        <>
+                          <Loader2 className="animate-spin mr-1.5 inline-block" size={14} /> Simulando...
+                        </>
+                      ) : (
+                        "Simular Conteo de Operador (Discrepancia)"
+                      )}
+                    </Button>
+                  </div>
+                  {activeEvent ? (
+                    <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-3 text-[11px] text-neutral-400 space-y-1">
+                      <span className="font-bold text-amber-400 uppercase text-[9px] block">Instrucciones de Prueba:</span>
+                      <p>
+                        Presiona <strong>Simular Conteo (Discrepancia)</strong> para crear de forma ficticia un conteo de operador con discrepancias para una caja aleatoria. Esto actualizará la bandeja de aprobación y notificará en tiempo real.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-amber-500/80 text-center font-semibold">
+                      ⚠️ Debe existir un evento de inventario activo para simular conteos.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
 

@@ -34,7 +34,8 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
     talla: product.talla || "M",
     temporada: product.temporada as Temporada,
     tipo: product.tipo as TipoProducto,
-    marca_sub: product.marca_sub || "Guess"
+    marca_sub: product.marca_sub || "Guess",
+    modelo_grupo: (product as any).modelo_grupo || "sin modelo"
   });
 
   const [temporadas, setTemporadas] = useState<string[]>([]);
@@ -92,7 +93,8 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
           talla: formData.talla.trim(),
           temporada: formData.temporada,
           tipo: formData.tipo,
-          marca_sub: formData.marca_sub.trim()
+          marca_sub: formData.marca_sub.trim(),
+          modelo_grupo: formData.modelo_grupo.trim()
         })
       });
 
@@ -149,6 +151,16 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
                 value={formData.ean_13} 
                 onChange={e => setFormData({...formData, ean_13: e.target.value})}
                 placeholder="Escribir EAN-13 si es diferente al SKU"
+                className="rounded-xl bg-neutral-50"
+              />
+            </div>
+
+            <div className="space-y-1 col-span-2">
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Modelo de Grupo (Estilo/Color)</label>
+              <Input 
+                value={formData.modelo_grupo} 
+                onChange={e => setFormData({...formData, modelo_grupo: e.target.value})}
+                placeholder="Ej: M12345 (sin modelo por defecto)"
                 className="rounded-xl bg-neutral-50"
               />
             </div>

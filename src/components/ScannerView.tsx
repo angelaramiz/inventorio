@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { AlertCircle, CheckCircle2, Box, Package, Camera, Power, RefreshCw, Scan, MapPin, Home } from "lucide-react";
+import { AlertCircle, CheckCircle2, Box, Package, Camera, Power, RefreshCw, Scan, MapPin, Home, Repeat } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ProductQuickRegister from "./ProductQuickRegister";
 import { Caja, Producto } from "../types";
@@ -31,6 +31,17 @@ export default function ScannerView() {
   const [pendingQty, setPendingQty] = useState(1);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const preventReactivateRef = useRef(false);
+
+  // Modo continuo
+  const [continuousScan, setContinuousScan] = useState(false);
+  const [lastScannedCode, setLastScannedCode] = useState<string | null>(null);
+  const [lastScannedTime, setLastScannedTime] = useState<number>(0);
+  
+  // Modales de cantidad
+  const [showQtyModal, setShowQtyModal] = useState(false);
+  const [showPostRegisterModal, setShowPostRegisterModal] = useState(false);
+  const [qtyModalValue, setQtyModalValue] = useState(1);
+  const [registeredProduct, setRegisteredProduct] = useState<Producto | null>(null);
 
   const handleManualSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -225,14 +236,93 @@ export default function ScannerView() {
   const onScanSuccess = (decodedText: string) => {
     if (isChecking) return;
     
-    // Stop the scanner immediately to avoid duplicate scan loops
-    stopScanner();
+    if (continuousScan) {
+      const now = Date.now();
+      if (decodedText === lastScannedCode && now - lastScannedTime < 2000) {
+        return; // ignore duplicates for 2 seconds
+      }
+      setLastScannedCode(decodedText);
+      setLastScannedTime(now);
+      toast.info(`EAN continuo: ${decodedText}`);
+      verifyProductContinuous(decodedText);
+    } else {
+      stopScanner();
+      setScannedResult(decodedText);
+      verifyProduct(decodedText);
+      toast.info(`EAN detectado: ${decodedText}`);
+    }
+  };
+
+  const verifyProductContinuous = async (ean: string) => {
+    let targetCaja = activeCaja;
     
-    setScannedResult(decodedText);
-    verifyProduct(decodedText);
-    
-    // Feedback visual/sonoro rápido
-    toast.info(`EAN detectado: ${decodedText}`);
+    if (activeMode === "seccion") {
+      if (!selectedSectionId) {
+        toast.error("Selecciona una sección activa primero");
+        return;
+      }
+      try {
+        const box = await getOrCreateSectionCaja(parseInt(selectedSectionId));
+        targetCaja = box;
+      } catch (err: any) {
+        toast.error(err.message || "Error al obtener contenedor de sección");
+        return;
+      }
+    } else if (activeMode === "almacen") {
+      if (!selectedAlmacenId) {
+        toast.error("Selecciona un almacén activo primero");
+        return;
+      }
+      try {
+        const box = await getOrCreateZoneCaja(parseInt(selectedAlmacenId));
+        targetCaja = box;
+      } catch (err: any) {
+        toast.error(err.message || "Error al obtener contenedor de almacén");
+        return;
+      }
+    } else {
+      if (!activeCaja) {
+        toast.error("Selecciona una caja activa primero en la pestaña de Cajas");
+        return;
+      }
+    }
+
+    try {
+      const resp = await fetch(`/api/verificar/${ean}`);
+      const data = await resp.json();
+      
+      if (!data.exists) {
+        stopScanner();
+        setScannedResult(ean);
+        setVerificationResult(data);
+        setResolvedTargetCaja(targetCaja);
+        setShowQuickRegister(true);
+        toast.warning("Producto no registrado. Inicia registro rápido.");
+      } else if (data.ubicacion && data.ubicacion.numero_caja !== targetCaja?.numero_caja) {
+        stopScanner();
+        setScannedResult(ean);
+        setVerificationResult(data);
+        setResolvedTargetCaja(targetCaja);
+        setShowConflictDialog(true);
+        toast.warning("Conflicto de ubicación. Escaneo pausado.");
+      } else {
+        const id_producto = data.product.id_producto;
+        const res = await fetch(`/api/cajas/${targetCaja.id_caja}/asignar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id_producto, force: false, cantidad: 1 })
+        });
+        if (res.ok) {
+          toast.success(`[Lote] 1 unidad de ${data.product.sku} agregada a ${targetCaja.numero_caja}`);
+          fetchCajas();
+        } else {
+          const errData = await res.json();
+          toast.error(errData.error || "Error al asignar");
+        }
+      }
+    } catch (error) {
+      toast.error("Error en escaneo continuo");
+    }
   };
 
   const onScanError = (errorMessage: string) => {
@@ -345,12 +435,11 @@ export default function ScannerView() {
       if (!data.exists) {
         toast.warning("Producto no encontrado. ¿Registrar ahora?");
         setShowQuickRegister(true);
-      } else if (data.ubicacion && data.ubicacion.numero_caja !== targetCaja?.numero_caja) {
-        // Conflicto de ubicación
-        setShowConflictDialog(true);
       } else {
-        // Producto existe y no tiene conflicto o ya está en esta caja
-        asignarProducto(data.product.id_producto, false, qty, undefined, targetCaja);
+        // En vez de agregar directo, abrimos modal de cantidad
+        setResolvedTargetCaja(targetCaja);
+        setQtyModalValue(1);
+        setShowQtyModal(true);
       }
     } catch (error) {
       toast.error("Error al verificar producto");
@@ -576,14 +665,26 @@ export default function ScannerView() {
                     <CardTitle>Visor de Cámara</CardTitle>
                     <CardDescription className="text-neutral-400">Escaneando EAN-13 / UPC / CODE 128</CardDescription>
                   </div>
-                  <Button 
-                    size="icon" 
-                    variant={isScannerActive ? "destructive" : "secondary"}
-                    onClick={isScannerActive ? stopScanner : startScanner}
-                    className="rounded-full"
-                  >
-                    {isScannerActive ? <Power size={18} /> : <Camera size={18} />}
-                  </Button>
+                  <div className="flex gap-2">
+                    {/* Botón Escaneo Continuo */}
+                    <Button 
+                      size="icon" 
+                      variant={continuousScan ? "default" : "outline"}
+                      onClick={() => setContinuousScan(prev => !prev)}
+                      className={`rounded-full ${continuousScan ? "bg-amber-500 hover:bg-amber-600 text-neutral-900 border-none animate-pulse" : "bg-neutral-800 text-neutral-400 border-neutral-700 hover:bg-neutral-700 hover:text-white"}`}
+                      title={continuousScan ? "Desactivar escaneo continuo (por lotes)" : "Activar escaneo continuo (por lotes)"}
+                    >
+                      <Repeat size={18} />
+                    </Button>
+                    <Button 
+                      size="icon" 
+                      variant={isScannerActive ? "destructive" : "secondary"}
+                      onClick={isScannerActive ? stopScanner : startScanner}
+                      className="rounded-full"
+                    >
+                      {isScannerActive ? <Power size={18} /> : <Camera size={18} />}
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className={`p-0 bg-neutral-100 relative min-h-[300px] flex items-center justify-center ${!isScannerActive ? "bg-neutral-200" : ""}`}>
@@ -729,13 +830,27 @@ export default function ScannerView() {
           ean={scannedResult || ""} 
           defaultQty={pendingQty}
           defaultTemporada={resolvedTargetCaja?.temporada_default || undefined}
+          defaultTipo={(() => {
+            if (activeMode === "caja") {
+              const type = activeCaja?.tags?.tipo_producto;
+              return type && type !== "todos" ? type : undefined;
+            }
+            if (activeMode === "seccion") {
+              const activeSec = sections.find(s => s.id_zona_seccion === parseInt(selectedSectionId));
+              const type = activeSec?.tags?.tipo_producto;
+              return type && type !== "todos" ? type : undefined;
+            }
+            return undefined;
+          })()}
           onClose={() => {
             setShowQuickRegister(false);
             startScanner();
           }}
           onSuccess={(product, qty) => {
             preventReactivateRef.current = true;
-            asignarProducto(product.id_producto, false, qty, undefined, resolvedTargetCaja);
+            setRegisteredProduct(product);
+            setQtyModalValue(qty || 1);
+            setShowPostRegisterModal(true);
             setShowQuickRegister(false);
           }}
         />
@@ -771,7 +886,7 @@ export default function ScannerView() {
           </div>
           <div className="flex flex-col gap-2 w-full pt-4 border-t border-neutral-100">
             <Button 
-              className="rounded-xl w-full bg-neutral-900 hover:bg-neutral-850 text-white h-11 text-sm font-extrabold transition-all"
+              className="rounded-xl w-full bg-neutral-900 hover:bg-neutral-855 text-white h-11 text-sm font-extrabold transition-all"
               onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'mover', resolvedTargetCaja)}
             >
               Mover a {activeMode === "caja" ? "esta caja" : activeMode === "seccion" ? "esta sección" : "este almacén"}
@@ -792,6 +907,130 @@ export default function ScannerView() {
             >
               Cancelar
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Cantidad para Producto Existente */}
+      <Dialog open={showQtyModal} onOpenChange={(open) => {
+        if (!open) {
+          setShowQtyModal(false);
+          if (!preventReactivateRef.current) startScanner();
+          preventReactivateRef.current = false;
+        }
+      }}>
+        <DialogContent className="max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black flex items-center gap-2">
+              <Package className="text-amber-500" size={20} />
+              Ingresar Cantidad
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-xs text-neutral-500 font-medium">
+              Define cuántas unidades del producto <strong>{verificationResult?.product?.sku}</strong> deseas guardar en el contenedor <strong>{resolvedTargetCaja?.numero_caja}</strong>.
+            </p>
+            
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-neutral-700 block">Cantidad a Guardar</label>
+              <Input 
+                type="number"
+                min={1}
+                value={qtyModalValue}
+                onChange={e => setQtyModalValue(parseInt(e.target.value) || 1)}
+                className="rounded-xl h-11 text-center font-bold text-lg focus-visible:ring-neutral-400"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowQtyModal(false);
+                  startScanner();
+                }} 
+                className="flex-1 rounded-xl h-11 font-bold text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button 
+                onClick={() => {
+                  setShowQtyModal(false);
+                  if (verificationResult?.ubicacion && verificationResult.ubicacion.numero_caja !== resolvedTargetCaja?.numero_caja) {
+                    setPendingQty(qtyModalValue);
+                    setShowConflictDialog(true);
+                  } else {
+                    asignarProducto(verificationResult.product.id_producto, false, qtyModalValue, undefined, resolvedTargetCaja);
+                  }
+                }} 
+                className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold text-xs"
+              >
+                Asociar a Caja
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Post-Registro (Asociar o registrar libre) */}
+      <Dialog open={showPostRegisterModal} onOpenChange={(open) => {
+        if (!open) {
+          setShowPostRegisterModal(false);
+          if (!preventReactivateRef.current) startScanner();
+          preventReactivateRef.current = false;
+        }
+      }}>
+        <DialogContent className="max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black flex items-center gap-2">
+              <CheckCircle2 className="text-emerald-500" size={20} />
+              Producto Registrado
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-xs text-neutral-500 font-medium">
+              El producto se ha registrado con éxito en el sistema. ¿Deseas ingresarlo en la caja/contenedor <strong>{resolvedTargetCaja?.numero_caja}</strong>?
+            </p>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-neutral-700 block">Cantidad a Ingresar</label>
+              <Input 
+                type="number"
+                min={1}
+                value={qtyModalValue}
+                onChange={e => setQtyModalValue(parseInt(e.target.value) || 1)}
+                className="rounded-xl h-11 text-center font-bold text-lg focus-visible:ring-neutral-400"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    setShowPostRegisterModal(false);
+                    toast.success("Producto registrado únicamente (libre de contenedor)");
+                    setVerificationResult(null);
+                    setScannedResult(null);
+                    startScanner();
+                  }} 
+                  className="flex-1 rounded-xl h-11 font-bold text-xs"
+                >
+                  Solo Registrar (Libre)
+                </Button>
+                <Button 
+                  onClick={() => {
+                    setShowPostRegisterModal(false);
+                    if (registeredProduct) {
+                      asignarProducto(registeredProduct.id_producto, false, qtyModalValue, undefined, resolvedTargetCaja);
+                    }
+                  }} 
+                  className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold text-xs"
+                >
+                  Asociar a Caja
+                </Button>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

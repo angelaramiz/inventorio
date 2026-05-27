@@ -381,70 +381,68 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
           </div>
         </DialogHeader>
 
-        <div className="flex-1 flex flex-col overflow-hidden bg-white">
-          {/* Formulario de SKU, Ubicación y Temporada de la Caja Contenedora (al tope de la modal) */}
-          <div className="p-6 pb-4 border-b bg-neutral-50 grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
-            {/* SKU Field */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="font-bold text-neutral-900 flex items-center gap-2 text-sm">
-                  <Barcode size={16} className="text-neutral-500" /> SKU de la Caja
-                </h3>
-                <p className="text-[11px] text-neutral-500">Asocia el código de barras físico</p>
-              </div>
+        <div className="flex-1 flex flex-col md:grid md:grid-cols-3 overflow-hidden bg-white">
+          {/* COLUMNA IZQUIERDA: Detalles (1) y Asociación (3) */}
+          <div className="md:col-span-1 border-b md:border-b-0 md:border-r bg-neutral-50/50 p-5 flex flex-col gap-5 overflow-y-auto shrink-0 md:shrink">
+            
+            {/* SECCIÓN 1: DETALLES DEL CONTENEDOR */}
+            <div className="space-y-4 bg-white p-5 rounded-2xl border shadow-sm">
+              <h3 className="font-black text-neutral-400 text-[10px] uppercase tracking-wider">1. Detalles del Contenedor</h3>
               
-              {isEditingSku ? (
-                <form onSubmit={handleSaveBoxSku} className="flex gap-2 w-full sm:w-auto">
-                  <Input 
-                    placeholder="Escribe SKU de la caja" 
-                    value={boxSku}
-                    onChange={(e) => setBoxSku(e.target.value)}
-                    className="bg-white rounded-xl text-sm h-10 w-full sm:w-40 focus-visible:ring-neutral-400"
-                    disabled={isSavingSku}
-                  />
-                  <Button type="submit" disabled={isSavingSku} className="rounded-xl h-10 bg-neutral-900 text-xs px-3 text-white font-semibold">
-                    {isSavingSku ? <Loader2 className="animate-spin" size={16} /> : "Ok"}
-                  </Button>
-                </form>
-              ) : (
-                <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end bg-white px-4 py-1.5 rounded-xl border">
-                  <span className="font-mono text-sm font-bold text-neutral-900">{boxSku || "Sin SKU"}</span>
-                  <Button 
-                    size="icon" 
-                    variant="ghost" 
-                    onClick={() => setIsEditingSku(true)}
-                    className="h-8 w-8 rounded-lg hover:bg-neutral-100"
-                  >
-                    <Edit2 size={14} className="text-neutral-600" />
-                  </Button>
+              {/* SKU Field */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                    <Barcode size={14} className="text-neutral-500" /> SKU de la Caja
+                  </h4>
                 </div>
-              )}
-            </div>
-
-            {/* Location Field */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 md:border-l md:pl-6">
-              <div>
-                <h3 className="font-bold text-neutral-900 flex items-center gap-2 text-sm">
-                  📍 Ubicación Física
-                </h3>
-                <p className="text-[11px] text-neutral-500">Asocia a una sección de almacén</p>
+                {isEditingSku ? (
+                  <form onSubmit={handleSaveBoxSku} className="flex gap-2">
+                    <Input 
+                      placeholder="Escribe SKU de la caja" 
+                      value={boxSku}
+                      onChange={(e) => setBoxSku(e.target.value)}
+                      className="bg-white rounded-xl text-xs h-9 w-full focus-visible:ring-neutral-400"
+                      disabled={isSavingSku}
+                    />
+                    <Button type="submit" disabled={isSavingSku} className="rounded-xl h-9 bg-neutral-900 text-xs px-3 text-white font-semibold">
+                      {isSavingSku ? <Loader2 className="animate-spin" size={14} /> : "Ok"}
+                    </Button>
+                  </form>
+                ) : (
+                  <div className="flex items-center gap-2 justify-between bg-neutral-50 px-3 py-1.5 rounded-xl border border-neutral-200/60">
+                    <span className="font-mono text-xs font-bold text-neutral-900">{boxSku || "Sin SKU"}</span>
+                    <Button 
+                      size="icon" 
+                      variant="ghost" 
+                      onClick={() => setIsEditingSku(true)}
+                      className="h-7 w-7 rounded-lg hover:bg-neutral-100"
+                    >
+                      <Edit2 size={12} className="text-neutral-600" />
+                    </Button>
+                  </div>
+                )}
               </div>
 
-              <div className="w-full sm:w-auto">
+              {/* Location Field */}
+              <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                  📍 Ubicación Física
+                </h4>
                 <select
                   value={selectedValue}
                   onChange={(e) => {
                     const val = e.target.value;
                     handleSaveLocation(val);
                   }}
-                  className="rounded-xl h-10 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full sm:w-48"
+                  className="rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full"
                 >
                   <option value="">Sin ubicación física</option>
                   {zones.map((zone) => {
                     const zoneSections = sections.filter(s => s.id_zona_almacen === zone.id_zona_almacen);
                     return (
                       <React.Fragment key={zone.id_zona_almacen}>
-                        <option value={`zone_${zone.id_zona_almacen}`} className="font-extrabold bg-neutral-100 text-neutral-950">
+                        <option value={`zone_${zone.id_zona_almacen}`} className="font-extrabold bg-neutral-100 text-neutral-955">
                           {zone.nombre.toUpperCase()} (SOLO ALMACÉN)
                         </option>
                         {zoneSections.map((sec) => (
@@ -457,174 +455,179 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                   })}
                 </select>
               </div>
+
+              {/* Temporada Default Field */}
+              <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                  <Calendar size={14} className="text-neutral-500" /> Temporada Default
+                </h4>
+                <div className="flex gap-2">
+                  <select
+                    value={cajaTemporada}
+                    onChange={e => setCajaTemporada(e.target.value)}
+                    className="flex-1 rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                  >
+                    <option value="">Sin temporada</option>
+                    {temporadasOpts.map(t => (
+                      <option key={t} value={t}>{t.toUpperCase()}</option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    onClick={handleSaveTemporada}
+                    disabled={isSavingTemporada}
+                    className="rounded-xl h-9 bg-neutral-900 text-xs px-3 text-white font-semibold shrink-0"
+                  >
+                    {isSavingTemporada ? <Loader2 className="animate-spin" size={14} /> : "Ok"}
+                  </Button>
+                </div>
+                {cajaTemporada && (
+                  <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full mt-1 w-fit">
+                    🗓 {cajaTemporada}
+                  </span>
+                )}
+              </div>
             </div>
 
-            {/* Temporada Default Field */}
-            <div className="flex flex-col justify-between gap-3 md:border-l md:pl-4">
+            {/* SECCIÓN 3: ASOCIAR PRODUCTOS */}
+            <div className="space-y-4 bg-white p-5 rounded-2xl border shadow-sm">
               <div>
-                <h3 className="font-bold text-neutral-900 flex items-center gap-2 text-sm">
-                  <Calendar size={16} className="text-neutral-500" /> Temporada Default
-                </h3>
-                <p className="text-[11px] text-neutral-500">Los nuevos productos heredan esta temporada</p>
+                <h3 className="font-black text-neutral-400 text-[10px] uppercase tracking-wider mb-1">3. Asociar Producto</h3>
+                <p className="text-[10px] text-neutral-500">Agrega un artículo existente por su código</p>
               </div>
-              <div className="flex gap-2 items-center">
-                <select
-                  value={cajaTemporada}
-                  onChange={e => setCajaTemporada(e.target.value)}
-                  className="flex-1 rounded-xl h-10 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                >
-                  <option value="">Sin temporada</option>
-                  {temporadasOpts.map(t => (
-                    <option key={t} value={t}>{t.toUpperCase()}</option>
-                  ))}
-                </select>
-                <Button
-                  type="button"
-                  onClick={handleSaveTemporada}
-                  disabled={isSavingTemporada}
-                  className="rounded-xl h-10 bg-neutral-900 text-xs px-3 text-white font-semibold shrink-0"
-                >
-                  {isSavingTemporada ? <Loader2 className="animate-spin" size={14} /> : "Ok"}
+              <form onSubmit={handleAddProductBySku} className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[9px] uppercase font-black text-neutral-400 block">SKU o EAN-13</label>
+                  <Input 
+                    placeholder="SKU o EAN-13" 
+                    value={skuInput}
+                    onChange={(e) => setSkuInput(e.target.value)}
+                    className="bg-white rounded-xl text-xs h-9 focus-visible:ring-neutral-400"
+                    disabled={isAdding}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] uppercase font-black text-neutral-400 block">Cantidad</label>
+                  <Input 
+                    type="number"
+                    min={1}
+                    value={qtyInput}
+                    onChange={(e) => setQtyInput(parseInt(e.target.value) || 1)}
+                    className="bg-white rounded-xl text-xs h-9 text-center font-bold focus-visible:ring-neutral-400"
+                    disabled={isAdding}
+                  />
+                </div>
+                <Button type="submit" disabled={isAdding || !skuInput.trim()} className="w-full rounded-xl h-9 bg-neutral-900 text-xs px-4 text-white font-semibold">
+                  {isAdding ? <Loader2 className="animate-spin" size={14} /> : <Plus size={14} className="inline mr-1" />}
+                  Asociar a Caja
                 </Button>
-              </div>
-              {cajaTemporada && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 px-2 py-1 rounded-full w-fit">
-                  🗓 {cajaTemporada}
-                </span>
+              </form>
+            </div>
+          </div>
+
+          {/* COLUMNA DERECHA: Tabla de Productos (2) */}
+          <div className="md:col-span-2 flex flex-col overflow-hidden p-5 gap-3">
+            <h3 className="font-black text-neutral-400 text-[10px] uppercase tracking-wider">2. Productos en Contenedor</h3>
+            
+            <div className="flex-1 overflow-auto">
+              {loading ? (
+                <div className="flex flex-col items-center justify-center h-full text-neutral-400 py-12">
+                  <Loader2 className="animate-spin mb-2" size={32} />
+                  <p className="text-sm font-medium">Cargando inventario de caja...</p>
+                </div>
+              ) : productos.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-neutral-400 border-2 border-dashed rounded-3xl p-8 py-16">
+                  <Package size={48} strokeWidth={1} className="mb-4 opacity-20" />
+                  <p className="font-semibold text-sm">Esta caja está vacía</p>
+                  <p className="text-xs text-center max-w-[250px] mt-1 text-neutral-500">Asocia productos en el formulario de la izquierda o utiliza el Escáner para empezar a llenarla.</p>
+                </div>
+              ) : (
+                <div className="rounded-xl border overflow-hidden overflow-x-auto w-full">
+                  <Table>
+                    <TableHeader className="bg-neutral-50/50">
+                      <TableRow>
+                        <TableHead className="w-[60px]">Foto</TableHead>
+                        <TableHead>Producto (SKU)</TableHead>
+                        <TableHead>Detalles</TableHead>
+                        <TableHead className="text-right w-[110px]">Cant.</TableHead>
+                        <TableHead className="w-[100px] text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {productos.map((item) => (
+                        <TableRow key={item.id_producto} className="group hover:bg-neutral-50/50">
+                          <TableCell className="py-2">
+                            {item.productos.has_foto ? (
+                              <img 
+                                src={`/api/productos/${item.id_producto}/image`}
+                                alt="Producto" 
+                                loading="lazy"
+                                className="w-10 h-10 object-cover rounded-lg shadow-sm border" 
+                              />
+                            ) : (
+                              <div className="w-10 h-10 bg-neutral-100 flex items-center justify-center rounded-lg border text-neutral-400">
+                                <ImageIcon size={16} />
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <div className="flex flex-col">
+                              <span className="font-bold text-neutral-900 text-xs">{item.productos.sku}</span>
+                              <span className="text-[10px] text-neutral-550 font-mono leading-none">{item.productos.ean_13}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <div className="flex gap-1 flex-wrap">
+                              <Badge variant="secondary" className="text-[9px] uppercase font-bold px-1.5 py-0.5">{item.productos.tipo}</Badge>
+                              <Badge variant="outline" className="text-[9px] uppercase font-bold bg-white px-1.5 py-0.5">{item.productos.talla}</Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateQty(item.id_producto, item.cantidad - 1)}
+                                className="w-6 h-6 flex items-center justify-center rounded-md border bg-white hover:bg-neutral-100 active:scale-95 transition-all text-neutral-600 font-bold text-xs select-none"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                value={item.cantidad}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value);
+                                  if (!isNaN(val) && val >= 0) {
+                                    handleUpdateQty(item.id_producto, val);
+                                  }
+                                }}
+                                className="w-10 h-6 text-center font-black text-xs bg-neutral-55 border rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-900 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateQty(item.id_producto, item.cantidad + 1)}
+                                className="w-6 h-6 flex items-center justify-center rounded-md border bg-white hover:bg-neutral-100 active:scale-95 transition-all text-neutral-600 font-bold text-xs select-none"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 text-right">
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => startTransfer(item)}
+                              className="h-8 rounded-lg hover:bg-neutral-100 font-bold text-[10px] flex gap-1 items-center justify-end w-full"
+                            >
+                              <ArrowLeftRight size={10} /> Transferir
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </div>
-          </div>
-
-          <div className="flex-1 overflow-auto p-6">
-            {loading ? (
-              <div className="flex flex-col items-center justify-center h-full text-neutral-400">
-                <Loader2 className="animate-spin mb-2" size={32} />
-                <p className="font-medium">Cargando inventario de caja...</p>
-              </div>
-            ) : productos.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-neutral-400 border-2 border-dashed rounded-3xl p-8">
-                <Package size={48} strokeWidth={1} className="mb-4 opacity-20" />
-                <p className="font-semibold">Esta caja está vacía</p>
-                <p className="text-sm">Asocia productos arriba o usa el Escáner para empezar a llenarla</p>
-              </div>
-            ) : (
-              <div className="rounded-xl border overflow-hidden overflow-x-auto w-full">
-                <Table>
-                  <TableHeader className="bg-neutral-50/50">
-                    <TableRow>
-                      <TableHead className="w-[80px]">Foto</TableHead>
-                      <TableHead>Producto (SKU)</TableHead>
-                      <TableHead>Detalles</TableHead>
-                      <TableHead className="text-right">Cant.</TableHead>
-                      <TableHead className="w-[120px] text-right">Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {productos.map((item) => (
-                      <TableRow key={item.id_producto} className="group hover:bg-neutral-50/50">
-                        <TableCell>
-                          {item.productos.has_foto ? (
-                            <img 
-                              src={`/api/productos/${item.id_producto}/image`}
-                              alt="Producto" 
-                              loading="lazy"
-                              className="w-12 h-12 object-cover rounded-lg shadow-sm border" 
-                            />
-                          ) : (
-                            <div className="w-12 h-12 bg-neutral-100 flex items-center justify-center rounded-lg border text-neutral-400">
-                              <ImageIcon size={18} />
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col">
-                            <span className="font-bold text-neutral-900">{item.productos.sku}</span>
-                            <span className="text-xs text-neutral-500 font-mono">{item.productos.ean_13}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-1.5 flex-wrap">
-                            <Badge variant="secondary" className="text-[10px] uppercase font-bold">{item.productos.tipo}</Badge>
-                            <Badge variant="outline" className="text-[10px] uppercase font-bold bg-white">{item.productos.talla}</Badge>
-                            <Badge variant="outline" className="text-[10px] uppercase font-bold bg-white">{item.productos.temporada}</Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right font-black text-lg">
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateQty(item.id_producto, item.cantidad - 1)}
-                              className="w-7 h-7 flex items-center justify-center rounded-lg border bg-white hover:bg-neutral-100 active:scale-95 transition-all text-neutral-600 font-bold text-xs select-none"
-                            >
-                              -
-                            </button>
-                            <input
-                              type="number"
-                              value={item.cantidad}
-                              onChange={(e) => {
-                                const val = parseInt(e.target.value);
-                                if (!isNaN(val) && val >= 0) {
-                                  handleUpdateQty(item.id_producto, val);
-                                }
-                              }}
-                              className="w-12 h-7 text-center font-black text-sm bg-neutral-50 border rounded-lg focus:outline-none focus:ring-1 focus:ring-neutral-900 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateQty(item.id_producto, item.cantidad + 1)}
-                              className="w-7 h-7 flex items-center justify-center rounded-lg border bg-white hover:bg-neutral-100 active:scale-95 transition-all text-neutral-600 font-bold text-xs select-none"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => startTransfer(item)}
-                            className="h-8 rounded-lg hover:bg-neutral-100 font-bold text-xs flex gap-1 items-center justify-end w-full"
-                          >
-                            <ArrowLeftRight size={12} className="mr-1" /> Transferir
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </div>
-
-          {/* Formulario de Asociación Manual de Productos (al fondo de la modal) */}
-          <div className="p-6 pt-4 pb-6 border-t bg-neutral-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
-            <div>
-              <h3 className="font-bold text-neutral-900 flex items-center gap-2 text-sm">
-                <Plus size={16} /> Asociar Producto Existente
-              </h3>
-              <p className="text-[11px] text-neutral-500">Ingresa el SKU o EAN-13 para agregarlo a esta caja</p>
-            </div>
-            <form onSubmit={handleAddProductBySku} className="flex gap-2 w-full sm:w-auto items-center">
-              <Input 
-                placeholder="SKU o EAN-13" 
-                value={skuInput}
-                onChange={(e) => setSkuInput(e.target.value)}
-                className="bg-white rounded-xl text-sm h-10 w-full sm:w-48 focus-visible:ring-neutral-400"
-                disabled={isAdding}
-              />
-              <Input 
-                type="number"
-                min={1}
-                value={qtyInput}
-                onChange={(e) => setQtyInput(parseInt(e.target.value) || 1)}
-                className="bg-white rounded-xl text-sm h-10 w-16 text-center font-bold focus-visible:ring-neutral-400"
-                disabled={isAdding}
-                title="Cantidad a asociar"
-              />
-              <Button type="submit" disabled={isAdding || !skuInput.trim()} className="rounded-xl h-10 bg-neutral-900 text-sm whitespace-nowrap px-4 text-white font-semibold">
-                {isAdding ? <Loader2 className="animate-spin" size={16} /> : "Agregar"}
-              </Button>
-            </form>
           </div>
         </div>
       </DialogContent>

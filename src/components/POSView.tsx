@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, useRef, FormEvent } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,9 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   ShoppingCart, Package, Trash2, Search, CheckCircle2, 
-  Loader2, CreditCard, Tag, AlertCircle, RefreshCw 
+  Loader2, CreditCard, Tag, AlertCircle, RefreshCw, Scan, Camera, Power
 } from "lucide-react";
 import { toast } from "sonner";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
 interface CartItem {
   producto_id: number;
@@ -35,17 +36,84 @@ export default function POSView() {
   const [vendedorId, setVendedorId] = useState("Vendedor 1");
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
-  const handleSearch = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
+  // Camera scanner states
+  const [isScannerActive, setIsScannerActive] = useState(false);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current) {
+        try {
+          if (scannerRef.current.isScanning) {
+            scannerRef.current.stop();
+          }
+        } catch (e) {}
+      }
+    };
+  }, []);
+
+  const startScanner = async () => {
+    try {
+      setIsScannerActive(true);
+      // small delay to let target element render in DOM
+      setTimeout(async () => {
+        try {
+          const html5QrCode = new Html5Qrcode("pos-reader");
+          scannerRef.current = html5QrCode;
+          
+          await html5QrCode.start(
+            { facingMode: "environment" },
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 150 },
+              formatsToSupport: [
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.UPC_A,
+                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.CODE_128
+              ]
+            } as any,
+            (decodedText) => {
+              stopScanner();
+              setSearchQuery(decodedText);
+              triggerSearch(decodedText);
+            },
+            () => {}
+          );
+          toast.success("Escáner de POS activado");
+        } catch (err) {
+          toast.error("Error al iniciar cámara");
+          setIsScannerActive(false);
+        }
+      }, 300);
+    } catch (e) {
+      setIsScannerActive(false);
+    }
+  };
+
+  const stopScanner = async () => {
+    if (scannerRef.current) {
+      try {
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
+        }
+        scannerRef.current.clear();
+      } catch (err) {
+        console.error("Failed to stop scanner in POS", err);
+      }
+      scannerRef.current = null;
+    }
+    setIsScannerActive(false);
+  };
+
+  const triggerSearch = async (query: string) => {
     setSearching(true);
     setSearchResult(null);
     setSelectedBox(null);
     setSellQty(1);
 
     try {
-      const resp = await fetch(`/api/consultar-producto/${searchQuery.trim()}`);
+      const resp = await fetch(`/api/consultar-producto/${query}`);
       if (resp.ok) {
         const data = await resp.json();
         setSearchResult(data);
@@ -60,6 +128,12 @@ export default function POSView() {
     } finally {
       setSearching(false);
     }
+  };
+
+  const handleSearch = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    triggerSearch(searchQuery.trim());
   };
 
   const handleAddToCart = () => {
@@ -187,7 +261,7 @@ export default function POSView() {
               Busca por SKU o EAN-13 para ubicar en qué cajas o estantes se encuentra stock
             </CardDescription>
           </CardHeader>
-          <CardContent className="pt-4">
+          <CardContent className="pt-4 space-y-4">
             <form onSubmit={handleSearch} className="flex gap-2">
               <Input 
                 placeholder="Escribe SKU o EAN-13 (ej: SKU-PANT-01)"
@@ -196,10 +270,33 @@ export default function POSView() {
                 className="rounded-2xl h-11 border-neutral-200 focus-visible:ring-neutral-400"
                 disabled={searching}
               />
+              <Button 
+                type="button"
+                variant="outline"
+                onClick={isScannerActive ? stopScanner : startScanner}
+                className="rounded-2xl h-11 px-3 border-neutral-200 text-neutral-600 hover:text-neutral-900 shrink-0"
+                title="Escanear producto con cámara"
+              >
+                <Scan size={18} />
+              </Button>
               <Button type="submit" disabled={searching} className="rounded-2xl h-11 px-6 bg-neutral-900 text-white font-bold shrink-0">
                 {searching ? <Loader2 className="animate-spin" size={18} /> : "Buscar"}
               </Button>
             </form>
+
+            {isScannerActive && (
+              <div className="relative rounded-2xl overflow-hidden border bg-neutral-900 aspect-[4/3] w-full flex flex-col shadow-inner justify-center items-center">
+                <div id="pos-reader" className="w-full h-full object-cover" />
+                <Button 
+                  onClick={stopScanner}
+                  variant="destructive"
+                  size="sm"
+                  className="absolute bottom-3 right-3 rounded-xl text-xs font-bold shadow-lg"
+                >
+                  Apagar Cámara
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 

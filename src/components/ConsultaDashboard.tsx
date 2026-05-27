@@ -65,6 +65,14 @@ export default function ConsultaDashboard() {
   const [filterTalla, setFilterTalla] = useState("");
   const [filterTemporada, setFilterTemporada] = useState("");
   const [filterTipo, setFilterTipo] = useState("");
+  
+  // Unified Dynamic Scan States
+  const [unifiedQuery, setUnifiedQuery] = useState("");
+  const [unifiedLoading, setUnifiedLoading] = useState(false);
+  const [isUnifiedScannerActive, setIsUnifiedScannerActive] = useState(false);
+
+  // Section display states
+  const [expandedBoxId, setExpandedBoxId] = useState<number | null>(null);
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
   const [marcasOpts, setMarcasOpts] = useState<string[]>([]);
   const [tiposOpts, setTiposOpts] = useState<string[]>([]);
@@ -144,6 +152,89 @@ export default function ConsultaDashboard() {
     setIsBoxScannerActive(false);
     setIsProdScannerActive(false);
     setIsSectionScannerActive(false);
+    setIsUnifiedScannerActive(false);
+  };
+
+  const startUnifiedScanner = async () => {
+    await stopAnyScanner();
+    try {
+      setIsUnifiedScannerActive(true);
+      setTimeout(async () => {
+        try {
+          const html5QrCode = new Html5Qrcode("unified-reader");
+          scannerRef.current = html5QrCode;
+          
+          await html5QrCode.start(
+            { facingMode: "environment" },
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 150 },
+              formatsToSupport: [
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.UPC_A,
+                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.CODE_128
+              ]
+            } as any,
+            (decodedText) => {
+              stopAnyScanner();
+              setUnifiedQuery(decodedText);
+              handleUnifiedSearch(decodedText);
+            },
+            () => {}
+          );
+          toast.success("Cámara iniciada");
+        } catch (err) {
+          toast.error("No se pudo iniciar la cámara");
+          setIsUnifiedScannerActive(false);
+        }
+      }, 300);
+    } catch (e) {
+      setIsUnifiedScannerActive(false);
+    }
+  };
+
+  const handleUnifiedSearch = async (query: string) => {
+    if (!query.trim()) return;
+    setUnifiedLoading(true);
+    stopAnyScanner();
+
+    try {
+      const resp = await fetch(`/api/consultar-dinamico/${encodeURIComponent(query.trim())}`);
+      if (resp.ok) {
+        const result = await resp.json();
+        if (result.type === "seccion") {
+          setCurrentSection(result.data);
+          setCurrentBox(null);
+          setCurrentProduct(null);
+          setExpandedBoxId(null);
+          setActiveTab("secciones");
+          toast.success(`Sección ${result.data.section.nombre.toUpperCase()} encontrada`);
+        } else if (result.type === "caja") {
+          setCurrentBox(result.data);
+          setCurrentSection(null);
+          setCurrentProduct(null);
+          setActiveTab("cajas");
+          toast.success(`Caja ${result.data.numero_caja} encontrada`);
+          
+          await saveBoxToHistory(result.data);
+          await loadHistory();
+        } else if (result.type === "producto") {
+          setCurrentProduct(result.data);
+          setCurrentBox(null);
+          setCurrentSection(null);
+          setActiveTab("productos");
+          toast.success(`Producto ${result.data.product.sku} encontrado`);
+        }
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Código no identificado en el sistema");
+      }
+    } catch (err) {
+      toast.error("Error al conectar con la base de datos");
+    } finally {
+      setUnifiedLoading(false);
+    }
   };
 
   const handleSectionSearch = async (searchQuery: string) => {
@@ -449,73 +540,78 @@ export default function ConsultaDashboard() {
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto p-4 md:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-7xl">
-        
-        {/* LEFT COLUMN: Controls & History */}
+      <main className="container mx-auto p-4 md:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-7xl">        {/* LEFT COLUMN: Controls & History */}
         <div className="lg:col-span-4 space-y-6 flex flex-col">
           
-          {/* TAB 1: BOX CONTROLS */}
+          {/* TARJETA UNIFICADA: ESCÁNER DINÁMICO */}
+          <Card className="border border-neutral-100 shadow-lg rounded-[2rem] overflow-hidden bg-white">
+            <CardHeader className="pb-3 bg-neutral-50/50">
+              <CardTitle className="text-lg font-bold flex items-center gap-2">
+                <Scan size={18} className="text-neutral-500 animate-pulse" />
+                Escáner Inteligente
+              </CardTitle>
+              <CardDescription>Escanea cualquier EAN de prenda, código de caja o sección</CardDescription>
+            </CardHeader>
+            <CardContent className="p-5 space-y-4">
+              {/* Scanner container */}
+              <div className="relative rounded-2xl overflow-hidden border bg-neutral-900 aspect-[4/3] w-full flex flex-col shadow-inner justify-center items-center">
+                <div 
+                  id="unified-reader" 
+                  className={`w-full h-full object-cover ${isUnifiedScannerActive ? "block" : "hidden"}`} 
+                />
+                {!isUnifiedScannerActive && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400 space-y-4 p-4 text-center">
+                    <Scan size={36} className="text-neutral-500" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-white">Escáner Apagado</p>
+                      <p className="text-[11px] text-neutral-400 max-w-[200px]">Usa la cámara trasera para escanear etiquetas</p>
+                    </div>
+                    <Button onClick={startUnifiedScanner} variant="outline" size="sm" className="rounded-full bg-white text-black hover:bg-neutral-100 font-semibold border-none shadow-md">
+                      Encender Cámara
+                    </Button>
+                  </div>
+                )}
+                {isUnifiedScannerActive && (
+                  <Button 
+                    onClick={stopAnyScanner}
+                    variant="destructive"
+                    size="sm"
+                    className="absolute bottom-3 right-3 rounded-xl text-xs font-bold shadow-lg"
+                  >
+                    Apagar Cámara
+                  </Button>
+                )}
+              </div>
+
+              {/* Input de búsqueda unificada */}
+              <div className="flex gap-2">
+                <Input 
+                  placeholder="Escribe SKU, EAN, Caja o Sección" 
+                  value={unifiedQuery}
+                  onChange={e => setUnifiedQuery(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleUnifiedSearch(unifiedQuery)}
+                  className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                />
+                <Button 
+                  onClick={() => handleUnifiedSearch(unifiedQuery)}
+                  disabled={unifiedLoading || !unifiedQuery.trim()}
+                  className="rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 font-bold shrink-0 px-4 text-white"
+                >
+                  {unifiedLoading ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* TAB 1: BOX FILTERS & HISTORY */}
           {activeTab === "cajas" && (
-            <Card className="border border-neutral-100 shadow-lg rounded-[2rem] overflow-hidden bg-white">
-              <CardHeader className="pb-3 bg-neutral-50/50">
-                <CardTitle className="text-lg font-bold flex items-center gap-2">
-                  <Search size={18} className="text-neutral-500" />
-                  Buscar Caja
-                </CardTitle>
-                <CardDescription>Escanea o escribe el número o SKU de la caja</CardDescription>
+            <Card className="border border-neutral-100 shadow-md rounded-[2rem] overflow-hidden bg-white">
+              <CardHeader className="pb-2 bg-neutral-50/50">
+                <CardTitle className="text-sm font-black uppercase text-neutral-400 tracking-wider">Filtros de Caja</CardTitle>
               </CardHeader>
               <CardContent className="p-5 space-y-4">
-                {/* Scanner Container */}
-                <div className="relative rounded-2xl overflow-hidden border bg-neutral-900 aspect-[4/3] w-full flex flex-col shadow-inner justify-center items-center">
-                  <div 
-                    id="dashboard-reader-box" 
-                    className={`w-full h-full object-cover ${isBoxScannerActive ? "block" : "hidden"}`} 
-                  />
-                  {!isBoxScannerActive && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400 space-y-4 p-4 text-center">
-                      <Scan size={36} className="text-neutral-500" />
-                      <div className="space-y-1">
-                        <p className="text-sm font-bold text-white">Escáner Desactivado</p>
-                        <p className="text-[11px] text-neutral-400 max-w-[200px]">Usa la cámara trasera para escanear el código de barra de la caja</p>
-                      </div>
-                      <Button onClick={startBoxScanner} variant="outline" size="sm" className="rounded-full bg-white text-black hover:bg-neutral-100 font-semibold border-none">
-                        Activar Cámara
-                      </Button>
-                    </div>
-                  )}
-                  {isBoxScannerActive && (
-                    <Button 
-                      onClick={stopAnyScanner}
-                      variant="destructive"
-                      size="sm"
-                      className="absolute bottom-3 right-3 rounded-xl text-xs font-bold shadow-lg"
-                    >
-                      Apagar Cámara
-                    </Button>
-                  )}
-                </div>
-
-                {/* Manual Input */}
-                <div className="flex gap-2">
-                  <Input 
-                    placeholder="Número o SKU de la caja" 
-                    value={boxQuery}
-                    onChange={e => setBoxQuery(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && handleBoxSearch(boxQuery)}
-                    className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
-                  />
-                  <Button 
-                    onClick={() => handleBoxSearch(boxQuery)}
-                    disabled={boxLoading || !boxQuery.trim()}
-                    className="rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 font-bold shrink-0 px-4"
-                  >
-                    {boxLoading ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
-                  </Button>
-                </div>
-
-                {/* Temporada Filter */}
-                <div className="border-t border-neutral-100 pt-3 space-y-2">
-                  <p className="text-[10px] font-black uppercase tracking-wider text-neutral-400">Filtrar por Temporada de Caja</p>
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-neutral-400">Filtrar por Temporada</p>
                   <div className="flex gap-2 items-center">
                     <select
                       value={boxFilterTemporada}
@@ -545,226 +641,88 @@ export default function ConsultaDashboard() {
             </Card>
           )}
 
-          {/* TAB 3: SECCIONES CONTROLS */}
-          {activeTab === "secciones" && (
-            <Card className="border border-neutral-100 shadow-lg rounded-[2rem] overflow-hidden bg-white">
-              <CardHeader className="pb-3 bg-neutral-50/50">
-                <CardTitle className="text-lg font-bold flex items-center gap-2">
-                  <Search size={18} className="text-neutral-500" />
-                  Buscar Sección
-                </CardTitle>
-                <CardDescription>Escanea o escribe el código alfanumérico (ej: AN01)</CardDescription>
-              </CardHeader>
-              <CardContent className="p-5 space-y-4">
-                {/* Scanner Container */}
-                <div className="relative rounded-2xl overflow-hidden border bg-neutral-900 aspect-[4/3] w-full flex flex-col shadow-inner justify-center items-center">
-                  <div 
-                    id="dashboard-reader-section" 
-                    className={`w-full h-full object-cover ${isSectionScannerActive ? "block" : "hidden"}`} 
-                  />
-                  {!isSectionScannerActive && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400 space-y-4 p-4 text-center">
-                      <Scan size={36} className="text-neutral-500" />
-                      <div className="space-y-1">
-                        <p className="text-sm font-bold text-white">Escáner Desactivado</p>
-                        <p className="text-[11px] text-neutral-400 max-w-[200px]">Usa la cámara trasera para escanear el código de barra de la sección</p>
-                      </div>
-                      <Button onClick={startSectionScanner} variant="outline" size="sm" className="rounded-full bg-white text-black hover:bg-neutral-100 font-semibold border-none">
-                        Activar Cámara
-                      </Button>
-                    </div>
-                  )}
-                  {isSectionScannerActive && (
-                    <Button 
-                      onClick={stopAnyScanner}
-                      variant="destructive"
-                      size="sm"
-                      className="absolute bottom-3 right-3 rounded-xl text-xs font-bold shadow-lg"
-                    >
-                      Apagar Cámara
-                    </Button>
-                  )}
-                </div>
-
-                {/* Manual Input */}
-                <div className="flex gap-2">
-                  <Input 
-                    placeholder="Código de sección (ej: AN01)" 
-                    value={sectionQuery}
-                    onChange={e => setSectionQuery(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && handleSectionSearch(sectionQuery)}
-                    className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
-                  />
-                  <Button 
-                    onClick={() => handleSectionSearch(sectionQuery)}
-                    disabled={sectionLoading || !sectionQuery.trim()}
-                    className="rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 font-bold shrink-0 px-4"
-                  >
-                    {sectionLoading ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* TAB 2: PRODUCT CONTROLS */}
+          {/* TAB 2: PRODUCT FILTERS */}
           {activeTab === "productos" && (
-            <Card className="border border-neutral-100 shadow-lg rounded-[2rem] overflow-hidden bg-white">
-              <CardHeader className="pb-3 bg-neutral-50/50">
+            <Card className="border border-neutral-100 shadow-md rounded-[2rem] overflow-hidden bg-white">
+              <CardHeader className="pb-2 bg-neutral-50/50">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-lg font-bold flex items-center gap-2">
-                      <Search size={18} className="text-neutral-500" />
-                      Buscar Producto
-                    </CardTitle>
-                    <CardDescription>Escanea, escribe o filtra por atributos</CardDescription>
-                  </div>
-                  <button
-                    onClick={() => setShowProdFilters(!showProdFilters)}
-                    className={`relative p-2 rounded-xl border transition-all ${showProdFilters ? "bg-neutral-900 text-white border-neutral-900" : "bg-white border-neutral-200 text-neutral-600 hover:border-neutral-400"}`}
-                    title="Filtros avanzados"
-                  >
-                    <SlidersHorizontal size={16} />
-                    {activeFilterCount > 0 && (
-                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-400 text-neutral-950 text-[9px] font-black rounded-full flex items-center justify-center">
-                        {activeFilterCount}
-                      </span>
-                    )}
-                  </button>
+                  <CardTitle className="text-sm font-black uppercase text-neutral-400 tracking-wider">Filtros Avanzados</CardTitle>
+                  {activeFilterCount > 0 && (
+                    <span className="w-5 h-5 bg-amber-400 text-neutral-950 text-[10px] font-black rounded-full flex items-center justify-center">
+                      {activeFilterCount}
+                    </span>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="p-5 space-y-4">
-                {/* Advanced Filters */}
-                <AnimatePresence>
-                  {showProdFilters && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="overflow-hidden"
+                <div className="grid grid-cols-1 gap-2">
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] font-bold text-neutral-500">MARCA</label>
+                    <select
+                      value={filterMarca}
+                      onChange={e => setFilterMarca(e.target.value)}
+                      className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
                     >
-                      <div className="bg-neutral-50 border border-neutral-100 rounded-2xl p-3 space-y-2 mb-2">
-                        <p className="text-[10px] font-black uppercase tracking-wider text-neutral-400">Búsqueda Avanzada</p>
-                        <div className="grid grid-cols-1 gap-2">
-                          <div className="flex flex-col gap-0.5">
-                            <label className="text-[10px] font-bold text-neutral-500">MARCA</label>
-                            <select
-                              value={filterMarca}
-                              onChange={e => setFilterMarca(e.target.value)}
-                              className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                            >
-                              <option value="">Todas las marcas</option>
-                              {marcasOpts.map(m => <option key={m} value={m}>{m}</option>)}
-                            </select>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <label className="text-[10px] font-bold text-neutral-500">TALLA</label>
-                            <select
-                              value={filterTalla}
-                              onChange={e => setFilterTalla(e.target.value)}
-                              className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                            >
-                              <option value="">Todas las tallas</option>
-                              {[...TALLAS_LETRA, ...TALLAS_NUMERO.filter(t => t !== "SinTalla")].filter((v, i, arr) => arr.indexOf(v) === i).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <label className="text-[10px] font-bold text-neutral-500">TEMPORADA</label>
-                            <select
-                              value={filterTemporada}
-                              onChange={e => setFilterTemporada(e.target.value)}
-                              className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                            >
-                              <option value="">Todas las temporadas</option>
-                              {temporadasOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
-                            </select>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <label className="text-[10px] font-bold text-neutral-500">TIPO</label>
-                            <select
-                              value={filterTipo}
-                              onChange={e => setFilterTipo(e.target.value)}
-                              className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 uppercase"
-                            >
-                              <option value="">Todos los tipos</option>
-                              {tiposOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
-                            </select>
-                          </div>
-                        </div>
-                        <div className="flex gap-2 pt-1">
-                          <Button
-                            size="sm"
-                            onClick={() => handleProdFilterSearch(prodQuery)}
-                            disabled={prodLoading}
-                            className="flex-1 rounded-xl h-9 bg-neutral-900 hover:bg-neutral-800 text-xs font-bold"
-                          >
-                            {prodLoading ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
-                            Buscar con filtros
-                          </Button>
-                          {activeFilterCount > 0 && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={clearProdFilters}
-                              className="rounded-xl h-9 text-xs font-bold text-neutral-500 hover:text-red-500 hover:bg-red-50 gap-1"
-                            >
-                              <X size={12} /> Limpiar
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Scanner Container */}
-                <div className="relative rounded-2xl overflow-hidden border bg-neutral-900 aspect-[4/3] w-full flex flex-col shadow-inner justify-center items-center">
-                  <div 
-                    id="dashboard-reader-prod" 
-                    className={`w-full h-full object-cover ${isProdScannerActive ? "block" : "hidden"}`} 
-                  />
-                  {!isProdScannerActive && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400 space-y-4 p-4 text-center">
-                      <Scan size={36} className="text-neutral-500" />
-                      <div className="space-y-1">
-                        <p className="text-sm font-bold text-white">Escáner Desactivado</p>
-                        <p className="text-[11px] text-neutral-400 max-w-[200px]">Escanea el código de barras (SKU o EAN-13) de una prenda</p>
-                      </div>
-                      <Button onClick={startProdScanner} variant="outline" size="sm" className="rounded-full bg-white text-black hover:bg-neutral-100 font-semibold border-none">
-                        Activar Cámara
-                      </Button>
-                    </div>
-                  )}
-                  {isProdScannerActive && (
-                    <Button 
-                      onClick={stopAnyScanner}
-                      variant="destructive"
+                      <option value="">Todas las marcas</option>
+                      {marcasOpts.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] font-bold text-neutral-500">TALLA</label>
+                    <select
+                      value={filterTalla}
+                      onChange={e => setFilterTalla(e.target.value)}
+                      className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                    >
+                      <option value="">Todas las tallas</option>
+                      {[...TALLAS_LETRA, ...TALLAS_NUMERO.filter(t => t !== "SinTalla")].filter((v, i, arr) => arr.indexOf(v) === i).map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] font-bold text-neutral-500">TEMPORADA</label>
+                    <select
+                      value={filterTemporada}
+                      onChange={e => setFilterTemporada(e.target.value)}
+                      className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                    >
+                      <option value="">Todas las temporadas</option>
+                      {temporadasOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] font-bold text-neutral-500">TIPO</label>
+                    <select
+                      value={filterTipo}
+                      onChange={e => setFilterTipo(e.target.value)}
+                      className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 uppercase"
+                    >
+                      <option value="">Todos los tipos</option>
+                      {tiposOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    onClick={() => handleProdFilterSearch(unifiedQuery)}
+                    disabled={prodLoading}
+                    className="flex-1 rounded-xl h-9 bg-neutral-900 hover:bg-neutral-800 text-xs font-bold text-white"
+                  >
+                    {prodLoading ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
+                    Filtrar Productos
+                  </Button>
+                  {activeFilterCount > 0 && (
+                    <Button
                       size="sm"
-                      className="absolute bottom-3 right-3 rounded-xl text-xs font-bold shadow-lg"
+                      variant="ghost"
+                      onClick={clearProdFilters}
+                      className="rounded-xl h-9 text-xs font-bold text-neutral-500 hover:text-red-500 hover:bg-red-50 gap-1"
                     >
-                      Apagar Cámara
+                      <X size={12} /> Limpiar
                     </Button>
                   )}
-                </div>
-
-                {/* Manual Input */}
-                <div className="flex gap-2">
-                  <Input 
-                    placeholder="SKU o EAN-13 del producto" 
-                    value={prodQuery}
-                    onChange={e => setProdQuery(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && handleProdSearch(prodQuery)}
-                    className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
-                  />
-                  <Button 
-                    onClick={() => handleProdSearch(prodQuery)}
-                    disabled={prodLoading || (!prodQuery.trim() && activeFilterCount === 0)}
-                    className="rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 font-bold shrink-0 px-4"
-                  >
-                    {prodLoading ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
-                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -1061,28 +1019,67 @@ export default function ConsultaDashboard() {
                             No hay cajas ubicadas físicamente en esta sección.
                           </p>
                         ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {currentSection.boxes.map((b: any) => (
-                              <div
-                                key={b.id_caja}
-                                className="bg-neutral-50/50 border border-neutral-100 rounded-xl p-3 flex gap-3 items-center"
-                              >
-                                <div className={`p-2 rounded-lg text-white ${
-                                  b.estado === 'llena' ? 'bg-rose-500' : b.estado === 'activa' ? 'bg-amber-400 text-neutral-900' : 'bg-neutral-700'
-                                }`}>
-                                  <Package size={16} />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-extrabold text-xs text-neutral-950">Caja {b.numero_caja}</p>
-                                  <p className="text-[9px] font-mono text-neutral-400 truncate">{b.sku || "Sin SKU"}</p>
-                                  <div className="flex gap-1.5 mt-0.5">
-                                    <span className="text-[9px] font-extrabold text-neutral-500 uppercase">{b.estado}</span>
-                                    <span className="text-[9px] text-neutral-300">|</span>
-                                    <span className="text-[9px] font-extrabold text-neutral-500">{b.total_unidades || 0} uds</span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {currentSection.boxes.map((b: any) => {
+                              const isExpanded = expandedBoxId === b.id_caja;
+                              const boxProducts = currentSection.productos.filter((item: any) => item.id_caja === b.id_caja);
+                              
+                              return (
+                                <div key={b.id_caja} className="flex flex-col border border-neutral-100 rounded-2xl overflow-hidden shadow-sm bg-neutral-50/20">
+                                  <div
+                                    onClick={() => setExpandedBoxId(isExpanded ? null : b.id_caja)}
+                                    className="p-4 flex gap-3 items-center hover:bg-neutral-100 cursor-pointer transition-colors"
+                                  >
+                                    <div className={`p-2 rounded-lg text-white ${
+                                      b.estado === 'llena' ? 'bg-rose-500' : b.estado === 'activa' ? 'bg-amber-400 text-neutral-900' : 'bg-neutral-700'
+                                    }`}>
+                                      <Package size={16} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-extrabold text-xs text-neutral-950">Caja {b.numero_caja}</p>
+                                      <p className="text-[9px] font-mono text-neutral-400 truncate">{b.sku || "Sin SKU"}</p>
+                                      <div className="flex gap-1.5 mt-0.5">
+                                        <span className="text-[9px] font-extrabold text-neutral-500 uppercase">{b.estado}</span>
+                                        <span className="text-[9px] text-neutral-300">|</span>
+                                        <span className="text-[9px] font-extrabold text-neutral-500">{b.total_unidades || 0} uds</span>
+                                      </div>
+                                    </div>
+                                    <ChevronRight size={16} className={`text-neutral-450 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
                                   </div>
+
+                                  {isExpanded && (
+                                    <div className="bg-white border-t p-3 space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar">
+                                      {boxProducts.length === 0 ? (
+                                        <p className="text-[10px] text-neutral-450 italic p-2 text-center bg-neutral-50 rounded-xl">No hay productos en esta caja.</p>
+                                      ) : (
+                                        boxProducts.map((item: any) => (
+                                          <div key={item.id_producto} className="flex items-center justify-between text-xs py-1.5 border-b border-neutral-50 last:border-none">
+                                            <div className="flex items-center gap-2">
+                                              {item.productos.has_foto ? (
+                                                <img 
+                                                  src={`/api/productos/${item.id_producto}/image`} 
+                                                  className="w-8 h-8 object-cover rounded-lg border bg-white" 
+                                                  alt="" 
+                                                />
+                                              ) : (
+                                                <div className="w-8 h-8 bg-neutral-100 rounded-lg border flex items-center justify-center text-neutral-400">
+                                                  <ImageIcon size={12} />
+                                                </div>
+                                              )}
+                                              <div className="flex flex-col">
+                                                <span className="font-bold text-neutral-800 text-[11px]">{item.productos.sku}</span>
+                                                <span className="text-[9px] text-neutral-400 bg-neutral-50 px-1 rounded w-max">Talla {item.productos.talla}</span>
+                                              </div>
+                                            </div>
+                                            <span className="font-black text-neutral-900 bg-neutral-100 px-2 py-0.5 rounded-lg text-[10px]">{item.cantidad} uds</span>
+                                          </div>
+                                        ))
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -1279,6 +1276,48 @@ export default function ConsultaDashboard() {
                               ))}
                             </TableBody>
                           </Table>
+                        </div>
+                      )}
+
+                      {/* Otras variantes del mismo modelo de grupo */}
+                      {currentProduct.variantes && currentProduct.variantes.length > 0 && (
+                        <div className="pt-6 border-t border-neutral-100 mt-6">
+                          <h3 className="text-xs font-black uppercase text-neutral-450 tracking-wider mb-4 flex items-center gap-1.5">
+                            <Layers size={14} className="text-amber-500" />
+                            Otras Variantes en Tallas (Mismo Estilo: {currentProduct.product.modelo_grupo})
+                          </h3>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                            {currentProduct.variantes.map((v: any) => (
+                              <button
+                                key={v.id_producto}
+                                onClick={async () => {
+                                  setUnifiedQuery(v.sku);
+                                  handleUnifiedSearch(v.sku);
+                                }}
+                                className="bg-neutral-50/50 hover:bg-neutral-100/50 border hover:border-neutral-900 rounded-xl p-3 flex gap-2.5 items-center text-left transition-all"
+                              >
+                                {v.has_foto ? (
+                                  <img 
+                                    src={`/api/productos/${v.id_producto}/image`}
+                                    alt=""
+                                    className="w-10 h-10 object-cover rounded-lg border bg-white"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 bg-white rounded-lg border flex items-center justify-center text-neutral-450">
+                                    <ImageIcon size={14} />
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-extrabold text-[11px] text-neutral-955 truncate leading-tight">{v.sku}</p>
+                                  <div className="flex gap-1.5 mt-1">
+                                    <span className="text-[9px] font-black uppercase bg-white border px-1.5 py-0.5 rounded text-neutral-600">Talla {v.talla}</span>
+                                    <span className="text-[9px] font-black uppercase bg-white border px-1.5 py-0.5 rounded text-neutral-400">{v.marca_sub}</span>
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </CardContent>

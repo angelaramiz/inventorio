@@ -123,7 +123,7 @@ app.get("/api/productos", async (req, res) => {
     
     let query = supabase
       .from("productos")
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at")
+      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo")
       .order("created_at", { ascending: false });
     
     if (q) {
@@ -155,7 +155,7 @@ app.get("/api/productos", async (req, res) => {
 app.post("/api/productos", upload.single('foto'), async (req, res) => {
   try {
     const supabase = getSupabase();
-    let { sku, ean_13, talla, temporada, tipo, marca_sub } = req.body;
+    let { sku, ean_13, talla, temporada, tipo, marca_sub, modelo_grupo } = req.body;
     
     sku = sanitizeIdentifier(sku, 100);
     if (!sku) {
@@ -175,13 +175,14 @@ app.post("/api/productos", upload.single('foto'), async (req, res) => {
     temporada = (sanitizeIdentifier(temporada, 100) || "todouso").toLowerCase();
     tipo = (sanitizeIdentifier(tipo, 100) || "otro").toLowerCase();
     marca_sub = sanitizeIdentifier(marca_sub, 100);
+    modelo_grupo = sanitizeIdentifier(modelo_grupo, 100) || "sin modelo";
     
     const foto = req.file ? '\\x' + req.file.buffer.toString('hex') : null;
     
     const { data, error } = await supabase
       .from("productos")
-      .insert([{ sku, ean_13, talla, temporada, tipo, marca_sub, foto }])
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at");
+      .insert([{ sku, ean_13, talla, temporada, tipo, marca_sub, foto, modelo_grupo }])
+      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo");
     
     if (error) throw error;
     res.json(data[0]);
@@ -413,7 +414,7 @@ app.get("/api/verificar/:ean", async (req, res) => {
     // 1. Buscar producto por EAN o SKU
     const { data: product, error: pError } = await supabase
       .from("productos")
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at")
+      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo")
       .or(`ean_13.eq.${ean},sku.eq.${ean}`)
       .single();
     
@@ -665,7 +666,7 @@ app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: "ID de producto inválido" });
     }
-    let { sku, ean_13, talla, temporada, tipo, marca_sub, delete_foto } = req.body;
+    let { sku, ean_13, talla, temporada, tipo, marca_sub, delete_foto, modelo_grupo } = req.body;
     
     const updateData: any = {};
     if (sku !== undefined) {
@@ -688,6 +689,7 @@ app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
     if (temporada !== undefined) updateData.temporada = (sanitizeIdentifier(temporada, 100) || "todouso").toLowerCase();
     if (tipo !== undefined) updateData.tipo = (sanitizeIdentifier(tipo, 100) || "otro").toLowerCase();
     if (marca_sub !== undefined) updateData.marca_sub = sanitizeIdentifier(marca_sub, 100);
+    if (modelo_grupo !== undefined) updateData.modelo_grupo = sanitizeIdentifier(modelo_grupo, 100) || "sin modelo";
     
     if (req.file) {
       updateData.foto = '\\x' + req.file.buffer.toString('hex');
@@ -699,7 +701,7 @@ app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
       .from("productos")
       .update(updateData)
       .eq("id_producto", id)
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at");
+      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo");
       
     if (error) throw error;
     res.json(data[0]);
@@ -1165,10 +1167,202 @@ app.get("/api/consultar-producto/:query", async (req, res) => {
       };
     });
     
+    // Fetch product variants of same group model (excluding original)
+    let variantes: any[] = [];
+    if (product.modelo_grupo && product.modelo_grupo !== "sin modelo") {
+      const { data: vData } = await supabase
+        .from("productos")
+        .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo")
+        .eq("modelo_grupo", product.modelo_grupo)
+        .neq("id_producto", product.id_producto);
+      variantes = vData || [];
+    }
+
     res.json({
       product,
-      boxes: resultBoxes
+      boxes: resultBoxes,
+      variantes
     });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/consultar-dinamico/:query - Unified dynamic lookup for section, box, or product
+app.get("/api/consultar-dinamico/:query", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { query } = req.params;
+    const cleanQuery = query.trim();
+
+    // 1. Check Section by SEC-ID or by name
+    const secMatch = cleanQuery.match(/^SEC-(\d+)$/i);
+    const secNumericId = secMatch ? parseInt(secMatch[1]) : parseInt(cleanQuery);
+    
+    let sectionQuery = supabase.from("zonas_seccion").select(`
+      id_zona_seccion,
+      nombre,
+      id_zona_almacen,
+      id_zona_pasillo,
+      tags,
+      zonas_almacen (nombre),
+      zonas_pasillo (
+        nombre,
+        id_zona_almacen,
+        zonas_almacen (nombre)
+      )
+    `);
+    
+    if (!isNaN(secNumericId)) {
+      sectionQuery = sectionQuery.eq("id_zona_seccion", secNumericId);
+    } else {
+      sectionQuery = sectionQuery.ilike("nombre", cleanQuery);
+    }
+    
+    const { data: section } = await sectionQuery.maybeSingle();
+    
+    if (section) {
+      // It is a Section! Fetch section boxes
+      const { data: boxes } = await supabase
+        .from("vista_total_cajas")
+        .select("*")
+        .eq("id_zona_seccion", section.id_zona_seccion);
+        
+      const boxIds = (boxes || []).map(b => b.id_caja);
+      let productos: any[] = [];
+      
+      if (boxIds.length > 0) {
+        const { data: prodData } = await supabase
+          .from("caja_productos")
+          .select(`
+            id_caja,
+            id_producto,
+            cantidad,
+            productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, modelo_grupo)
+          `)
+          .in("id_caja", boxIds);
+          
+        productos = prodData || [];
+      }
+      
+      return res.json({
+        type: "seccion",
+        data: {
+          section: {
+            id_zona_seccion: section.id_zona_seccion,
+            nombre: section.nombre,
+            tags: section.tags,
+            pasillo_nombre: section.zonas_pasillo ? section.zonas_pasillo.nombre : "Sin pasillo",
+            almacen_nombre: section.zonas_pasillo && section.zonas_pasillo.zonas_almacen 
+              ? section.zonas_pasillo.zonas_almacen.nombre 
+              : (section.zonas_almacen ? section.zonas_almacen.nombre : "Sin almacén")
+          },
+          boxes: boxes || [],
+          productos: productos
+        }
+      });
+    }
+
+    // 2. Check Caja (by SKU or numero_caja)
+    const { data: caja } = await supabase
+      .from("vista_total_cajas")
+      .select("*")
+      .or(`sku.eq.${cleanQuery},numero_caja.eq.${cleanQuery}`)
+      .maybeSingle();
+      
+    if (caja) {
+      // Fetch products inside the box
+      const { data: productos } = await supabase
+        .from("caja_productos")
+        .select(`
+          id_producto,
+          cantidad,
+          productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo)
+        `)
+        .eq("id_caja", caja.id_caja);
+        
+      return res.json({
+        type: "caja",
+        data: {
+          ...caja,
+          productos: productos || []
+        }
+      });
+    }
+
+    // 3. Check Product (by SKU or EAN-13)
+    const { data: product } = await supabase
+      .from("productos")
+      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo")
+      .or(`sku.eq.${cleanQuery},ean_13.eq.${cleanQuery}`)
+      .maybeSingle();
+      
+    if (product) {
+      // Find boxes containing this product
+      const { data: boxes } = await supabase
+        .from("caja_productos")
+        .select(`
+          cantidad,
+          cajas (
+            id_caja, 
+            numero_caja, 
+            sku, 
+            estado,
+            id_zona_seccion,
+            id_zona_almacen,
+            zonas_seccion (
+              nombre,
+              zonas_almacen (nombre)
+            ),
+            zonas_almacen (
+              nombre
+            )
+          )
+        `)
+        .eq("id_producto", product.id_producto);
+        
+      const resultBoxes = (boxes || []).map((b: any) => {
+        const c = b.cajas;
+        const seccion = c.zonas_seccion;
+        const almacen = seccion ? seccion.zonas_almacen : c.zonas_almacen;
+        return {
+          cantidad: b.cantidad,
+          cajas: {
+            id_caja: c.id_caja,
+            numero_caja: c.numero_caja,
+            sku: c.sku,
+            estado: c.estado,
+            id_zona_seccion: c.id_zona_seccion,
+            id_zona_almacen: c.id_zona_almacen,
+            seccion_nombre: seccion ? seccion.nombre : null,
+            almacen_nombre: almacen ? almacen.nombre : null
+          }
+        };
+      });
+
+      // Find variants (same modelo_grupo, excluding the searched product)
+      let variantes: any[] = [];
+      if (product.modelo_grupo && product.modelo_grupo !== "sin modelo") {
+        const { data: vData } = await supabase
+          .from("productos")
+          .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo")
+          .eq("modelo_grupo", product.modelo_grupo)
+          .neq("id_producto", product.id_producto);
+        variantes = vData || [];
+      }
+
+      return res.json({
+        type: "producto",
+        data: {
+          product,
+          boxes: resultBoxes,
+          variantes
+        }
+      });
+    }
+
+    // 4. Return 404 if nothing matches
+    res.status(404).json({ error: "No se encontró caja, producto o sección que coincida con el código ingresado" });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
