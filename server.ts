@@ -103,6 +103,27 @@ function getSupabase() {
   return supabaseClient;
 }
 
+let hasModeloGrupoColumn = false;
+let schemaDetected = false;
+
+async function detectSchema() {
+  if (schemaDetected) return;
+  try {
+    const supabase = getSupabase();
+    const { data } = await supabase.from("productos").select("*").limit(1);
+    if (data && data.length > 0) {
+      hasModeloGrupoColumn = "modelo_grupo" in data[0];
+    } else {
+      const { error } = await supabase.from("productos").select("modelo_grupo").limit(1);
+      hasModeloGrupoColumn = !error;
+    }
+    schemaDetected = true;
+    console.log("Schema detection: hasModeloGrupoColumn =", hasModeloGrupoColumn);
+  } catch (e) {
+    console.error("Schema detection failed, assuming false:", e);
+  }
+}
+
 // --- HEALTH CHECK ---
 app.get('/api/health', (req, res) => {
   res.json({
@@ -118,12 +139,14 @@ app.get('/api/health', (req, res) => {
 // GET /api/productos - EXCLUDING foto column for performance. Supports ?q, ?marca, ?talla, ?temporada, ?tipo filters
 app.get("/api/productos", async (req, res) => {
   try {
+    await detectSchema();
     const supabase = getSupabase();
     const { q, marca, talla, temporada, tipo } = req.query as Record<string, string>;
     
+    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
     let query = supabase
       .from("productos")
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo")
+      .select(fields)
       .order("created_at", { ascending: false });
     
     if (q) {
@@ -145,7 +168,13 @@ app.get("/api/productos", async (req, res) => {
     
     const { data, error } = await query;
     if (error) throw error;
-    res.json(data);
+    
+    const mappedData = (data || []).map(p => ({
+      modelo_grupo: "sin modelo",
+      ...p
+    }));
+    
+    res.json(mappedData);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -154,6 +183,7 @@ app.get("/api/productos", async (req, res) => {
 // POST /api/productos - Supporting multipart/form-data for binary capture
 app.post("/api/productos", upload.single('foto'), async (req, res) => {
   try {
+    await detectSchema();
     const supabase = getSupabase();
     let { sku, ean_13, talla, temporada, tipo, marca_sub, modelo_grupo } = req.body;
     
@@ -175,17 +205,28 @@ app.post("/api/productos", upload.single('foto'), async (req, res) => {
     temporada = (sanitizeIdentifier(temporada, 100) || "todouso").toLowerCase();
     tipo = (sanitizeIdentifier(tipo, 100) || "otro").toLowerCase();
     marca_sub = sanitizeIdentifier(marca_sub, 100);
-    modelo_grupo = sanitizeIdentifier(modelo_grupo, 100) || "sin modelo";
     
-    const foto = req.file ? '\\x' + req.file.buffer.toString('hex') : null;
+    const insertData: any = { sku, ean_13, talla, temporada, tipo, marca_sub };
+    if (req.file) {
+      insertData.foto = '\\x' + req.file.buffer.toString('hex');
+    }
+    if (hasModeloGrupoColumn) {
+      insertData.modelo_grupo = sanitizeIdentifier(modelo_grupo, 100) || "sin modelo";
+    }
     
+    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
     const { data, error } = await supabase
       .from("productos")
-      .insert([{ sku, ean_13, talla, temporada, tipo, marca_sub, foto, modelo_grupo }])
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo");
+      .insert([insertData])
+      .select(fields);
     
     if (error) throw error;
-    res.json(data[0]);
+    
+    const result = {
+      modelo_grupo: "sin modelo",
+      ...data[0]
+    };
+    res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -408,13 +449,15 @@ app.delete("/api/cajas/:id", async (req, res) => {
 // GET /api/verificar/:ean
 app.get("/api/verificar/:ean", async (req, res) => {
   try {
+    await detectSchema();
     const supabase = getSupabase();
     const { ean } = req.params;
     
     // 1. Buscar producto por EAN o SKU
+    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
     const { data: product, error: pError } = await supabase
       .from("productos")
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo")
+      .select(fields)
       .or(`ean_13.eq.${ean},sku.eq.${ean}`)
       .single();
     
@@ -424,6 +467,11 @@ app.get("/api/verificar/:ean", async (req, res) => {
       }
       throw pError;
     }
+    
+    const mappedProduct = {
+      modelo_grupo: "sin modelo",
+      ...product
+    };
     
     // 2. Buscar si esta en alguna caja activa o llena
     const { data: ubicaciones, error: uError } = await supabase
@@ -444,7 +492,7 @@ app.get("/api/verificar/:ean", async (req, res) => {
     
     res.json({
       exists: true,
-      product,
+      product: mappedProduct,
       ubicacion: ubicacionActiva ? {
         numero_caja: ubicacionActiva.cajas.numero_caja,
         estado: ubicacionActiva.cajas.estado,
@@ -661,6 +709,7 @@ app.get("/api/reporte-inventario", async (req, res) => {
 // PUT /api/productos/:id - Editing product info and/or photo
 app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
   try {
+    await detectSchema();
     const supabase = getSupabase();
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
@@ -689,7 +738,10 @@ app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
     if (temporada !== undefined) updateData.temporada = (sanitizeIdentifier(temporada, 100) || "todouso").toLowerCase();
     if (tipo !== undefined) updateData.tipo = (sanitizeIdentifier(tipo, 100) || "otro").toLowerCase();
     if (marca_sub !== undefined) updateData.marca_sub = sanitizeIdentifier(marca_sub, 100);
-    if (modelo_grupo !== undefined) updateData.modelo_grupo = sanitizeIdentifier(modelo_grupo, 100) || "sin modelo";
+    
+    if (hasModeloGrupoColumn && modelo_grupo !== undefined) {
+      updateData.modelo_grupo = sanitizeIdentifier(modelo_grupo, 100) || "sin modelo";
+    }
     
     if (req.file) {
       updateData.foto = '\\x' + req.file.buffer.toString('hex');
@@ -697,14 +749,20 @@ app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
       updateData.foto = null;
     }
     
+    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
     const { data, error } = await supabase
       .from("productos")
       .update(updateData)
       .eq("id_producto", id)
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo");
+      .select(fields);
       
     if (error) throw error;
-    res.json(data[0]);
+    
+    const result = {
+      modelo_grupo: "sin modelo",
+      ...data[0]
+    };
+    res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -1110,13 +1168,15 @@ app.get("/api/consultar-seccion/:query", async (req, res) => {
 // GET /api/consultar-producto/:query - Query boxes containing a specific product by SKU or EAN-13
 app.get("/api/consultar-producto/:query", async (req, res) => {
   try {
+    await detectSchema();
     const supabase = getSupabase();
     const { query } = req.params;
     
     // Find the product by SKU or EAN-13
+    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
     const { data: product, error: pErr } = await supabase
       .from("productos")
-      .select("*")
+      .select(fields)
       .or(`sku.eq.${query},ean_13.eq.${query}`)
       .maybeSingle();
       
@@ -1161,6 +1221,8 @@ app.get("/api/consultar-producto/:query", async (req, res) => {
           numero_caja: c.numero_caja,
           sku: c.sku,
           estado: c.estado,
+          id_zona_seccion: c.id_zona_seccion,
+          id_zona_almacen: c.id_zona_almacen,
           seccion_nombre: seccion ? seccion.nombre : null,
           almacen_nombre: almacen ? almacen.nombre : null
         }
@@ -1169,19 +1231,19 @@ app.get("/api/consultar-producto/:query", async (req, res) => {
     
     // Fetch product variants of same group model (excluding original)
     let variantes: any[] = [];
-    if (product.modelo_grupo && product.modelo_grupo !== "sin modelo") {
+    if (hasModeloGrupoColumn && product.modelo_grupo && product.modelo_grupo !== "sin modelo") {
       const { data: vData } = await supabase
         .from("productos")
-        .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo")
+        .select(fields)
         .eq("modelo_grupo", product.modelo_grupo)
         .neq("id_producto", product.id_producto);
       variantes = vData || [];
     }
 
     res.json({
-      product,
+      product: { modelo_grupo: "sin modelo", ...product },
       boxes: resultBoxes,
-      variantes
+      variantes: variantes.map((v: any) => ({ modelo_grupo: "sin modelo", ...v }))
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -1191,6 +1253,7 @@ app.get("/api/consultar-producto/:query", async (req, res) => {
 // GET /api/consultar-dinamico/:query - Unified dynamic lookup for section, box, or product
 app.get("/api/consultar-dinamico/:query", async (req, res) => {
   try {
+    await detectSchema();
     const supabase = getSupabase();
     const { query } = req.params;
     const cleanQuery = query.trim();
@@ -1221,6 +1284,10 @@ app.get("/api/consultar-dinamico/:query", async (req, res) => {
     
     const { data: section } = await sectionQuery.maybeSingle();
     
+    // Determine dynamic fields
+    const prodFields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
+    const prodFieldsWithActive = `${prodFields}, activo, created_at`;
+    
     if (section) {
       // It is a Section! Fetch section boxes
       const { data: boxes } = await supabase
@@ -1238,11 +1305,14 @@ app.get("/api/consultar-dinamico/:query", async (req, res) => {
             id_caja,
             id_producto,
             cantidad,
-            productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, modelo_grupo)
+            productos (${prodFields})
           `)
           .in("id_caja", boxIds);
           
-        productos = prodData || [];
+        productos = (prodData || []).map((item: any) => ({
+          ...item,
+          productos: item.productos ? { modelo_grupo: "sin modelo", ...item.productos } : null
+        }));
       }
       
       return res.json({
@@ -1277,15 +1347,20 @@ app.get("/api/consultar-dinamico/:query", async (req, res) => {
         .select(`
           id_producto,
           cantidad,
-          productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo)
+          productos (${prodFieldsWithActive})
         `)
         .eq("id_caja", caja.id_caja);
         
+      const mappedProductos = (productos || []).map((item: any) => ({
+        ...item,
+        productos: item.productos ? { modelo_grupo: "sin modelo", ...item.productos } : null
+      }));
+
       return res.json({
         type: "caja",
         data: {
           ...caja,
-          productos: productos || []
+          productos: mappedProductos
         }
       });
     }
@@ -1293,7 +1368,7 @@ app.get("/api/consultar-dinamico/:query", async (req, res) => {
     // 3. Check Product (by SKU or EAN-13)
     const { data: product } = await supabase
       .from("productos")
-      .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo")
+      .select(prodFieldsWithActive)
       .or(`sku.eq.${cleanQuery},ean_13.eq.${cleanQuery}`)
       .maybeSingle();
       
@@ -1342,10 +1417,10 @@ app.get("/api/consultar-dinamico/:query", async (req, res) => {
 
       // Find variants (same modelo_grupo, excluding the searched product)
       let variantes: any[] = [];
-      if (product.modelo_grupo && product.modelo_grupo !== "sin modelo") {
+      if (hasModeloGrupoColumn && product.modelo_grupo && product.modelo_grupo !== "sin modelo") {
         const { data: vData } = await supabase
           .from("productos")
-          .select("id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo")
+          .select(prodFieldsWithActive)
           .eq("modelo_grupo", product.modelo_grupo)
           .neq("id_producto", product.id_producto);
         variantes = vData || [];
@@ -1354,9 +1429,9 @@ app.get("/api/consultar-dinamico/:query", async (req, res) => {
       return res.json({
         type: "producto",
         data: {
-          product,
+          product: { modelo_grupo: "sin modelo", ...product },
           boxes: resultBoxes,
-          variantes
+          variantes: variantes.map((v: any) => ({ modelo_grupo: "sin modelo", ...v }))
         }
       });
     }

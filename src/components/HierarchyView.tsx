@@ -130,9 +130,13 @@ export default function HierarchyView() {
       const resp = await fetch("/api/productos");
       if (resp.ok) {
         const data = await resp.json();
-        setProducts(data);
+        setProducts(Array.isArray(data) ? data : []);
+      } else {
+        setProducts([]);
       }
-    } catch (e) {}
+    } catch (e) {
+      setProducts([]);
+    }
   };
 
   const fetchSettings = async () => {

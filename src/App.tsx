@@ -47,7 +47,7 @@ export default function App() {
   if (pathMatches(["/pos"])) {
     return (
       <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-6">
-        <AppHeader subtitle="POS" actionLabel="Ir al Panel" actionUrl="/" />
+        <AppHeader subtitle="POS" />
         <main className="container mx-auto p-4 md:p-6 lg:p-8">
           <POSView />
         </main>
@@ -61,7 +61,7 @@ export default function App() {
   if (pathMatches(["/conteo_inv"])) {
     return (
       <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-6">
-        <AppHeader subtitle="CONTEO" actionLabel="Ir al Panel" actionUrl="/" />
+        <AppHeader subtitle="CONTEO" />
         <main className="container mx-auto p-4 md:p-6 lg:p-8">
           <InventoryControlView userRole="operator" />
         </main>
@@ -75,7 +75,7 @@ export default function App() {
   if (pathMatches(["/admin"])) {
     return (
       <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-6">
-        <AppHeader subtitle="CONTEO ADMIN" actionLabel="Ir al Panel" actionUrl="/" />
+        <AppHeader subtitle="CONTEO ADMIN" />
         <main className="container mx-auto p-4 md:p-6 lg:p-8">
           <InventoryControlView userRole="manager" />
         </main>

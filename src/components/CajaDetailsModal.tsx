@@ -2,7 +2,7 @@ import React, { useState, useEffect, FormEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode, ArrowLeftRight, Trash2, Calendar } from "lucide-react";
+import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode, ArrowLeftRight, Trash2, Calendar, ChevronDown, ChevronRight } from "lucide-react";
 import { Caja, CajaProducto } from "../types";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,10 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   const [cajaTemporada, setCajaTemporada] = useState(caja.temporada_default || "");
   const [isSavingTemporada, setIsSavingTemporada] = useState(false);
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
+  
+  // Collapsible section states (retracted by default)
+  const [isSection1Expanded, setIsSection1Expanded] = useState(false);
+  const [isSection3Expanded, setIsSection3Expanded] = useState(false);
 
   // Locations states
   const [zones, setZones] = useState<any[]>([]);
@@ -386,142 +390,167 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
           <div className="md:col-span-1 border-b md:border-b-0 md:border-r bg-neutral-50/50 p-5 flex flex-col gap-5 overflow-y-auto shrink-0 md:shrink">
             
             {/* SECCIÓN 1: DETALLES DEL CONTENEDOR */}
-            <div className="space-y-4 bg-white p-5 rounded-2xl border shadow-sm">
-              <h3 className="font-black text-neutral-400 text-[10px] uppercase tracking-wider">1. Detalles del Contenedor</h3>
+            <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+              <div 
+                onClick={() => setIsSection1Expanded(prev => !prev)}
+                className="flex items-center justify-between p-4 cursor-pointer hover:bg-neutral-50/50 transition-colors select-none border-b border-neutral-100"
+              >
+                <h3 className="font-black text-neutral-800 text-xs uppercase tracking-wider flex items-center gap-2">
+                  <Box size={14} className="text-neutral-500" />
+                  1. Detalles del Contenedor
+                </h3>
+                {isSection1Expanded ? <ChevronDown size={16} className="text-neutral-550" /> : <ChevronRight size={16} className="text-neutral-550" />}
+              </div>
               
-              {/* SKU Field */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between items-center">
-                  <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
-                    <Barcode size={14} className="text-neutral-500" /> SKU de la Caja
-                  </h4>
-                </div>
-                {isEditingSku ? (
-                  <form onSubmit={handleSaveBoxSku} className="flex gap-2">
-                    <Input 
-                      placeholder="Escribe SKU de la caja" 
-                      value={boxSku}
-                      onChange={(e) => setBoxSku(e.target.value)}
-                      className="bg-white rounded-xl text-xs h-9 w-full focus-visible:ring-neutral-400"
-                      disabled={isSavingSku}
-                    />
-                    <Button type="submit" disabled={isSavingSku} className="rounded-xl h-9 bg-neutral-900 text-xs px-3 text-white font-semibold">
-                      {isSavingSku ? <Loader2 className="animate-spin" size={14} /> : "Ok"}
-                    </Button>
-                  </form>
-                ) : (
-                  <div className="flex items-center gap-2 justify-between bg-neutral-50 px-3 py-1.5 rounded-xl border border-neutral-200/60">
-                    <span className="font-mono text-xs font-bold text-neutral-900">{boxSku || "Sin SKU"}</span>
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      onClick={() => setIsEditingSku(true)}
-                      className="h-7 w-7 rounded-lg hover:bg-neutral-100"
-                    >
-                      <Edit2 size={12} className="text-neutral-600" />
-                    </Button>
+              {isSection1Expanded && (
+                <div className="p-5 space-y-4">
+                  {/* SKU Field */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                        <Barcode size={14} className="text-neutral-500" /> SKU de la Caja
+                      </h4>
+                    </div>
+                    {isEditingSku ? (
+                      <form onSubmit={handleSaveBoxSku} className="flex gap-2">
+                        <Input 
+                          placeholder="Escribe SKU de la caja" 
+                          value={boxSku}
+                          onChange={(e) => setBoxSku(e.target.value)}
+                          className="bg-white rounded-xl text-xs h-9 w-full focus-visible:ring-neutral-400"
+                          disabled={isSavingSku}
+                        />
+                        <Button type="submit" disabled={isSavingSku} className="rounded-xl h-9 bg-neutral-900 text-xs px-3 text-white font-semibold">
+                          {isSavingSku ? <Loader2 className="animate-spin" size={14} /> : "Ok"}
+                        </Button>
+                      </form>
+                    ) : (
+                      <div className="flex items-center gap-2 justify-between bg-neutral-50 px-3 py-1.5 rounded-xl border border-neutral-200/60">
+                        <span className="font-mono text-xs font-bold text-neutral-900">{boxSku || "Sin SKU"}</span>
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          onClick={() => setIsEditingSku(true)}
+                          className="h-7 w-7 rounded-lg hover:bg-neutral-100"
+                        >
+                          <Edit2 size={12} className="text-neutral-600" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* Location Field */}
-              <div className="space-y-1.5 pt-2 border-t border-neutral-100">
-                <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
-                  📍 Ubicación Física
-                </h4>
-                <select
-                  value={selectedValue}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    handleSaveLocation(val);
-                  }}
-                  className="rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full"
-                >
-                  <option value="">Sin ubicación física</option>
-                  {zones.map((zone) => {
-                    const zoneSections = sections.filter(s => s.id_zona_almacen === zone.id_zona_almacen);
-                    return (
-                      <React.Fragment key={zone.id_zona_almacen}>
-                        <option value={`zone_${zone.id_zona_almacen}`} className="font-extrabold bg-neutral-100 text-neutral-955">
-                          {zone.nombre.toUpperCase()} (SOLO ALMACÉN)
-                        </option>
-                        {zoneSections.map((sec) => (
-                          <option key={sec.id_zona_seccion} value={`section_${sec.id_zona_seccion}`}>
-                            &nbsp;&nbsp;↳ {sec.pasillo_nombre && sec.pasillo_nombre !== "Sin pasillo" ? `${sec.pasillo_nombre.toUpperCase()} > ` : ""}{sec.nombre.toUpperCase()}
-                          </option>
+                  {/* Location Field */}
+                  <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                    <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                      📍 Ubicación Física
+                    </h4>
+                    <select
+                      value={selectedValue}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        handleSaveLocation(val);
+                      }}
+                      className="rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full"
+                    >
+                      <option value="">Sin ubicación física</option>
+                      {zones.map((zone) => {
+                        const zoneSections = sections.filter(s => s.id_zona_almacen === zone.id_zona_almacen);
+                        return (
+                          <React.Fragment key={zone.id_zona_almacen}>
+                            <option value={`zone_${zone.id_zona_almacen}`} className="font-extrabold bg-neutral-100 text-neutral-955">
+                              {zone.nombre.toUpperCase()} (SOLO ALMACÉN)
+                            </option>
+                            {zoneSections.map((sec) => (
+                              <option key={sec.id_zona_seccion} value={`section_${sec.id_zona_seccion}`}>
+                                &nbsp;&nbsp;↳ {sec.pasillo_nombre && sec.pasillo_nombre !== "Sin pasillo" ? `${sec.pasillo_nombre.toUpperCase()} > ` : ""}{sec.nombre.toUpperCase()}
+                              </option>
+                            ))}
+                          </React.Fragment>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  {/* Temporada Default Field */}
+                  <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                    <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                      <Calendar size={14} className="text-neutral-500" /> Temporada Default
+                    </h4>
+                    <div className="flex gap-2">
+                      <select
+                        value={cajaTemporada}
+                        onChange={e => setCajaTemporada(e.target.value)}
+                        className="flex-1 rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                      >
+                        <option value="">Sin temporada</option>
+                        {temporadasOpts.map(t => (
+                          <option key={t} value={t}>{t.toUpperCase()}</option>
                         ))}
-                      </React.Fragment>
-                    );
-                  })}
-                </select>
-              </div>
-
-              {/* Temporada Default Field */}
-              <div className="space-y-1.5 pt-2 border-t border-neutral-100">
-                <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
-                  <Calendar size={14} className="text-neutral-500" /> Temporada Default
-                </h4>
-                <div className="flex gap-2">
-                  <select
-                    value={cajaTemporada}
-                    onChange={e => setCajaTemporada(e.target.value)}
-                    className="flex-1 rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                  >
-                    <option value="">Sin temporada</option>
-                    {temporadasOpts.map(t => (
-                      <option key={t} value={t}>{t.toUpperCase()}</option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    onClick={handleSaveTemporada}
-                    disabled={isSavingTemporada}
-                    className="rounded-xl h-9 bg-neutral-900 text-xs px-3 text-white font-semibold shrink-0"
-                  >
-                    {isSavingTemporada ? <Loader2 className="animate-spin" size={14} /> : "Ok"}
-                  </Button>
+                      </select>
+                      <Button
+                        type="button"
+                        onClick={handleSaveTemporada}
+                        disabled={isSavingTemporada}
+                        className="rounded-xl h-9 bg-neutral-900 text-xs px-3 text-white font-semibold shrink-0"
+                      >
+                        {isSavingTemporada ? <Loader2 className="animate-spin" size={14} /> : "Ok"}
+                      </Button>
+                    </div>
+                    {cajaTemporada && (
+                      <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full mt-1 w-fit">
+                        🗓 {cajaTemporada}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                {cajaTemporada && (
-                  <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full mt-1 w-fit">
-                    🗓 {cajaTemporada}
-                  </span>
-                )}
-              </div>
+              )}
             </div>
 
             {/* SECCIÓN 3: ASOCIAR PRODUCTOS */}
-            <div className="space-y-4 bg-white p-5 rounded-2xl border shadow-sm">
-              <div>
-                <h3 className="font-black text-neutral-400 text-[10px] uppercase tracking-wider mb-1">3. Asociar Producto</h3>
-                <p className="text-[10px] text-neutral-500">Agrega un artículo existente por su código</p>
+            <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+              <div 
+                onClick={() => setIsSection3Expanded(prev => !prev)}
+                className="flex items-center justify-between p-4 cursor-pointer hover:bg-neutral-50/50 transition-colors select-none border-b border-neutral-100"
+              >
+                <h3 className="font-black text-neutral-800 text-xs uppercase tracking-wider flex items-center gap-2">
+                  <Plus size={14} className="text-neutral-500" />
+                  3. Asociar Producto
+                </h3>
+                {isSection3Expanded ? <ChevronDown size={16} className="text-neutral-550" /> : <ChevronRight size={16} className="text-neutral-550" />}
               </div>
-              <form onSubmit={handleAddProductBySku} className="space-y-3">
-                <div className="space-y-1">
-                  <label className="text-[9px] uppercase font-black text-neutral-400 block">SKU o EAN-13</label>
-                  <Input 
-                    placeholder="SKU o EAN-13" 
-                    value={skuInput}
-                    onChange={(e) => setSkuInput(e.target.value)}
-                    className="bg-white rounded-xl text-xs h-9 focus-visible:ring-neutral-400"
-                    disabled={isAdding}
-                  />
+              
+              {isSection3Expanded && (
+                <div className="p-5 space-y-4">
+                  <p className="text-[10px] text-neutral-500">Agrega un artículo existente por su código</p>
+                  <form onSubmit={handleAddProductBySku} className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] uppercase font-black text-neutral-400 block">SKU o EAN-13</label>
+                      <Input 
+                        placeholder="SKU o EAN-13" 
+                        value={skuInput}
+                        onChange={(e) => setSkuInput(e.target.value)}
+                        className="bg-white rounded-xl text-xs h-9 focus-visible:ring-neutral-400"
+                        disabled={isAdding}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] uppercase font-black text-neutral-400 block">Cantidad</label>
+                      <Input 
+                        type="number"
+                        min={1}
+                        value={qtyInput}
+                        onChange={(e) => setQtyInput(parseInt(e.target.value) || 1)}
+                        className="bg-white rounded-xl text-xs h-9 text-center font-bold focus-visible:ring-neutral-400"
+                        disabled={isAdding}
+                      />
+                    </div>
+                    <Button type="submit" disabled={isAdding || !skuInput.trim()} className="w-full rounded-xl h-9 bg-neutral-900 text-xs px-4 text-white font-semibold">
+                      {isAdding ? <Loader2 className="animate-spin" size={14} /> : <Plus size={14} className="inline mr-1" />}
+                      Asociar a Caja
+                    </Button>
+                  </form>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] uppercase font-black text-neutral-400 block">Cantidad</label>
-                  <Input 
-                    type="number"
-                    min={1}
-                    value={qtyInput}
-                    onChange={(e) => setQtyInput(parseInt(e.target.value) || 1)}
-                    className="bg-white rounded-xl text-xs h-9 text-center font-bold focus-visible:ring-neutral-400"
-                    disabled={isAdding}
-                  />
-                </div>
-                <Button type="submit" disabled={isAdding || !skuInput.trim()} className="w-full rounded-xl h-9 bg-neutral-900 text-xs px-4 text-white font-semibold">
-                  {isAdding ? <Loader2 className="animate-spin" size={14} /> : <Plus size={14} className="inline mr-1" />}
-                  Asociar a Caja
-                </Button>
-              </form>
+              )}
             </div>
           </div>
 

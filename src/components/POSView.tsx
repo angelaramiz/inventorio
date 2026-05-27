@@ -11,6 +11,24 @@ import {
 import { toast } from "sonner";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
+const waitForElement = (id: string, maxAttempts = 10, interval = 100): Promise<HTMLElement> => {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const check = () => {
+      const el = document.getElementById(id);
+      if (el) {
+        resolve(el);
+      } else if (attempts >= maxAttempts) {
+        reject(new Error(`Element with id=${id} not found`));
+      } else {
+        attempts++;
+        setTimeout(check, interval);
+      }
+    };
+    check();
+  });
+};
+
 interface CartItem {
   producto_id: number;
   sku: string;
@@ -55,37 +73,37 @@ export default function POSView() {
   const startScanner = async () => {
     try {
       setIsScannerActive(true);
-      // small delay to let target element render in DOM
-      setTimeout(async () => {
-        try {
-          const html5QrCode = new Html5Qrcode("pos-reader");
-          scannerRef.current = html5QrCode;
-          
-          await html5QrCode.start(
-            { facingMode: "environment" },
-            {
-              fps: 10,
-              qrbox: { width: 250, height: 150 },
-              formatsToSupport: [
-                Html5QrcodeSupportedFormats.EAN_13,
-                Html5QrcodeSupportedFormats.UPC_A,
-                Html5QrcodeSupportedFormats.UPC_E,
-                Html5QrcodeSupportedFormats.CODE_128
-              ]
-            } as any,
-            (decodedText) => {
-              stopScanner();
-              setSearchQuery(decodedText);
-              triggerSearch(decodedText);
-            },
-            () => {}
-          );
-          toast.success("Escáner de POS activado");
-        } catch (err) {
-          toast.error("Error al iniciar cámara");
-          setIsScannerActive(false);
-        }
-      }, 300);
+      // Wait for DOM to update and render the #pos-reader element using waitForElement
+      await new Promise(resolve => setTimeout(resolve, 50));
+      try {
+        await waitForElement("pos-reader", 20, 50);
+        const html5QrCode = new Html5Qrcode("pos-reader");
+        scannerRef.current = html5QrCode;
+        
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 150 },
+            formatsToSupport: [
+              Html5QrcodeSupportedFormats.EAN_13,
+              Html5QrcodeSupportedFormats.UPC_A,
+              Html5QrcodeSupportedFormats.UPC_E,
+              Html5QrcodeSupportedFormats.CODE_128
+            ]
+          } as any,
+          (decodedText) => {
+            stopScanner();
+            setSearchQuery(decodedText);
+            triggerSearch(decodedText);
+          },
+          () => {}
+        );
+        toast.success("Escáner de POS activado");
+      } catch (err) {
+        toast.error("Error al iniciar cámara o elemento no renderizado");
+        setIsScannerActive(false);
+      }
     } catch (e) {
       setIsScannerActive(false);
     }

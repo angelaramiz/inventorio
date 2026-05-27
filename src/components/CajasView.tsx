@@ -82,8 +82,9 @@ export default function CajasView() {
       const cjxResp = await fetch("/api/cajas");
       if (cjxResp.ok) {
         const data = await cjxResp.json();
+        const dataList = Array.isArray(data) ? data : [];
         // Filters boxes that have SKU matching the CJ-X pattern
-        const filtered = data.filter((c: any) => c.sku && c.sku.startsWith("CJ-"));
+        const filtered = dataList.filter((c: any) => c.sku && c.sku.startsWith("CJ-"));
         setCjxContainers(filtered.map((f: any) => {
           const parts = f.sku.split("-");
           return {

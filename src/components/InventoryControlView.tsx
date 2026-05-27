@@ -12,6 +12,24 @@ import {
 import { toast } from "sonner";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
+const waitForElement = (id: string, maxAttempts = 10, interval = 100): Promise<HTMLElement> => {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const check = () => {
+      const el = document.getElementById(id);
+      if (el) {
+        resolve(el);
+      } else if (attempts >= maxAttempts) {
+        reject(new Error(`Element with id=${id} not found`));
+      } else {
+        attempts++;
+        setTimeout(check, interval);
+      }
+    };
+    check();
+  });
+};
+
 interface Props {
   userRole: "operator" | "manager";
 }
@@ -182,38 +200,46 @@ export default function InventoryControlView({ userRole }: Props) {
 
   const startCameraScanner = async () => {
     try {
-      let html5QrCode = scannerRef.current;
-      if (!html5QrCode) {
-        html5QrCode = new Html5Qrcode("operator-reader");
-        scannerRef.current = html5QrCode;
-      }
-
-      if (html5QrCode.isScanning) {
-        await html5QrCode.stop();
-      }
-
       setIsScannerActive(true);
+      // Wait for DOM to update and render the #operator-reader element using waitForElement
+      await new Promise(resolve => setTimeout(resolve, 50));
+      try {
+        await waitForElement("operator-reader", 20, 50);
+        let html5QrCode = scannerRef.current;
+        if (!html5QrCode) {
+          html5QrCode = new Html5Qrcode("operator-reader");
+          scannerRef.current = html5QrCode;
+        }
 
-      await html5QrCode.start(
-        { facingMode: "environment" },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 150 },
-          formatsToSupport: [
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.EAN_13
-          ]
-        },
-        (decodedText) => {
-          processScannedCode(decodedText);
-          stopCameraScanner();
-        },
-        (errorMessage) => {}
-      );
-      toast.success("Cámara de escaneo activada");
+        if (html5QrCode.isScanning) {
+          await html5QrCode.stop();
+        }
+
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 150 },
+            formatsToSupport: [
+              Html5QrcodeSupportedFormats.CODE_128,
+              Html5QrcodeSupportedFormats.EAN_13
+            ]
+          } as any,
+          (decodedText) => {
+            processScannedCode(decodedText);
+            stopCameraScanner();
+          },
+          (errorMessage) => {}
+        );
+        toast.success("Cámara de escaneo activada");
+      } catch (err: any) {
+        console.error(err);
+        toast.error("Error al acceder a la cámara o elemento no renderizado");
+        setIsScannerActive(false);
+      }
     } catch (err: any) {
       console.error(err);
-      toast.error("Error al acceder a la cámara");
+      toast.error("Error al inicializar la cámara");
       setIsScannerActive(false);
     }
   };
@@ -384,7 +410,8 @@ export default function InventoryControlView({ userRole }: Props) {
         // If box is empty, let's grab some random products from the catalog to simulate a discrepancy!
         const prodResp = await fetch("/api/productos");
         if (prodResp.ok) {
-          const allProducts = await prodResp.json();
+          const allProductsData = await prodResp.json();
+          const allProducts = Array.isArray(allProductsData) ? allProductsData : [];
           if (allProducts.length > 0) {
             // Pick 1-2 random products and report they were found in this box (which the system thinks is empty!)
             const countToSimulate = Math.min(2, allProducts.length);

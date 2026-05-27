@@ -35,10 +35,17 @@ export default function InventoryView() {
     setLoading(true);
     try {
       const resp = await fetch("/api/productos");
-      const data = await resp.json();
-      setProductos(data);
+      if (resp.ok) {
+        const data = await resp.json();
+        setProductos(Array.isArray(data) ? data : []);
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al cargar productos");
+        setProductos([]);
+      }
     } catch (err) {
       toast.error("Error al cargar productos");
+      setProductos([]);
     } finally {
       setLoading(false);
     }
