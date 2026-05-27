@@ -4,18 +4,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { AlertCircle, CheckCircle2, Box, Package, Camera, Power, RefreshCw, Scan, MapPin, Home, Repeat } from "lucide-react";
+import { AlertCircle, CheckCircle2, Box, Package, Camera, Power, RefreshCw, Scan, MapPin, Home, Repeat, Layers } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ProductQuickRegister from "./ProductQuickRegister";
 import { Caja, Producto } from "../types";
 import { Input } from "@/components/ui/input";
 
 export default function ScannerView() {
-  const [activeMode, setActiveMode] = useState<"caja" | "seccion" | "almacen">("caja");
+  const [activeMode, setActiveMode] = useState<"caja" | "nivel" | "seccion" | "almacen">("caja");
   const [selectedSectionId, setSelectedSectionId] = useState("");
   const [selectedAlmacenId, setSelectedAlmacenId] = useState("");
+  const [selectedNivelId, setSelectedNivelId] = useState("");
   const [zones, setZones] = useState<any[]>([]);
   const [sections, setSections] = useState<any[]>([]);
+  const [niveles, setNiveles] = useState<any[]>([]);
   const [cajas, setCajas] = useState<any[]>([]);
   const [resolvedTargetCaja, setResolvedTargetCaja] = useState<Caja | null>(null);
 
@@ -56,17 +58,20 @@ export default function ScannerView() {
 
   const fetchLocations = async () => {
     try {
-      const [zonesResp, sectionsResp] = await Promise.all([
+      const [zonesResp, sectionsResp, nivelesResp] = await Promise.all([
         fetch("/api/almacen/zonas"),
-        fetch("/api/almacen/secciones")
+        fetch("/api/almacen/secciones"),
+        fetch("/api/almacen/niveles")
       ]);
-      if (zonesResp.ok && sectionsResp.ok) {
-        const [zonesData, sectionsData] = await Promise.all([
+      if (zonesResp.ok && sectionsResp.ok && nivelesResp.ok) {
+        const [zonesData, sectionsData, nivelesData] = await Promise.all([
           zonesResp.json(),
-          sectionsResp.json()
+          sectionsResp.json(),
+          nivelesResp.json()
         ]);
         setZones(zonesData);
         setSections(sectionsData);
+        setNiveles(nivelesData);
       }
     } catch (e) {
       console.error(e);
@@ -102,6 +107,10 @@ export default function ScannerView() {
     if (savedAlm) {
       setSelectedAlmacenId(savedAlm);
     }
+    const savedNivel = localStorage.getItem("activeScannerNivelId");
+    if (savedNivel) {
+      setSelectedNivelId(savedNivel);
+    }
 
     fetchLocations();
     fetchCajas();
@@ -127,6 +136,24 @@ export default function ScannerView() {
     const updateResolvedTarget = () => {
       if (activeMode === "caja") {
         setResolvedTargetCaja(activeCaja);
+      } else if (activeMode === "nivel") {
+        if (selectedNivelId && niveles.length > 0) {
+          const lvlId = parseInt(selectedNivelId);
+          const lvl = niveles.find(n => n.id_zona_nivel === lvlId);
+          if (lvl) {
+            const nameToMatch = `NIVEL: ${lvl.nombre.toUpperCase()}`;
+            const existing = cajas.find(c => c.id_zona_nivel === lvlId && c.numero_caja === nameToMatch);
+            if (existing) {
+              setResolvedTargetCaja(existing);
+            } else {
+              setResolvedTargetCaja(null);
+            }
+          } else {
+            setResolvedTargetCaja(null);
+          }
+        } else {
+          setResolvedTargetCaja(null);
+        }
       } else if (activeMode === "seccion") {
         if (selectedSectionId && sections.length > 0) {
           const secId = parseInt(selectedSectionId);
@@ -166,7 +193,7 @@ export default function ScannerView() {
       }
     };
     updateResolvedTarget();
-  }, [activeMode, activeCaja, selectedSectionId, selectedAlmacenId, sections, zones, cajas]);
+  }, [activeMode, activeCaja, selectedSectionId, selectedAlmacenId, selectedNivelId, sections, zones, niveles, cajas]);
 
   const startScanner = async () => {
     try {
@@ -256,7 +283,19 @@ export default function ScannerView() {
   const verifyProductContinuous = async (ean: string) => {
     let targetCaja = activeCaja;
     
-    if (activeMode === "seccion") {
+    if (activeMode === "nivel") {
+      if (!selectedNivelId) {
+        toast.error("Selecciona un nivel activo primero");
+        return;
+      }
+      try {
+        const box = await getOrCreateNivelCaja(parseInt(selectedNivelId));
+        targetCaja = box;
+      } catch (err: any) {
+        toast.error(err.message || "Error al obtener contenedor de nivel");
+        return;
+      }
+    } else if (activeMode === "seccion") {
       if (!selectedSectionId) {
         toast.error("Selecciona una sección activa primero");
         return;
@@ -385,10 +424,53 @@ export default function ScannerView() {
     }
   };
 
+  const getOrCreateNivelCaja = async (lvlId: number) => {
+    const lvl = niveles.find(n => n.id_zona_nivel === lvlId);
+    if (!lvl) throw new Error("Nivel no encontrado");
+    
+    const nameToMatch = `NIVEL: ${lvl.nombre.toUpperCase()}`;
+    const existing = cajas.find(c => c.id_zona_nivel === lvlId && c.numero_caja === nameToMatch);
+    if (existing) {
+      return existing;
+    }
+    
+    const resp = await fetch("/api/cajas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        numero_caja: nameToMatch,
+        id_zona_nivel: lvlId,
+        id_zona_seccion: lvl.id_zona_seccion,
+        id_zona_almacen: null
+      })
+    });
+    if (resp.ok) {
+      const newCaja = await resp.json();
+      await fetchCajas();
+      return newCaja;
+    } else {
+      throw new Error("No se pudo crear la caja de nivel");
+    }
+  };
+
   const verifyProduct = async (ean: string, qty = 1) => {
     let targetCaja = activeCaja;
     
-    if (activeMode === "seccion") {
+    if (activeMode === "nivel") {
+      if (!selectedNivelId) {
+        toast.error("Selecciona un nivel activo primero");
+        return;
+      }
+      setIsChecking(true);
+      try {
+        const box = await getOrCreateNivelCaja(parseInt(selectedNivelId));
+        targetCaja = box;
+      } catch (err: any) {
+        toast.error(err.message || "Error al obtener contenedor de nivel");
+        setIsChecking(false);
+        return;
+      }
+    } else if (activeMode === "seccion") {
       if (!selectedSectionId) {
         toast.error("Selecciona una sección activa primero");
         return;
@@ -487,6 +569,7 @@ export default function ScannerView() {
 
   const isTargetSelected = () => {
     if (activeMode === "caja") return !!activeCaja;
+    if (activeMode === "nivel") return !!selectedNivelId;
     if (activeMode === "seccion") return !!selectedSectionId;
     if (activeMode === "almacen") return !!selectedAlmacenId;
     return false;
@@ -497,7 +580,7 @@ export default function ScannerView() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 md:p-6 rounded-3xl shadow-sm border border-neutral-100">
         <div>
           <h2 className="text-2xl md:text-3xl font-black tracking-tight uppercase text-neutral-900 leading-none">ESCÁNER</h2>
-          <p className="text-xs md:text-sm text-neutral-500 font-medium mt-1">Asocia productos a cajas, secciones o almacenes</p>
+          <p className="text-xs md:text-sm text-neutral-500 font-medium mt-1">Asocia productos a cajas, niveles, secciones o almacenes</p>
         </div>
         
         {/* Tab switcher for scanner modes */}
@@ -511,7 +594,18 @@ export default function ScannerView() {
             }`}
           >
             <Box size={16} className="md:w-3.5 md:h-3.5" />
-            Cajas (Nivel 4)
+            Cajas (Nivel 5)
+          </button>
+          <button
+            onClick={() => setActiveMode("nivel")}
+            className={`flex items-center gap-2 px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
+              activeMode === "nivel"
+                ? "bg-white text-neutral-950 shadow-md"
+                : "text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            <Layers size={16} className="md:w-3.5 md:h-3.5" />
+            Niveles (Nivel 4)
           </button>
           <button
             onClick={() => setActiveMode("seccion")}
@@ -542,27 +636,32 @@ export default function ScannerView() {
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-neutral-100 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="bg-neutral-900 p-3 rounded-2xl text-white shadow-lg shrink-0">
-            {activeMode === "caja" ? <Box size={24} /> : activeMode === "seccion" ? <MapPin size={24} /> : <Home size={24} />}
+            {activeMode === "caja" ? <Box size={24} /> : activeMode === "nivel" ? <Layers size={24} /> : activeMode === "seccion" ? <MapPin size={24} /> : <Home size={24} />}
           </div>
           <div>
             <p className="text-[10px] uppercase font-black text-neutral-400 tracking-[0.2em]">
-              {activeMode === "caja" ? "Caja Receptora" : activeMode === "seccion" ? "Sección Receptora" : "Almacén Receptor"}
+              {activeMode === "caja" ? "Caja Receptora" : activeMode === "nivel" ? "Nivel Receptor" : activeMode === "seccion" ? "Sección Receptora" : "Almacén Receptor"}
             </p>
             <h3 className="font-black text-neutral-900 leading-none text-xl tracking-tight mt-1">
               {activeMode === "caja" 
                 ? (activeCaja ? activeCaja.numero_caja : "Ninguna seleccionada") 
-                : activeMode === "seccion" 
-                  ? (selectedSectionId 
-                      ? (() => {
-                          const sec = sections.find(s => s.id_zona_seccion === parseInt(selectedSectionId));
-                          return sec ? sec.nombre.toUpperCase() : "No encontrada";
-                        })()
-                      : "Ninguna seleccionada"
-                    )
-                  : (selectedAlmacenId 
-                      ? (zones.find(z => z.id_zona_almacen === parseInt(selectedAlmacenId))?.nombre.toUpperCase() || "No encontrado")
+                : activeMode === "nivel"
+                  ? (selectedNivelId 
+                      ? (niveles.find(n => n.id_zona_nivel === parseInt(selectedNivelId))?.nombre.toUpperCase() || "No encontrado")
                       : "Ninguno seleccionado"
                     )
+                  : activeMode === "seccion" 
+                    ? (selectedSectionId 
+                        ? (() => {
+                            const sec = sections.find(s => s.id_zona_seccion === parseInt(selectedSectionId));
+                            return sec ? sec.nombre.toUpperCase() : "No encontrada";
+                          })()
+                        : "Ninguna seleccionada"
+                      )
+                    : (selectedAlmacenId 
+                        ? (zones.find(z => z.id_zona_almacen === parseInt(selectedAlmacenId))?.nombre.toUpperCase() || "No encontrado")
+                        : "Ninguno seleccionado"
+                      )
               }
             </h3>
             {activeMode === "caja" && activeCaja && (
@@ -570,8 +669,17 @@ export default function ScannerView() {
                 📍 {activeCaja.almacen_nombre || "Sin almacén"} 
                 {activeCaja.pasillo_nombre && activeCaja.pasillo_nombre !== "Sin pasillo" ? ` | ${activeCaja.pasillo_nombre}` : ""} 
                 {activeCaja.seccion_nombre ? ` | ${activeCaja.seccion_nombre}` : ""}
+                {activeCaja.nivel_nombre ? ` | ${activeCaja.nivel_nombre}` : ""}
               </p>
             )}
+            {activeMode === "nivel" && selectedNivelId && (() => {
+              const lvl = niveles.find(n => n.id_zona_nivel === parseInt(selectedNivelId));
+              return lvl ? (
+                <p className="text-[10px] text-neutral-500 font-medium mt-1">
+                  📍 {lvl.almacen_nombre || "Sin almacén"} {lvl.pasillo_nombre && lvl.pasillo_nombre !== "Sin pasillo" ? ` | ${lvl.pasillo_nombre}` : ""} {lvl.seccion_nombre ? ` | ${lvl.seccion_nombre}` : ""}
+                </p>
+              ) : null;
+            })()}
             {activeMode === "seccion" && selectedSectionId && (() => {
               const sec = sections.find(s => s.id_zona_seccion === parseInt(selectedSectionId));
               return sec ? (
@@ -584,6 +692,42 @@ export default function ScannerView() {
         </div>
 
         {/* Dynamic Selectors depending on Active Mode */}
+        {activeMode === "nivel" && (
+          <div className="w-full sm:w-64">
+            <select
+              value={selectedNivelId}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedNivelId(val);
+                localStorage.setItem("activeScannerNivelId", val);
+              }}
+              className="w-full rounded-2xl h-11 px-4 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+            >
+              <option value="">Selecciona un nivel...</option>
+              {zones.map((zone) => {
+                const zoneSections = sections.filter(s => s.id_zona_almacen === zone.id_zona_almacen);
+                return (
+                  <optgroup key={zone.id_zona_almacen} label={zone.nombre.toUpperCase()}>
+                    {zoneSections.map((sec) => {
+                      const secNiveles = niveles.filter(n => n.id_zona_seccion === sec.id_zona_seccion);
+                      if (secNiveles.length === 0) return null;
+                      return (
+                        <optgroup key={sec.id_zona_seccion} label={`  ↳ ${sec.nombre.toUpperCase()}`}>
+                          {secNiveles.map((n) => (
+                            <option key={n.id_zona_nivel} value={n.id_zona_nivel}>
+                              {n.nombre.toUpperCase()}
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                  </optgroup>
+                );
+              })}
+            </select>
+          </div>
+        )}
+
         {activeMode === "seccion" && (
           <div className="w-full sm:w-64">
             <select
@@ -641,14 +785,16 @@ export default function ScannerView() {
               <AlertCircle size={32} className="text-amber-500" />
             </div>
             <h3 className="text-lg font-semibold">
-              {activeMode === "caja" ? "Caja no seleccionada" : activeMode === "seccion" ? "Sección no seleccionada" : "Almacén no seleccionado"}
+              {activeMode === "caja" ? "Caja no seleccionada" : activeMode === "nivel" ? "Nivel no seleccionado" : activeMode === "seccion" ? "Sección no seleccionada" : "Almacén no seleccionado"}
             </h3>
             <p className="text-neutral-500 max-w-xs mt-1 mb-6">
               {activeMode === "caja" 
                 ? "Debes seleccionar o crear una caja en la pestaña 'Cajas' antes de empezar a escanear."
-                : activeMode === "seccion"
-                  ? "Selecciona una sección activa arriba para asociar los productos directamente a ella."
-                  : "Selecciona un almacén activo arriba para asociar los productos directamente a él."}
+                : activeMode === "nivel"
+                  ? "Selecciona un nivel activo arriba para asociar los productos directamente a él."
+                  : activeMode === "seccion"
+                    ? "Selecciona una sección activa arriba para asociar los productos directamente a ella."
+                    : "Selecciona un almacén activo arriba para asociar los productos directamente a él."}
             </p>
             {activeMode === "caja" && (
               <Button variant="outline" className="rounded-full">Ir a Cajas</Button>
@@ -832,7 +978,20 @@ export default function ScannerView() {
           defaultTemporada={resolvedTargetCaja?.temporada_default || undefined}
           defaultTipo={(() => {
             if (activeMode === "caja") {
-              const type = activeCaja?.tags?.tipo_producto;
+              const tags = activeCaja?.tags;
+              if (tags?.tipo_producto === "ropa" && tags?.tipo_producto_exacto && tags?.tipo_producto_exacto !== "todos") {
+                return tags.tipo_producto_exacto;
+              }
+              const type = tags?.tipo_producto;
+              return type && type !== "todos" ? type : undefined;
+            }
+            if (activeMode === "nivel") {
+              const lvl = niveles.find(n => n.id_zona_nivel === parseInt(selectedNivelId));
+              const tags = lvl?.tags;
+              if (tags?.tipo_producto === "ropa" && tags?.tipo_producto_exacto && tags?.tipo_producto_exacto !== "todos") {
+                return tags.tipo_producto_exacto;
+              }
+              const type = tags?.tipo_producto;
               return type && type !== "todos" ? type : undefined;
             }
             if (activeMode === "seccion") {
@@ -842,6 +1001,10 @@ export default function ScannerView() {
             }
             return undefined;
           })()}
+          defaultCajaId={resolvedTargetCaja?.id_caja || undefined}
+          defaultNivelId={activeMode === "nivel" ? parseInt(selectedNivelId) : undefined}
+          defaultSeccionId={activeMode === "seccion" ? parseInt(selectedSectionId) : undefined}
+          defaultAlmacenId={activeMode === "almacen" ? parseInt(selectedAlmacenId) : undefined}
           onClose={() => {
             setShowQuickRegister(false);
             startScanner();
@@ -852,6 +1015,12 @@ export default function ScannerView() {
             setQtyModalValue(qty || 1);
             setShowPostRegisterModal(true);
             setShowQuickRegister(false);
+          }}
+          onSuccessGroup={(products) => {
+            toast.success(`Grupo de ${products.length} productos registrado y asignado`);
+            setShowQuickRegister(false);
+            fetchCajas();
+            startScanner();
           }}
         />
       )}
@@ -878,9 +1047,11 @@ export default function ScannerView() {
               <strong>
                 {activeMode === "caja" 
                   ? activeCaja?.numero_caja 
-                  : activeMode === "seccion" 
-                    ? `Sección: ${sections.find(s => s.id_zona_seccion === parseInt(selectedSectionId))?.nombre}` 
-                    : `Almacén: ${zones.find(z => z.id_zona_almacen === parseInt(selectedAlmacenId))?.nombre}`}
+                  : activeMode === "nivel"
+                    ? `Nivel: ${niveles.find(n => n.id_zona_nivel === parseInt(selectedNivelId))?.nombre}`
+                    : activeMode === "seccion" 
+                      ? `Sección: ${sections.find(s => s.id_zona_seccion === parseInt(selectedSectionId))?.nombre}` 
+                      : `Almacén: ${zones.find(z => z.id_zona_almacen === parseInt(selectedAlmacenId))?.nombre}`}
               </strong>?
             </p>
           </div>
@@ -889,13 +1060,13 @@ export default function ScannerView() {
               className="rounded-xl w-full bg-neutral-900 hover:bg-neutral-855 text-white h-11 text-sm font-extrabold transition-all"
               onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'mover', resolvedTargetCaja)}
             >
-              Mover a {activeMode === "caja" ? "esta caja" : activeMode === "seccion" ? "esta sección" : "este almacén"}
+              Mover a {activeMode === "caja" ? "esta caja" : activeMode === "nivel" ? "este nivel" : activeMode === "seccion" ? "esta sección" : "este almacén"}
             </Button>
             <Button 
               className="rounded-xl w-full bg-neutral-100 hover:bg-neutral-200 text-neutral-900 border border-neutral-200 h-11 text-sm font-bold transition-all"
               onClick={() => asignarProducto(verificationResult.product.id_producto, true, pendingQty, 'agregar', resolvedTargetCaja)}
             >
-              Agregar a {activeMode === "caja" ? "caja actual" : activeMode === "seccion" ? "sección actual" : "almacén actual"}
+              Agregar a {activeMode === "caja" ? "caja actual" : activeMode === "nivel" ? "nivel actual" : activeMode === "seccion" ? "sección actual" : "almacén actual"}
             </Button>
             <Button 
               variant="outline" 

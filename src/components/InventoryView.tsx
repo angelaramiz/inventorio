@@ -7,6 +7,7 @@ import { Producto } from "../types";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import ProductEditModal from "./ProductEditModal";
+import ProductQuickRegister from "./ProductQuickRegister";
 
 const TALLAS_LETRA = ["SinTalla", "XS", "S", "M", "L", "XL", "XXL"];
 const TALLAS_NUMERO = ["SinTalla", "38", "40", "42", "44", "46", "48"];
@@ -22,6 +23,7 @@ export default function InventoryView() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showQuickRegister, setShowQuickRegister] = useState(false);
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
   const [marcasOpts, setMarcasOpts] = useState<string[]>([]);
   const [tiposOpts, setTiposOpts] = useState<string[]>([]);
@@ -123,6 +125,13 @@ export default function InventoryView() {
         </div>
 
         <div className="flex gap-2 items-center w-full md:w-auto">
+          <Button
+            onClick={() => setShowQuickRegister(true)}
+            className="rounded-xl h-12 bg-neutral-900 hover:bg-neutral-800 text-white font-extrabold text-xs uppercase tracking-wider px-5 shrink-0 flex items-center gap-1.5 shadow-md"
+          >
+            <Package size={16} />
+            Crear Grupo
+          </Button>
           <div className="flex gap-3 bg-white p-1.5 rounded-2xl shadow-sm border border-neutral-100 flex-1 md:w-96 overflow-hidden focus-within:border-neutral-900 transition-colors">
             <div className="flex items-center pl-3 text-neutral-400">
               <Search size={20} />
@@ -332,6 +341,22 @@ export default function InventoryView() {
             setShowEditModal(false);
           }}
           onSuccess={fetchProductos}
+        />
+      )}
+
+      {showQuickRegister && (
+        <ProductQuickRegister
+          ean=""
+          initialIsGroup={true}
+          onClose={() => setShowQuickRegister(false)}
+          onSuccess={() => {
+            setShowQuickRegister(false);
+            fetchProductos();
+          }}
+          onSuccessGroup={() => {
+            setShowQuickRegister(false);
+            fetchProductos();
+          }}
         />
       )}
     </div>

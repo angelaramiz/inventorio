@@ -136,7 +136,13 @@ export default function AlmacenView() {
   const [pasillos, setPasillos] = useState<any[]>([]);
   const [sections, setSections] = useState<any[]>([]);
   const [boxes, setBoxes] = useState<any[]>([]);
+  const [niveles, setNiveles] = useState<any[]>([]);
   
+  // Concept options
+  const [conceptTipos, setConceptTipos] = useState<string[]>([]);
+  const [conceptTemporadas, setConceptTemporadas] = useState<string[]>([]);
+  const [conceptMarcas, setConceptMarcas] = useState<string[]>([]);
+
   // Report states
   const [selectedReportZoneId, setSelectedReportZoneId] = useState("all");
   const [selectedReportSectionId, setSelectedReportSectionId] = useState("all");
@@ -150,8 +156,12 @@ export default function AlmacenView() {
   const [loadingZones, setLoadingZones] = useState(false);
   const [loadingPasillos, setLoadingPasillos] = useState(false);
   const [loadingSections, setLoadingSections] = useState(false);
+  const [loadingNiveles, setLoadingNiveles] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   
+  // Container type creation mode selector
+  const [containerTypeToCreate, setContainerTypeToCreate] = useState<"caja" | "nivel">("caja");
+
   // Form states - Add Zone
   const [newZoneName, setNewZoneName] = useState("");
   
@@ -164,14 +174,50 @@ export default function AlmacenView() {
   const [selectedZoneId, setSelectedZoneId] = useState("");
   const [selectedPasilloId, setSelectedPasilloId] = useState("");
 
-  // Form states - Add Caja (Level 4)
+  // Form states - Add Nivel (Level 4)
+  const [newNivelName, setNewNivelName] = useState("");
+  const [selectedNivelZoneId, setSelectedNivelZoneId] = useState("");
+  const [selectedNivelPasilloId, setSelectedNivelPasilloId] = useState("");
+  const [selectedNivelSectionId, setSelectedNivelSectionId] = useState("");
+  const [newNivelTipo, setNewNivelTipo] = useState("todos");
+  const [newNivelTipoExacto, setNewNivelTipoExacto] = useState("todos");
+  const [newNivelTemporada, setNewNivelTemporada] = useState("todouso");
+  const [newNivelGenero, setNewNivelGenero] = useState("todos");
+  const [newNivelMarca, setNewNivelMarca] = useState("todos");
+
+  // Form states - Add Caja (Level 5)
   const [newCajaName, setNewCajaName] = useState("");
   const [selectedCajaZoneId, setSelectedCajaZoneId] = useState("");
   const [selectedCajaPasilloId, setSelectedCajaPasilloId] = useState("");
   const [selectedCajaSectionId, setSelectedCajaSectionId] = useState("");
+  const [selectedCajaNivelId, setSelectedCajaNivelId] = useState("");
   const [newCajaTipo, setNewCajaTipo] = useState("todos");
+  const [newCajaTipoExacto, setNewCajaTipoExacto] = useState("todos");
   const [newCajaGenero, setNewCajaGenero] = useState("todos");
   const [newCajaMarca, setNewCajaMarca] = useState("todos");
+
+  // Form states - Bulk Sections
+  const [bulkSecZoneId, setBulkSecZoneId] = useState("");
+  const [bulkSecPasilloId, setBulkSecPasilloId] = useState("");
+  const [bulkSecPrefix, setBulkSecPrefix] = useState("SEC-");
+  const [bulkSecStart, setBulkSecStart] = useState("1");
+  const [bulkSecEnd, setBulkSecEnd] = useState("25");
+  const [bulkSecTipo, setBulkSecTipo] = useState("todos");
+  const [bulkSecGenero, setBulkSecGenero] = useState("todos");
+  const [bulkSecMarca, setBulkSecMarca] = useState("todos");
+
+  // Form states - Bulk Niveles
+  const [bulkLvlZoneId, setBulkLvlZoneId] = useState("");
+  const [bulkLvlPasilloId, setBulkLvlPasilloId] = useState("");
+  const [bulkLvlSectionId, setBulkLvlSectionId] = useState("");
+  const [bulkLvlPrefix, setBulkLvlPrefix] = useState("NIV-");
+  const [bulkLvlStart, setBulkLvlStart] = useState("1");
+  const [bulkLvlEnd, setBulkLvlEnd] = useState("5");
+  const [bulkLvlTipo, setBulkLvlTipo] = useState("todos");
+  const [bulkLvlTipoExacto, setBulkLvlTipoExacto] = useState("todos");
+  const [bulkLvlTemporada, setBulkLvlTemporada] = useState("todouso");
+  const [bulkLvlGenero, setBulkLvlGenero] = useState("todos");
+  const [bulkLvlMarca, setBulkLvlMarca] = useState("todos");
 
   // Editing states
   const [editingZoneId, setEditingZoneId] = useState<number | null>(null);
@@ -186,18 +232,52 @@ export default function AlmacenView() {
   const [editingSectionZoneId, setEditingSectionZoneId] = useState("");
   const [editingSectionPasilloId, setEditingSectionPasilloId] = useState("");
 
+  // Editing states - Nivel
+  const [editingNivelId, setEditingNivelId] = useState<number | null>(null);
+  const [editingNivelName, setEditingNivelName] = useState("");
+  const [editingNivelZoneId, setEditingNivelZoneId] = useState("");
+  const [editingNivelPasilloId, setEditingNivelPasilloId] = useState("");
+  const [editingNivelSectionId, setEditingNivelSectionId] = useState("");
+
   // Editing states - Caja
   const [editingCajaId, setEditingCajaId] = useState<number | null>(null);
   const [editingCajaName, setEditingCajaName] = useState("");
   const [editingCajaZoneId, setEditingCajaZoneId] = useState("");
   const [editingCajaPasilloId, setEditingCajaPasilloId] = useState("");
   const [editingCajaSectionId, setEditingCajaSectionId] = useState("");
+  const [editingCajaNivelId, setEditingCajaNivelId] = useState("");
 
   useEffect(() => {
     fetchZones();
     fetchPasillos();
     fetchSections();
     fetchBoxes();
+    fetchNiveles();
+    
+    const fetchConcepts = async () => {
+      try {
+        const [rT, rTemp, rM] = await Promise.all([
+          fetch("/api/conceptos/tipos"),
+          fetch("/api/conceptos/temporadas"),
+          fetch("/api/conceptos/marcas")
+        ]);
+        if (rT.ok) {
+          const res = await rT.json();
+          setConceptTipos(res.map((v: any) => typeof v === 'object' ? v.nombre : v));
+        }
+        if (rTemp.ok) {
+          const res = await rTemp.json();
+          setConceptTemporadas(res.map((v: any) => typeof v === 'object' ? v.nombre : v));
+        }
+        if (rM.ok) {
+          const res = await rM.json();
+          setConceptMarcas(res.map((v: any) => typeof v === 'object' ? v.nombre : v));
+        }
+      } catch (err) {
+        console.error("Error loading concepts in AlmacenView:", err);
+      }
+    };
+    fetchConcepts();
   }, []);
 
   useEffect(() => {
@@ -1224,20 +1304,24 @@ export default function AlmacenView() {
           numero_caja: newCajaName,
           id_zona_seccion,
           id_zona_almacen,
+          id_zona_nivel: selectedCajaNivelId ? parseInt(selectedCajaNivelId) : null,
           tags: {
             tipo_producto: newCajaTipo,
+            tipo_producto_exacto: newCajaTipo === "ropa" ? newCajaTipoExacto : "todos",
             genero: newCajaGenero,
             marca: newCajaMarca
           }
         })
       });
       if (resp.ok) {
-        toast.success("Caja / Contenedor (Nivel 4) agregado");
+        toast.success("Caja (Nivel 5) agregada");
         setNewCajaName("");
         setSelectedCajaZoneId("");
         setSelectedCajaPasilloId("");
         setSelectedCajaSectionId("");
+        setSelectedCajaNivelId("");
         setNewCajaTipo("todos");
+        setNewCajaTipoExacto("todos");
         setNewCajaGenero("todos");
         setNewCajaMarca("todos");
         fetchBoxes();
@@ -1252,9 +1336,9 @@ export default function AlmacenView() {
     }
   };
 
-  // Delete Caja (Level 4)
+  // Delete Caja (Level 5)
   const handleDeleteCaja = async (id: number) => {
-    if (!window.confirm("¿Seguro que deseas eliminar esta caja/contenedor (Nivel 4)?")) return;
+    if (!window.confirm("¿Seguro que deseas eliminar esta caja (Nivel 5)?")) return;
     try {
       const resp = await fetch(`/api/cajas/${id}`, { method: "DELETE" });
       if (resp.ok) {
@@ -1275,6 +1359,7 @@ export default function AlmacenView() {
     setEditingCajaZoneId(caja.id_zona_almacen ? caja.id_zona_almacen.toString() : "");
     setEditingCajaPasilloId(caja.id_zona_pasillo ? caja.id_zona_pasillo.toString() : "");
     setEditingCajaSectionId(caja.id_zona_seccion ? caja.id_zona_seccion.toString() : "");
+    setEditingCajaNivelId(caja.id_zona_nivel ? caja.id_zona_nivel.toString() : "");
   };
 
   const handleUpdateCaja = async (id: number) => {
@@ -1282,6 +1367,7 @@ export default function AlmacenView() {
     try {
       let id_zona_seccion = editingCajaSectionId ? parseInt(editingCajaSectionId) : null;
       let id_zona_almacen = editingCajaZoneId ? parseInt(editingCajaZoneId) : null;
+      let id_zona_nivel = editingCajaNivelId ? parseInt(editingCajaNivelId) : null;
       
       const resp = await fetch(`/api/cajas/${id}`, {
         method: "PUT",
@@ -1289,7 +1375,8 @@ export default function AlmacenView() {
         body: JSON.stringify({ 
           numero_caja: editingCajaName,
           id_zona_seccion,
-          id_zona_almacen
+          id_zona_almacen,
+          id_zona_nivel
         })
       });
       if (resp.ok) {
@@ -1301,6 +1388,198 @@ export default function AlmacenView() {
       }
     } catch (e) {
       toast.error("Error de conexión");
+    }
+  };
+
+  // Niveles CRUD Handlers
+  const fetchNiveles = async () => {
+    setLoadingNiveles(true);
+    try {
+      const resp = await fetch("/api/almacen/niveles");
+      if (resp.ok) {
+        const data = await resp.json();
+        setNiveles(data);
+      }
+    } catch (e) {
+      console.error("Error fetching levels:", e);
+    } finally {
+      setLoadingNiveles(false);
+    }
+  };
+
+  const handleAddNivel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNivelName.trim() || !selectedNivelSectionId) return;
+    setSubmitting(true);
+    try {
+      const resp = await fetch("/api/almacen/niveles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nombre: newNivelName,
+          id_zona_seccion: parseInt(selectedNivelSectionId),
+          tags: {
+            tipo_producto: newNivelTipo,
+            tipo_producto_exacto: newNivelTipo === "ropa" ? newNivelTipoExacto : "todos",
+            genero: newNivelGenero,
+            marca: newNivelMarca,
+            temporada: newNivelTemporada
+          }
+        })
+      });
+      if (resp.ok) {
+        toast.success("Nivel agregado con éxito");
+        setNewNivelName("");
+        setSelectedNivelZoneId("");
+        setSelectedNivelPasilloId("");
+        setSelectedNivelSectionId("");
+        setNewNivelTipo("todos");
+        setNewNivelTipoExacto("todos");
+        setNewNivelGenero("todos");
+        setNewNivelMarca("todos");
+        setNewNivelTemporada("todouso");
+        fetchNiveles();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al agregar nivel");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteNivel = async (id: number) => {
+    if (!window.confirm("¿Seguro que deseas eliminar este nivel? Se desvincularán las cajas asociadas.")) return;
+    try {
+      const resp = await fetch(`/api/almacen/niveles/${id}`, { method: "DELETE" });
+      if (resp.ok) {
+        toast.success("Nivel eliminado con éxito");
+        fetchNiveles();
+        fetchBoxes();
+      } else {
+        toast.error("Error al eliminar el nivel");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    }
+  };
+
+  const startEditNivel = (lvl: any) => {
+    setEditingNivelId(lvl.id_zona_nivel);
+    setEditingNivelName(lvl.nombre);
+    setEditingNivelZoneId(lvl.id_zona_almacen ? lvl.id_zona_almacen.toString() : "");
+    setEditingNivelPasilloId(lvl.id_zona_pasillo ? lvl.id_zona_pasillo.toString() : "");
+    setEditingNivelSectionId(lvl.id_zona_seccion ? lvl.id_zona_seccion.toString() : "");
+  };
+
+  const handleUpdateNivel = async (id: number) => {
+    if (!editingNivelName.trim() || !editingNivelSectionId) return;
+    try {
+      const resp = await fetch(`/api/almacen/niveles/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nombre: editingNivelName,
+          id_zona_seccion: parseInt(editingNivelSectionId)
+        })
+      });
+      if (resp.ok) {
+        toast.success("Nivel actualizado con éxito");
+        setEditingNivelId(null);
+        fetchNiveles();
+      } else {
+        toast.error("Error al actualizar el nivel");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    }
+  };
+
+  // Bulk Handlers
+  const handleBulkCreateSections = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkSecPrefix.trim() || !bulkSecStart || !bulkSecEnd) return;
+    setSubmitting(true);
+    try {
+      const resp = await fetch("/api/almacen/secciones/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id_zona_almacen: bulkSecZoneId ? parseInt(bulkSecZoneId) : null,
+          id_zona_pasillo: bulkSecPasilloId ? parseInt(bulkSecPasilloId) : null,
+          prefijo: bulkSecPrefix,
+          inicio: parseInt(bulkSecStart),
+          fin: parseInt(bulkSecEnd),
+          tags: {
+            tipo_producto: bulkSecTipo,
+            genero: bulkSecGenero,
+            marca: bulkSecMarca
+          }
+        })
+      });
+      if (resp.ok) {
+        toast.success("Secciones creadas en lote");
+        setBulkSecPrefix("SEC-");
+        setBulkSecStart("1");
+        setBulkSecEnd("25");
+        setBulkSecTipo("todos");
+        setBulkSecGenero("todos");
+        setBulkSecMarca("todos");
+        fetchSections();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error en creación masiva");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleBulkCreateNiveles = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkLvlPrefix.trim() || !bulkLvlStart || !bulkLvlEnd || !bulkLvlSectionId) return;
+    setSubmitting(true);
+    try {
+      const resp = await fetch("/api/almacen/niveles/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id_zona_seccion: parseInt(bulkLvlSectionId),
+          prefijo: bulkLvlPrefix,
+          inicio: parseInt(bulkLvlStart),
+          fin: parseInt(bulkLvlEnd),
+          tags: {
+            tipo_producto: bulkLvlTipo,
+            tipo_producto_exacto: bulkLvlTipo === "ropa" ? bulkLvlTipoExacto : "todos",
+            genero: bulkLvlGenero,
+            marca: bulkLvlMarca,
+            temporada: bulkLvlTemporada
+          }
+        })
+      });
+      if (resp.ok) {
+        toast.success("Niveles creados en lote");
+        setBulkLvlPrefix("NIV-");
+        setBulkLvlStart("1");
+        setBulkLvlEnd("5");
+        setBulkLvlTipo("todos");
+        setBulkLvlTipoExacto("todos");
+        setBulkLvlTemporada("todouso");
+        setBulkLvlGenero("todos");
+        setBulkLvlMarca("todos");
+        fetchNiveles();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error en creación masiva");
+      }
+    } catch (e) {
+      toast.error("Error de conexión");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -1352,6 +1631,7 @@ export default function AlmacenView() {
             onClick={() => {
               setActiveTab("cajas");
               fetchBoxes();
+              fetchNiveles();
             }}
             className={`flex items-center gap-2 md:gap-1.5 px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
               activeTab === "cajas" 
@@ -2112,7 +2392,7 @@ export default function AlmacenView() {
               </motion.div>
             ) : (
               <motion.div
-                key="form-cajas"
+                key="form-containers"
                 initial={{ opacity: 0, x: -15 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 15 }}
@@ -2122,138 +2402,694 @@ export default function AlmacenView() {
                   <CardHeader className="pb-3 bg-neutral-50/50">
                     <CardTitle className="text-lg font-bold flex items-center gap-2">
                       <Plus size={18} className="text-neutral-500" />
-                      Nueva Caja / Nivel
+                      Contenedores y Avanzado
                     </CardTitle>
-                    <CardDescription>Crea un contenedor o subnivel de almacenamiento (Nivel 4)</CardDescription>
+                    <CardDescription>Gestiona niveles, cajas o creaciones en lote</CardDescription>
+                    
+                    {/* Select Form Type Buttons */}
+                    <div className="grid grid-cols-2 gap-1.5 p-1 bg-neutral-100 rounded-xl mt-3 text-xs font-black uppercase tracking-wider">
+                      <button 
+                        type="button"
+                        onClick={() => setContainerTypeToCreate("caja")}
+                        className={`py-2 px-1 rounded-lg text-[9px] tracking-tight text-center transition-all ${containerTypeToCreate === 'caja' ? 'bg-white text-neutral-900 shadow-sm font-black' : 'text-neutral-500 hover:text-neutral-950 font-semibold'}`}
+                      >
+                        Nueva Caja
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setContainerTypeToCreate("nivel")}
+                        className={`py-2 px-1 rounded-lg text-[9px] tracking-tight text-center transition-all ${containerTypeToCreate === 'nivel' ? 'bg-white text-neutral-900 shadow-sm font-black' : 'text-neutral-500 hover:text-neutral-950 font-semibold'}`}
+                      >
+                        Nuevo Nivel
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 p-1 bg-neutral-100 rounded-xl mt-1.5 text-xs font-black uppercase tracking-wider">
+                      <button 
+                        type="button"
+                        onClick={() => setContainerTypeToCreate("bulk_seccion")}
+                        className={`py-2 px-1 rounded-lg text-[9px] tracking-tight text-center transition-all ${containerTypeToCreate === 'bulk_seccion' ? 'bg-white text-neutral-900 shadow-sm font-black' : 'text-neutral-500 hover:text-neutral-950 font-semibold'}`}
+                      >
+                        + Secciones (Lote)
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setContainerTypeToCreate("bulk_nivel")}
+                        className={`py-2 px-1 rounded-lg text-[9px] tracking-tight text-center transition-all ${containerTypeToCreate === 'bulk_nivel' ? 'bg-white text-neutral-900 shadow-sm font-black' : 'text-neutral-500 hover:text-neutral-950 font-semibold'}`}
+                      >
+                        + Niveles (Lote)
+                      </button>
+                    </div>
                   </CardHeader>
                   <CardContent className="p-5">
-                    <form onSubmit={handleAddCaja} className="space-y-4">
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Identificador / Nombre</label>
-                        <Input 
-                          placeholder="Ej: Caja 1, Paquete A, CJ-123" 
-                          value={newCajaName}
-                          onChange={e => setNewCajaName(e.target.value)}
-                          className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
-                        />
-                      </div>
+                    
+                    {/* 1. CREATE CAJA FORM (LEVEL 5) */}
+                    {containerTypeToCreate === "caja" && (
+                      <form onSubmit={handleAddCaja} className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Identificador / Nombre</label>
+                          <Input 
+                            placeholder="Ej: Caja 1, Paquete A, CJ-123" 
+                            value={newCajaName}
+                            onChange={e => setNewCajaName(e.target.value)}
+                            className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                          />
+                        </div>
 
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Zona Almacén Asociada</label>
-                        <select
-                          value={selectedCajaZoneId}
-                          onChange={e => {
-                            setSelectedCajaZoneId(e.target.value);
-                            setSelectedCajaPasilloId("");
-                            setSelectedCajaSectionId("");
-                          }}
-                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                        >
-                          <option value="">Selecciona una zona...</option>
-                          {zones.map(z => (
-                            <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
-                              {z.nombre.toUpperCase()}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Pasillo / Zona Intermedia</label>
-                        <select
-                          value={selectedCajaPasilloId}
-                          onChange={e => {
-                            setSelectedCajaPasilloId(e.target.value);
-                            setSelectedCajaSectionId("");
-                          }}
-                          disabled={!selectedCajaZoneId}
-                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
-                        >
-                          <option value="">Selecciona un pasillo...</option>
-                          {pasillos
-                            .filter(p => p.id_zona_almacen === parseInt(selectedCajaZoneId))
-                            .map(p => (
-                              <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
-                                {p.nombre.toUpperCase()}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Zona Almacén Asociada</label>
+                          <select
+                            value={selectedCajaZoneId}
+                            onChange={e => {
+                              setSelectedCajaZoneId(e.target.value);
+                              setSelectedCajaPasilloId("");
+                              setSelectedCajaSectionId("");
+                              setSelectedCajaNivelId("");
+                            }}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="">Selecciona una zona...</option>
+                            {zones.map(z => (
+                              <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                                {z.nombre.toUpperCase()}
                               </option>
                             ))}
-                        </select>
-                      </div>
+                          </select>
+                        </div>
 
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Sección Física (Jerarquía 3)</label>
-                        <select
-                          value={selectedCajaSectionId}
-                          onChange={e => setSelectedCajaSectionId(e.target.value)}
-                          disabled={!selectedCajaPasilloId}
-                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Pasillo / Zona Intermedia</label>
+                          <select
+                            value={selectedCajaPasilloId}
+                            onChange={e => {
+                              setSelectedCajaPasilloId(e.target.value);
+                              setSelectedCajaSectionId("");
+                              setSelectedCajaNivelId("");
+                            }}
+                            disabled={!selectedCajaZoneId}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                          >
+                            <option value="">Selecciona un pasillo...</option>
+                            {pasillos
+                              .filter(p => p.id_zona_almacen === parseInt(selectedCajaZoneId))
+                              .map(p => (
+                                <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                  {p.nombre.toUpperCase()}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Sección Física (Jerarquía 3)</label>
+                          <select
+                            value={selectedCajaSectionId}
+                            onChange={e => {
+                              setSelectedCajaSectionId(e.target.value);
+                              setSelectedCajaNivelId("");
+                            }}
+                            disabled={!selectedCajaPasilloId}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                          >
+                            <option value="">Selecciona una sección...</option>
+                            {sections
+                              .filter(s => s.id_zona_pasillo === parseInt(selectedCajaPasilloId))
+                              .map(s => (
+                                <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
+                                  {s.nombre.toUpperCase()}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Nivel (Nivel 4 - Opcional)</label>
+                          <select
+                            value={selectedCajaNivelId}
+                            onChange={e => setSelectedCajaNivelId(e.target.value)}
+                            disabled={!selectedCajaSectionId}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                          >
+                            <option value="">Sin nivel (directo en sección)</option>
+                            {niveles
+                              .filter(n => n.id_zona_seccion === parseInt(selectedCajaSectionId))
+                              .map(n => (
+                                <option key={n.id_zona_nivel} value={n.id_zona_nivel}>
+                                  {n.nombre.toUpperCase()}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        {/* TAGS */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo de Producto</label>
+                          <select
+                            value={newCajaTipo}
+                            onChange={e => {
+                              setNewCajaTipo(e.target.value);
+                              setNewCajaTipoExacto("todos");
+                              if (e.target.value !== "calzado") {
+                                setNewCajaMarca("todos");
+                              }
+                            }}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">TODOS / AMBOS</option>
+                            <option value="ropa">ROPA</option>
+                            <option value="calzado">CALZADO</option>
+                          </select>
+                        </div>
+
+                        {newCajaTipo === "ropa" && (
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo Exacto (ropa)</label>
+                            <select
+                              value={newCajaTipoExacto}
+                              onChange={e => setNewCajaTipoExacto(e.target.value)}
+                              className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="todos">TODOS</option>
+                              {conceptTipos.map((t: string) => (
+                                <option key={t} value={t} className="capitalize">{t.toUpperCase()}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Género</label>
+                          <select
+                            value={newCajaGenero}
+                            onChange={e => setNewCajaGenero(e.target.value)}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">UNISEX / TODOS</option>
+                            <option value="H">HOMBRE (H)</option>
+                            <option value="M">MUJER (M)</option>
+                          </select>
+                        </div>
+
+                        {newCajaTipo === "calzado" && (
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Marca</label>
+                            <select
+                              value={newCajaMarca}
+                              onChange={e => setNewCajaMarca(e.target.value)}
+                              className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="todos">TODAS / AMBAS</option>
+                              {conceptMarcas.map((m: string) => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <Button 
+                          type="submit" 
+                          disabled={submitting || !newCajaName.trim()}
+                          className="w-full rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 text-white font-bold"
                         >
-                          <option value="">Selecciona una sección...</option>
-                          {sections
-                            .filter(s => s.id_zona_pasillo === parseInt(selectedCajaPasilloId))
-                            .map(s => (
-                              <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
-                                {s.nombre.toUpperCase()}
+                          {submitting ? <Loader2 className="animate-spin" size={18} /> : "Crear Caja"}
+                        </Button>
+                      </form>
+                    )}
+
+                    {/* 2. CREATE NIVEL FORM (LEVEL 4) */}
+                    {containerTypeToCreate === "nivel" && (
+                      <form onSubmit={handleAddNivel} className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Identificador / Nombre Nivel</label>
+                          <Input 
+                            placeholder="Ej: Nivel 1, Repisa A, Estante Superior" 
+                            value={newNivelName}
+                            onChange={e => setNewNivelName(e.target.value)}
+                            className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Zona Almacén Asociada</label>
+                          <select
+                            value={selectedNivelZoneId}
+                            onChange={e => {
+                              setSelectedNivelZoneId(e.target.value);
+                              setSelectedNivelPasilloId("");
+                              setSelectedNivelSectionId("");
+                            }}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="">Selecciona una zona...</option>
+                            {zones.map(z => (
+                              <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                                {z.nombre.toUpperCase()}
                               </option>
                             ))}
-                        </select>
-                      </div>
+                          </select>
+                        </div>
 
-                      {/* TAGS */}
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo de Producto</label>
-                        <select
-                          value={newCajaTipo}
-                          onChange={e => {
-                            setNewCajaTipo(e.target.value);
-                            if (e.target.value !== "calzado") {
-                              setNewCajaMarca("todos");
-                            }
-                          }}
-                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                        >
-                          <option value="todos">TODOS / AMBOS</option>
-                          <option value="ropa">ROPA</option>
-                          <option value="calzado">CALZADO</option>
-                        </select>
-                      </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Pasillo / Zona Intermedia</label>
+                          <select
+                            value={selectedNivelPasilloId}
+                            onChange={e => {
+                              setSelectedNivelPasilloId(e.target.value);
+                              setSelectedNivelSectionId("");
+                            }}
+                            disabled={!selectedNivelZoneId}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                          >
+                            <option value="">Selecciona un pasillo...</option>
+                            {pasillos
+                              .filter(p => p.id_zona_almacen === parseInt(selectedNivelZoneId))
+                              .map(p => (
+                                <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                  {p.nombre.toUpperCase()}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
 
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Género</label>
-                        <select
-                          value={newCajaGenero}
-                          onChange={e => setNewCajaGenero(e.target.value)}
-                          className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                        >
-                          <option value="todos">UNISEX / TODOS</option>
-                          <option value="H">HOMBRE (H)</option>
-                          <option value="M">MUJER (M)</option>
-                        </select>
-                      </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Sección Física (Jerarquía 3)</label>
+                          <select
+                            value={selectedNivelSectionId}
+                            onChange={e => setSelectedNivelSectionId(e.target.value)}
+                            disabled={!selectedNivelPasilloId}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                          >
+                            <option value="">Selecciona una sección...</option>
+                            {sections
+                              .filter(s => s.id_zona_pasillo === parseInt(selectedNivelPasilloId))
+                              .map(s => (
+                                <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
+                                  {s.nombre.toUpperCase()}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
 
-                      {newCajaTipo === "calzado" && (
+                        {/* TAGS */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo de Producto</label>
+                          <select
+                            value={newNivelTipo}
+                            onChange={e => {
+                              setNewNivelTipo(e.target.value);
+                              setNewNivelTipoExacto("todos");
+                              if (e.target.value !== "calzado") {
+                                setNewNivelMarca("todos");
+                              }
+                            }}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">TODOS / AMBOS</option>
+                            <option value="ropa">ROPA</option>
+                            <option value="calzado">CALZADO</option>
+                          </select>
+                        </div>
+
+                        {newNivelTipo === "ropa" && (
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo Exacto (ropa)</label>
+                            <select
+                              value={newNivelTipoExacto}
+                              onChange={e => setNewNivelTipoExacto(e.target.value)}
+                              className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="todos">TODOS</option>
+                              {conceptTipos.map((t: string) => (
+                                <option key={t} value={t} className="capitalize">{t.toUpperCase()}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Género</label>
+                          <select
+                            value={newNivelGenero}
+                            onChange={e => setNewNivelGenero(e.target.value)}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">UNISEX / TODOS</option>
+                            <option value="H">HOMBRE (H)</option>
+                            <option value="M">MUJER (M)</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Temporada Predeterminada</label>
+                          <select
+                            value={newNivelTemporada}
+                            onChange={e => setNewNivelTemporada(e.target.value)}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todouso">TODO USO</option>
+                            {conceptTemporadas.map((temp: string) => (
+                              <option key={temp} value={temp} className="capitalize">{temp.toUpperCase()}</option>
+                            ))}
+                          </select>
+                        </div>
+
                         <div className="space-y-1.5">
                           <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Marca</label>
                           <select
-                            value={newCajaMarca}
-                            onChange={e => setNewCajaMarca(e.target.value)}
+                            value={newNivelMarca}
+                            onChange={e => setNewNivelMarca(e.target.value)}
                             className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
                           >
-                            <option value="todos">TODAS / AMBAS</option>
-                            <option value="Marciano">MARCIANO (M)</option>
-                            <option value="Guess">GUESS (G)</option>
+                            <option value="todos">TODAS</option>
+                            {conceptMarcas.map((m: string) => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
                           </select>
                         </div>
-                      )}
 
-                      <Button 
-                        type="submit" 
-                        disabled={submitting || !newCajaName.trim()}
-                        className="w-full rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 text-white font-bold"
-                      >
-                        {submitting ? <Loader2 className="animate-spin" size={18} /> : "Crear Caja / Nivel"}
-                      </Button>
-                    </form>
+                        <Button 
+                          type="submit" 
+                          disabled={submitting || !newNivelName.trim() || !selectedNivelSectionId}
+                          className="w-full rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 text-white font-bold"
+                        >
+                          {submitting ? <Loader2 className="animate-spin" size={18} /> : "Crear Nivel"}
+                        </Button>
+                      </form>
+                    )}
+
+                    {/* 3. BULK CREATE SECCIONES */}
+                    {containerTypeToCreate === "bulk_seccion" && (
+                      <form onSubmit={handleBulkCreateSections} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1.5 col-span-2">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Clave / Prefijo</label>
+                            <Input 
+                              placeholder="Ej: AN, MESA" 
+                              value={bulkSecPrefix}
+                              onChange={e => setBulkSecPrefix(e.target.value)}
+                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200 uppercase font-black"
+                            />
+                          </div>
+                          
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Inicio (Nº)</label>
+                            <Input 
+                              type="number"
+                              value={bulkSecStart}
+                              onChange={e => setBulkSecStart(e.target.value)}
+                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Fin (Nº)</label>
+                            <Input 
+                              type="number"
+                              value={bulkSecEnd}
+                              onChange={e => setBulkSecEnd(e.target.value)}
+                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Zona Almacén</label>
+                          <select
+                            value={bulkSecZoneId}
+                            onChange={e => {
+                              setBulkSecZoneId(e.target.value);
+                              setBulkSecPasilloId("");
+                            }}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="">Selecciona una zona...</option>
+                            {zones.map(z => (
+                              <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                                {z.nombre.toUpperCase()}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Pasillo / Zona Intermedia</label>
+                          <select
+                            value={bulkSecPasilloId}
+                            onChange={e => setBulkSecPasilloId(e.target.value)}
+                            disabled={!bulkSecZoneId}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                          >
+                            <option value="">Selecciona un pasillo...</option>
+                            {pasillos
+                              .filter(p => p.id_zona_almacen === parseInt(bulkSecZoneId))
+                              .map(p => (
+                                <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                  {p.nombre.toUpperCase()}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        {/* TAGS */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo de Producto</label>
+                          <select
+                            value={bulkSecTipo}
+                            onChange={e => {
+                              setBulkSecTipo(e.target.value);
+                              if (e.target.value !== "calzado") {
+                                setBulkSecMarca("todos");
+                              }
+                            }}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">TODOS / AMBOS</option>
+                            <option value="ropa">ROPA</option>
+                            <option value="calzado">CALZADO</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Género</label>
+                          <select
+                            value={bulkSecGenero}
+                            onChange={e => setBulkSecGenero(e.target.value)}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">UNISEX / TODOS</option>
+                            <option value="H">HOMBRE (H)</option>
+                            <option value="M">MUJER (M)</option>
+                          </select>
+                        </div>
+
+                        {bulkSecTipo === "calzado" && (
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Marca</label>
+                            <select
+                              value={bulkSecMarca}
+                              onChange={e => setBulkSecMarca(e.target.value)}
+                              className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="todos">TODAS / AMBAS</option>
+                              {conceptMarcas.map((m: string) => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <Button 
+                          type="submit" 
+                          disabled={submitting || !bulkSecPrefix.trim() || !bulkSecStart || !bulkSecEnd}
+                          className="w-full rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 text-white font-bold"
+                        >
+                          {submitting ? <Loader2 className="animate-spin" size={18} /> : "Generar Secciones en Lote"}
+                        </Button>
+                      </form>
+                    )}
+
+                    {/* 4. BULK CREATE NIVELES */}
+                    {containerTypeToCreate === "bulk_nivel" && (
+                      <form onSubmit={handleBulkCreateNiveles} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1.5 col-span-2">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Prefijo Nivel</label>
+                            <Input 
+                              placeholder="Ej: N-, NIV-" 
+                              value={bulkLvlPrefix}
+                              onChange={e => setBulkLvlPrefix(e.target.value)}
+                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200 uppercase font-black"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Inicio (Nº)</label>
+                            <Input 
+                              type="number"
+                              value={bulkLvlStart}
+                              onChange={e => setBulkLvlStart(e.target.value)}
+                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Fin (Nº)</label>
+                            <Input 
+                              type="number"
+                              value={bulkLvlEnd}
+                              onChange={e => setBulkLvlEnd(e.target.value)}
+                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Zona Almacén</label>
+                          <select
+                            value={bulkLvlZoneId}
+                            onChange={e => {
+                              setBulkLvlZoneId(e.target.value);
+                              setBulkLvlPasilloId("");
+                              setBulkLvlSectionId("");
+                            }}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="">Selecciona una zona...</option>
+                            {zones.map(z => (
+                              <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                                {z.nombre.toUpperCase()}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Pasillo / Zona Intermedia</label>
+                          <select
+                            value={bulkLvlPasilloId}
+                            onChange={e => {
+                              setBulkLvlPasilloId(e.target.value);
+                              setBulkLvlSectionId("");
+                            }}
+                            disabled={!bulkLvlZoneId}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                          >
+                            <option value="">Selecciona un pasillo...</option>
+                            {pasillos
+                              .filter(p => p.id_zona_almacen === parseInt(bulkLvlZoneId))
+                              .map(p => (
+                                <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                  {p.nombre.toUpperCase()}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Sección Física</label>
+                          <select
+                            value={bulkLvlSectionId}
+                            onChange={e => setBulkLvlSectionId(e.target.value)}
+                            disabled={!bulkLvlPasilloId}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                          >
+                            <option value="">Selecciona una sección...</option>
+                            {sections
+                              .filter(s => s.id_zona_pasillo === parseInt(bulkLvlPasilloId))
+                              .map(s => (
+                                <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
+                                  {s.nombre.toUpperCase()}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        {/* TAGS */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo de Producto</label>
+                          <select
+                            value={bulkLvlTipo}
+                            onChange={e => {
+                              setBulkLvlTipo(e.target.value);
+                              setBulkLvlTipoExacto("todos");
+                              if (e.target.value !== "calzado") {
+                                setBulkLvlMarca("todos");
+                              }
+                            }}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">TODOS / AMBOS</option>
+                            <option value="ropa">ROPA</option>
+                            <option value="calzado">CALZADO</option>
+                          </select>
+                        </div>
+
+                        {bulkLvlTipo === "ropa" && (
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo Exacto (ropa)</label>
+                            <select
+                              value={bulkLvlTipoExacto}
+                              onChange={e => setBulkLvlTipoExacto(e.target.value)}
+                              className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="todos">TODOS</option>
+                              {conceptTipos.map((t: string) => (
+                                <option key={t} value={t} className="capitalize">{t.toUpperCase()}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Género</label>
+                          <select
+                            value={bulkLvlGenero}
+                            onChange={e => setBulkLvlGenero(e.target.value)}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">UNISEX / TODOS</option>
+                            <option value="H">HOMBRE (H)</option>
+                            <option value="M">MUJER (M)</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Temporada Predeterminada</label>
+                          <select
+                            value={bulkLvlTemporada}
+                            onChange={e => setBulkLvlTemporada(e.target.value)}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todouso">TODO USO</option>
+                            {conceptTemporadas.map((temp: string) => (
+                              <option key={temp} value={temp} className="capitalize">{temp.toUpperCase()}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Marca</label>
+                          <select
+                            value={bulkLvlMarca}
+                            onChange={e => setBulkLvlMarca(e.target.value)}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">TODAS</option>
+                            {conceptMarcas.map((m: string) => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <Button 
+                          type="submit" 
+                          disabled={submitting || !bulkLvlPrefix.trim() || !bulkLvlStart || !bulkLvlEnd || !bulkLvlSectionId}
+                          className="w-full rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 text-white font-bold"
+                        >
+                          {submitting ? <Loader2 className="animate-spin" size={18} /> : "Generar Niveles en Lote"}
+                        </Button>
+                      </form>
+                    )}
+
                   </CardContent>
                 </Card>
               </motion.div>
@@ -2647,206 +3483,439 @@ export default function AlmacenView() {
                 )
               )}
 
-              {/* CAJAS TABLE */}
               {activeTab === "cajas" && (
-                boxes.length === 0 ? (
-                  <div className="text-center py-16 text-neutral-400 flex flex-col items-center">
-                    <Box size={36} strokeWidth={1} className="opacity-40 mb-2" />
-                    <p className="text-sm font-bold">No hay cajas registradas</p>
+                <div className="flex flex-col">
+                  {/* 1. NIVELES TABLE (LEVEL 4) */}
+                  <div className="p-4 border-b bg-neutral-50/50 flex justify-between items-center">
+                    <h3 className="font-extrabold text-sm uppercase text-neutral-900 flex items-center gap-2">
+                      <Network size={16} className="text-neutral-500" />
+                      Niveles de Almacenamiento (Nivel 4)
+                    </h3>
+                    <Badge variant="outline" className="text-[10px] font-black uppercase">{niveles.length} Niveles</Badge>
                   </div>
-                ) : (
-                  <Table>
-                    <TableHeader className="bg-neutral-50/20">
-                      <TableRow>
-                        <TableHead>Nombre / ID</TableHead>
-                        <TableHead>Almacén Principal</TableHead>
-                        <TableHead>Pasillo / Subzona</TableHead>
-                        <TableHead>Sección Física</TableHead>
-                        <TableHead>Etiquetas (Tags)</TableHead>
-                        <TableHead>Estado</TableHead>
-                        <TableHead className="text-right w-[150px]">Acciones</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {boxes.map((box: any) => {
-                        const isEditing = editingCajaId === box.id_caja;
-                        return (
-                          <TableRow key={box.id_caja}>
-                            <TableCell className="font-extrabold text-sm uppercase">
-                              {isEditing ? (
-                                <Input 
-                                  value={editingCajaName}
-                                  onChange={e => setEditingCajaName(e.target.value)}
-                                  className="h-8 max-w-[150px] uppercase text-xs font-bold"
-                                />
-                              ) : (
-                                <div className="flex flex-col">
-                                  <span>{box.numero_caja}</span>
-                                  {box.sku && (
-                                    <span className="text-[10px] text-neutral-400 font-mono font-bold mt-0.5">{box.sku}</span>
-                                  )}
-                                </div>
-                              )}
-                            </TableCell>
-                            
-                            <TableCell className="font-semibold text-xs uppercase text-neutral-500">
-                              {isEditing ? (
-                                <select
-                                  value={editingCajaZoneId}
-                                  onChange={e => {
-                                    setEditingCajaZoneId(e.target.value);
-                                    setEditingCajaPasilloId("");
-                                    setEditingCajaSectionId("");
-                                  }}
-                                  className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none"
-                                >
-                                  <option value="">Selecciona zona...</option>
-                                  {zones.map(z => (
-                                    <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
-                                      {z.nombre.toUpperCase()}
-                                    </option>
-                                  ))}
-                                </select>
-                              ) : (
-                                box.almacen_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
-                              )}
-                            </TableCell>
-
-                            <TableCell className="font-semibold text-xs uppercase text-neutral-500">
-                              {isEditing ? (
-                                <select
-                                  value={editingCajaPasilloId}
-                                  onChange={e => {
-                                    setEditingCajaPasilloId(e.target.value);
-                                    setEditingCajaSectionId("");
-                                  }}
-                                  disabled={!editingCajaZoneId}
-                                  className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none disabled:opacity-50"
-                                >
-                                  <option value="">Selecciona pasillo...</option>
-                                  {pasillos
-                                    .filter(p => p.id_zona_almacen === parseInt(editingCajaZoneId))
-                                    .map(p => (
-                                      <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
-                                        {p.nombre.toUpperCase()}
-                                      </option>
-                                    ))}
-                                </select>
-                              ) : (
-                                box.pasillo_nombre && box.pasillo_nombre !== "Sin pasillo" ? box.pasillo_nombre : <span className="text-neutral-300 italic text-[10px]">N/A</span>
-                              )}
-                            </TableCell>
-
-                            <TableCell className="font-semibold text-xs uppercase text-neutral-500">
-                              {isEditing ? (
-                                <select
-                                  value={editingCajaSectionId}
-                                  onChange={e => setEditingCajaSectionId(e.target.value)}
-                                  disabled={!editingCajaPasilloId}
-                                  className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none disabled:opacity-50"
-                                >
-                                  <option value="">Selecciona sección...</option>
-                                  {sections
-                                    .filter(s => s.id_zona_pasillo === parseInt(editingCajaPasilloId))
-                                    .map(s => (
-                                      <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
-                                        {s.nombre.toUpperCase()}
-                                      </option>
-                                    ))}
-                                </select>
-                              ) : (
-                                box.seccion_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
-                              )}
-                            </TableCell>
-
-                            <TableCell className="py-2">
-                              {box.tags ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {box.tags.tipo_producto && box.tags.tipo_producto !== "todos" && (
-                                    <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 capitalize text-[9px] px-1.5 py-0">
-                                      {box.tags.tipo_producto}
-                                    </Badge>
-                                  )}
-                                  {box.tags.genero && box.tags.genero !== "todos" && (
-                                    <Badge className="bg-blue-50 text-blue-800 border border-blue-100 text-[9px] px-1.5 py-0 font-extrabold">
-                                      {box.tags.genero === "H" ? "H" : "M"}
-                                    </Badge>
-                                  )}
-                                  {box.tags.marca && box.tags.marca !== "todos" && (
-                                    <Badge className="bg-purple-50 text-purple-800 border border-purple-100 text-[9px] px-1.5 py-0 font-extrabold">
-                                      {box.tags.marca}
-                                    </Badge>
-                                  )}
-                                  {(!box.tags.tipo_producto || (box.tags.tipo_producto === "todos" && box.tags.genero === "todos" && box.tags.marca === "todos")) && (
-                                    <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
-                              )}
-                            </TableCell>
-
-                            <TableCell className="py-2">
-                              <Badge className={`text-[9px] px-2 py-0.5 capitalize font-black ${
-                                box.estado === 'vacia' 
-                                  ? 'bg-neutral-100 text-neutral-600 border'
-                                  : box.estado === 'activa'
-                                  ? 'bg-blue-50 text-blue-700 border border-blue-100'
-                                  : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                              }`}>
-                                {box.estado}
-                              </Badge>
-                            </TableCell>
-
-                            <TableCell className="text-right pr-6">
-                              <div className="flex justify-end gap-1.5">
+                  {loadingNiveles ? (
+                    <div className="flex justify-center items-center py-10 text-neutral-400">
+                      <Loader2 className="animate-spin" size={20} />
+                    </div>
+                  ) : niveles.length === 0 ? (
+                    <div className="text-center py-10 text-neutral-400 flex flex-col items-center">
+                      <Network size={30} strokeWidth={1} className="opacity-40 mb-1" />
+                      <p className="text-xs font-bold">No hay niveles registrados</p>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader className="bg-neutral-50/20">
+                        <TableRow>
+                          <TableHead>Nombre</TableHead>
+                          <TableHead>Almacén Principal</TableHead>
+                          <TableHead>Pasillo / Subzona</TableHead>
+                          <TableHead>Sección Física</TableHead>
+                          <TableHead>Etiquetas (Tags)</TableHead>
+                          <TableHead className="text-right w-[150px]">Acciones</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {niveles.map((lvl: any) => {
+                          const isEditing = editingNivelId === lvl.id_zona_nivel;
+                          return (
+                            <TableRow key={lvl.id_zona_nivel}>
+                              <TableCell className="font-extrabold text-sm uppercase">
                                 {isEditing ? (
-                                  <>
-                                    <Button 
-                                      size="icon" 
-                                      variant="ghost" 
-                                      onClick={() => handleUpdateCaja(box.id_caja)}
-                                      className="h-8 w-8 text-green-600 hover:bg-green-50 rounded-lg"
-                                    >
-                                      <Check size={14} />
-                                    </Button>
-                                    <Button 
-                                      size="icon" 
-                                      variant="ghost" 
-                                      onClick={() => setEditingCajaId(null)}
-                                      className="h-8 w-8 text-red-500 hover:bg-red-50 rounded-lg"
-                                    >
-                                      <X size={14} />
-                                    </Button>
-                                  </>
+                                  <Input 
+                                    value={editingNivelName}
+                                    onChange={e => setEditingNivelName(e.target.value)}
+                                    className="h-8 max-w-[150px] uppercase text-xs font-bold"
+                                  />
                                 ) : (
-                                  <>
-                                    <Button 
-                                      size="icon" 
-                                      variant="ghost" 
-                                      onClick={() => startEditCaja(box)}
-                                      className="h-8 w-8 text-neutral-400 hover:text-neutral-800 hover:bg-neutral-100 rounded-lg"
-                                    >
-                                      <Edit2 size={14} />
-                                    </Button>
-                                    <Button 
-                                      size="icon" 
-                                      variant="ghost" 
-                                      onClick={() => handleDeleteCaja(box.id_caja)}
-                                      className="h-8 w-8 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
-                                    >
-                                      <Trash2 size={14} />
-                                    </Button>
-                                  </>
+                                  lvl.nombre
                                 )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                )
+                              </TableCell>
+                              <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                                {isEditing ? (
+                                  <select
+                                    value={editingNivelZoneId}
+                                    onChange={e => {
+                                      setEditingNivelZoneId(e.target.value);
+                                      setEditingNivelPasilloId("");
+                                      setEditingNivelSectionId("");
+                                    }}
+                                    className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none"
+                                  >
+                                    <option value="">Selecciona zona...</option>
+                                    {zones.map(z => (
+                                      <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                                        {z.nombre.toUpperCase()}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  lvl.almacen_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                                {isEditing ? (
+                                  <select
+                                    value={editingNivelPasilloId}
+                                    onChange={e => {
+                                      setEditingNivelPasilloId(e.target.value);
+                                      setEditingNivelSectionId("");
+                                    }}
+                                    disabled={!editingNivelZoneId}
+                                    className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none disabled:opacity-50"
+                                  >
+                                    <option value="">Selecciona pasillo...</option>
+                                    {pasillos
+                                      .filter(p => p.id_zona_almacen === parseInt(editingNivelZoneId))
+                                      .map(p => (
+                                        <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                          {p.nombre.toUpperCase()}
+                                        </option>
+                                      ))}
+                                  </select>
+                                ) : (
+                                  lvl.pasillo_nombre && lvl.pasillo_nombre !== "Sin pasillo" ? lvl.pasillo_nombre : <span className="text-neutral-300 italic text-[10px]">N/A</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                                {isEditing ? (
+                                  <select
+                                    value={editingNivelSectionId}
+                                    onChange={e => setEditingNivelSectionId(e.target.value)}
+                                    disabled={!editingNivelPasilloId}
+                                    className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none disabled:opacity-50"
+                                  >
+                                    <option value="">Selecciona sección...</option>
+                                    {sections
+                                      .filter(s => s.id_zona_pasillo === parseInt(editingNivelPasilloId))
+                                      .map(s => (
+                                        <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
+                                          {s.nombre.toUpperCase()}
+                                        </option>
+                                      ))}
+                                  </select>
+                                ) : (
+                                  lvl.seccion_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="py-2">
+                                {lvl.tags ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {lvl.tags.tipo_producto && lvl.tags.tipo_producto !== "todos" && (
+                                      <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 capitalize text-[9px] px-1.5 py-0 font-extrabold">
+                                        {lvl.tags.tipo_producto}
+                                        {lvl.tags.tipo_producto === "ropa" && lvl.tags.tipo_producto_exacto && lvl.tags.tipo_producto_exacto !== "todos" && (
+                                          <span className="text-neutral-500 font-normal"> ({lvl.tags.tipo_producto_exacto})</span>
+                                        )}
+                                      </Badge>
+                                    )}
+                                    {lvl.tags.genero && lvl.tags.genero !== "todos" && (
+                                      <Badge className="bg-blue-50 text-blue-800 border border-blue-100 text-[9px] px-1.5 py-0 font-extrabold">
+                                        {lvl.tags.genero}
+                                      </Badge>
+                                    )}
+                                    {lvl.tags.temporada && lvl.tags.temporada !== "todouso" && (
+                                      <Badge className="bg-amber-50 text-amber-800 border border-amber-100 text-[9px] px-1.5 py-0 font-extrabold capitalize">
+                                        {lvl.tags.temporada}
+                                      </Badge>
+                                    )}
+                                    {lvl.tags.marca && lvl.tags.marca !== "todos" && (
+                                      <Badge className="bg-purple-50 text-purple-800 border border-purple-100 text-[9px] px-1.5 py-0 font-extrabold">
+                                        {lvl.tags.marca}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-1.5">
+                                  {isEditing ? (
+                                    <>
+                                      <Button 
+                                        size="icon" 
+                                        variant="ghost" 
+                                        onClick={() => handleUpdateNivel(lvl.id_zona_nivel)}
+                                        className="h-8 w-8 text-green-600 hover:bg-green-50 rounded-lg"
+                                      >
+                                        <Check size={14} />
+                                      </Button>
+                                      <Button 
+                                        size="icon" 
+                                        variant="ghost" 
+                                        onClick={() => setEditingNivelId(null)}
+                                        className="h-8 w-8 text-red-500 hover:bg-red-50 rounded-lg"
+                                      >
+                                        <X size={14} />
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button 
+                                        size="icon" 
+                                        variant="ghost" 
+                                        onClick={() => startEditNivel(lvl)}
+                                        className="h-8 w-8 text-neutral-400 hover:text-neutral-800 hover:bg-neutral-100 rounded-lg"
+                                      >
+                                        <Edit2 size={14} />
+                                      </Button>
+                                      <Button 
+                                        size="icon" 
+                                        variant="ghost" 
+                                        onClick={() => handleDeleteNivel(lvl.id_zona_nivel)}
+                                        className="h-8 w-8 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                                      >
+                                        <Trash2 size={14} />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
+
+                  {/* 2. CAJAS TABLE (LEVEL 5) */}
+                  <div className="p-4 border-t border-b bg-neutral-50/50 flex justify-between items-center mt-6">
+                    <h3 className="font-extrabold text-sm uppercase text-neutral-900 flex items-center gap-2">
+                      <Box size={16} className="text-neutral-500" />
+                      Cajas de Almacenamiento (Nivel 5)
+                    </h3>
+                    <Badge variant="outline" className="text-[10px] font-black uppercase">{boxes.length} Cajas</Badge>
+                  </div>
+                  {boxes.length === 0 ? (
+                    <div className="text-center py-10 text-neutral-400 flex flex-col items-center">
+                      <Box size={30} strokeWidth={1} className="opacity-40 mb-1" />
+                      <p className="text-xs font-bold">No hay cajas registradas</p>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader className="bg-neutral-50/20">
+                        <TableRow>
+                          <TableHead>Nombre / ID</TableHead>
+                          <TableHead>Almacén Principal</TableHead>
+                          <TableHead>Pasillo / Subzona</TableHead>
+                          <TableHead>Sección Física</TableHead>
+                          <TableHead>Nivel (Nivel 4)</TableHead>
+                          <TableHead>Etiquetas (Tags)</TableHead>
+                          <TableHead>Estado</TableHead>
+                          <TableHead className="text-right w-[150px]">Acciones</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {boxes.map((box: any) => {
+                          const isEditing = editingCajaId === box.id_caja;
+                          return (
+                            <TableRow key={box.id_caja}>
+                              <TableCell className="font-extrabold text-sm uppercase">
+                                {isEditing ? (
+                                  <Input 
+                                    value={editingCajaName}
+                                    onChange={e => setEditingCajaName(e.target.value)}
+                                    className="h-8 max-w-[150px] uppercase text-xs font-bold"
+                                  />
+                                ) : (
+                                  <div className="flex flex-col">
+                                    <span>{box.numero_caja}</span>
+                                    {box.sku && (
+                                      <span className="text-[10px] text-neutral-400 font-mono font-bold mt-0.5">{box.sku}</span>
+                                    )}
+                                  </div>
+                                )}
+                              </TableCell>
+                              
+                              <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                                {isEditing ? (
+                                  <select
+                                    value={editingCajaZoneId}
+                                    onChange={e => {
+                                      setEditingCajaZoneId(e.target.value);
+                                      setEditingCajaPasilloId("");
+                                      setEditingCajaSectionId("");
+                                      setEditingCajaNivelId("");
+                                    }}
+                                    className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none"
+                                  >
+                                    <option value="">Selecciona zona...</option>
+                                    {zones.map(z => (
+                                      <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                                        {z.nombre.toUpperCase()}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  box.almacen_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
+                                )}
+                              </TableCell>
+
+                              <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                                {isEditing ? (
+                                  <select
+                                    value={editingCajaPasilloId}
+                                    onChange={e => {
+                                      setEditingCajaPasilloId(e.target.value);
+                                      setEditingCajaSectionId("");
+                                      setEditingCajaNivelId("");
+                                    }}
+                                    disabled={!editingCajaZoneId}
+                                    className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none disabled:opacity-50"
+                                  >
+                                    <option value="">Selecciona pasillo...</option>
+                                    {pasillos
+                                      .filter(p => p.id_zona_almacen === parseInt(editingCajaZoneId))
+                                      .map(p => (
+                                        <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                          {p.nombre.toUpperCase()}
+                                        </option>
+                                      ))}
+                                  </select>
+                                ) : (
+                                  box.pasillo_nombre && box.pasillo_nombre !== "Sin pasillo" ? box.pasillo_nombre : <span className="text-neutral-300 italic text-[10px]">N/A</span>
+                                )}
+                              </TableCell>
+
+                              <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                                {isEditing ? (
+                                  <select
+                                    value={editingCajaSectionId}
+                                    onChange={e => {
+                                      setEditingCajaSectionId(e.target.value);
+                                      setEditingCajaNivelId("");
+                                    }}
+                                    disabled={!editingCajaPasilloId}
+                                    className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none disabled:opacity-50"
+                                  >
+                                    <option value="">Selecciona sección...</option>
+                                    {sections
+                                      .filter(s => s.id_zona_pasillo === parseInt(editingCajaPasilloId))
+                                      .map(s => (
+                                        <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
+                                          {s.nombre.toUpperCase()}
+                                        </option>
+                                      ))}
+                                  </select>
+                                ) : (
+                                  box.seccion_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
+                                )}
+                              </TableCell>
+
+                              <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                                {isEditing ? (
+                                  <select
+                                    value={editingCajaNivelId}
+                                    onChange={e => setEditingCajaNivelId(e.target.value)}
+                                    disabled={!editingCajaSectionId}
+                                    className="h-8 px-2 bg-neutral-50 border rounded-lg text-xs outline-none disabled:opacity-50"
+                                  >
+                                    <option value="">Sin nivel</option>
+                                    {niveles
+                                      .filter(n => n.id_zona_seccion === parseInt(editingCajaSectionId))
+                                      .map(n => (
+                                        <option key={n.id_zona_nivel} value={n.id_zona_nivel}>
+                                          {n.nombre.toUpperCase()}
+                                        </option>
+                                      ))}
+                                  </select>
+                                ) : (
+                                  box.nivel_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
+                                )}
+                              </TableCell>
+
+                              <TableCell className="py-2">
+                                {box.tags ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {box.tags.tipo_producto && box.tags.tipo_producto !== "todos" && (
+                                      <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 capitalize text-[9px] px-1.5 py-0 font-extrabold">
+                                        {box.tags.tipo_producto}
+                                        {box.tags.tipo_producto === "ropa" && box.tags.tipo_producto_exacto && box.tags.tipo_producto_exacto !== "todos" && (
+                                          <span className="text-neutral-500 font-normal"> ({box.tags.tipo_producto_exacto})</span>
+                                        )}
+                                      </Badge>
+                                    )}
+                                    {box.tags.genero && box.tags.genero !== "todos" && (
+                                      <Badge className="bg-blue-50 text-blue-800 border border-blue-100 text-[9px] px-1.5 py-0 font-extrabold">
+                                        {box.tags.genero === "H" ? "H" : "M"}
+                                      </Badge>
+                                    )}
+                                    {box.tags.marca && box.tags.marca !== "todos" && (
+                                      <Badge className="bg-purple-50 text-purple-800 border border-purple-100 text-[9px] px-1.5 py-0 font-extrabold">
+                                        {box.tags.marca}
+                                      </Badge>
+                                    )}
+                                    {(!box.tags.tipo_producto || (box.tags.tipo_producto === "todos" && box.tags.genero === "todos" && box.tags.marca === "todos")) && (
+                                      <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
+                                )}
+                              </TableCell>
+
+                              <TableCell className="py-2">
+                                <Badge className={`text-[9px] px-2 py-0.5 capitalize font-black ${
+                                  box.estado === 'vacia' 
+                                    ? 'bg-neutral-100 text-neutral-600 border'
+                                    : box.estado === 'activa'
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-100'
+                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                }`}>
+                                  {box.estado}
+                                </Badge>
+                              </TableCell>
+
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-1.5">
+                                  {isEditing ? (
+                                    <>
+                                      <Button 
+                                        size="icon" 
+                                        variant="ghost" 
+                                        onClick={() => handleUpdateCaja(box.id_caja)}
+                                        className="h-8 w-8 text-green-600 hover:bg-green-50 rounded-lg"
+                                      >
+                                        <Check size={14} />
+                                      </Button>
+                                      <Button 
+                                        size="icon" 
+                                        variant="ghost" 
+                                        onClick={() => setEditingCajaId(null)}
+                                        className="h-8 w-8 text-red-500 hover:bg-red-50 rounded-lg"
+                                      >
+                                        <X size={14} />
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button 
+                                        size="icon" 
+                                        variant="ghost" 
+                                        onClick={() => startEditCaja(box)}
+                                        className="h-8 w-8 text-neutral-400 hover:text-neutral-800 hover:bg-neutral-100 rounded-lg"
+                                      >
+                                        <Edit2 size={14} />
+                                      </Button>
+                                      <Button 
+                                        size="icon" 
+                                        variant="ghost" 
+                                        onClick={() => handleDeleteCaja(box.id_caja)}
+                                        className="h-8 w-8 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                                      >
+                                        <Trash2 size={14} />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
+                </div>
               )}
 
             </CardContent>

@@ -315,7 +315,7 @@ app.get("/api/cajas", async (req, res) => {
 app.post("/api/cajas", async (req, res) => {
   try {
     const supabase = getSupabase();
-    let { numero_caja, id_zona_seccion, id_zona_almacen, temporada_default, tags } = req.body;
+    let { numero_caja, id_zona_seccion, id_zona_almacen, id_zona_nivel, temporada_default, tags } = req.body;
     
     numero_caja = sanitizeIdentifier(numero_caja, 50);
     if (!numero_caja) {
@@ -323,13 +323,22 @@ app.post("/api/cajas", async (req, res) => {
     }
     
     const insertData: any = { numero_caja, estado: 'vacia' };
-    if (id_zona_seccion !== undefined && id_zona_seccion !== null && id_zona_seccion !== "") {
+    if (id_zona_nivel !== undefined && id_zona_nivel !== null && id_zona_nivel !== "") {
+      const parsedLvl = parseInt(id_zona_nivel);
+      if (isNaN(parsedLvl) || parsedLvl <= 0) {
+        return res.status(400).json({ error: "ID de nivel inválido" });
+      }
+      insertData.id_zona_nivel = parsedLvl;
+      insertData.id_zona_seccion = null;
+      insertData.id_zona_almacen = null;
+    } else if (id_zona_seccion !== undefined && id_zona_seccion !== null && id_zona_seccion !== "") {
       const parsedSec = parseInt(id_zona_seccion);
       if (isNaN(parsedSec) || parsedSec <= 0) {
         return res.status(400).json({ error: "ID de sección inválido" });
       }
       insertData.id_zona_seccion = parsedSec;
       insertData.id_zona_almacen = null;
+      insertData.id_zona_nivel = null;
     } else if (id_zona_almacen !== undefined && id_zona_almacen !== null && id_zona_almacen !== "") {
       const parsedAlm = parseInt(id_zona_almacen);
       if (isNaN(parsedAlm) || parsedAlm <= 0) {
@@ -337,8 +346,9 @@ app.post("/api/cajas", async (req, res) => {
       }
       insertData.id_zona_almacen = parsedAlm;
       insertData.id_zona_seccion = null;
+      insertData.id_zona_nivel = null;
     }
-
+ 
     // Optional: set default season for products added to this box
     if (temporada_default && temporada_default.trim()) {
       insertData.temporada_default = sanitizeIdentifier(temporada_default, 100).toLowerCase();
@@ -357,7 +367,7 @@ app.post("/api/cajas", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
+ 
 // PUT /api/cajas/:id
 app.put("/api/cajas/:id", async (req, res) => {
   try {
@@ -366,7 +376,7 @@ app.put("/api/cajas/:id", async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: "ID de caja inválido" });
     }
-    const { estado, sku, id_zona_seccion, id_zona_almacen, temporada_default, tags } = req.body;
+    const { estado, sku, id_zona_seccion, id_zona_almacen, id_zona_nivel, temporada_default, tags } = req.body;
     
     const updateData: any = {};
     if (estado !== undefined) {
@@ -389,13 +399,26 @@ app.put("/api/cajas/:id", async (req, res) => {
     if (tags !== undefined) {
       updateData.tags = tags;
     }
-    if (id_zona_seccion !== undefined && id_zona_seccion !== null && id_zona_seccion !== "") {
+    if (id_zona_nivel !== undefined) {
+      if (id_zona_nivel === null || id_zona_nivel === "") {
+        updateData.id_zona_nivel = null;
+      } else {
+        const parsedLvl = parseInt(id_zona_nivel);
+        if (isNaN(parsedLvl) || parsedLvl <= 0) {
+          return res.status(400).json({ error: "ID de nivel inválido" });
+        }
+        updateData.id_zona_nivel = parsedLvl;
+        updateData.id_zona_seccion = null;
+        updateData.id_zona_almacen = null;
+      }
+    } else if (id_zona_seccion !== undefined && id_zona_seccion !== null && id_zona_seccion !== "") {
       const parsedSec = parseInt(id_zona_seccion);
       if (isNaN(parsedSec) || parsedSec <= 0) {
         return res.status(400).json({ error: "ID de sección inválido" });
       }
       updateData.id_zona_seccion = parsedSec;
       updateData.id_zona_almacen = null;
+      updateData.id_zona_nivel = null;
     } else if (id_zona_almacen !== undefined && id_zona_almacen !== null && id_zona_almacen !== "") {
       const parsedAlm = parseInt(id_zona_almacen);
       if (isNaN(parsedAlm) || parsedAlm <= 0) {
@@ -403,9 +426,11 @@ app.put("/api/cajas/:id", async (req, res) => {
       }
       updateData.id_zona_almacen = parsedAlm;
       updateData.id_zona_seccion = null;
-    } else if (id_zona_seccion === null || id_zona_almacen === null) {
+      updateData.id_zona_nivel = null;
+    } else if (id_zona_seccion === null || id_zona_almacen === null || id_zona_nivel === null) {
       updateData.id_zona_seccion = null;
       updateData.id_zona_almacen = null;
+      updateData.id_zona_nivel = null;
     }
     
     const { data, error } = await supabase
@@ -2683,22 +2708,421 @@ app.put("/api/almacen/secciones/:id", async (req, res) => {
   }
 });
 
-// DELETE /api/almacen/secciones/:id - Delete section zone
-app.delete("/api/almacen/secciones/:id", async (req, res) => {
+// --- NIVELES (NIVEL 4) ENDPOINTS ---
+
+// GET /api/almacen/niveles - List all levels
+app.get("/api/almacen/niveles", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data: niveles, error: nErr } = await supabase
+      .from("zonas_nivel")
+      .select(`
+        id_zona_nivel,
+        nombre,
+        id_zona_seccion,
+        tags,
+        created_at,
+        zonas_seccion (
+          nombre,
+          id_zona_almacen,
+          id_zona_pasillo,
+          zonas_almacen (nombre),
+          zonas_pasillo (nombre)
+        )
+      `)
+      .order("nombre", { ascending: true });
+      
+    if (nErr) throw nErr;
+    
+    const result = (niveles || []).map((n: any) => {
+      const secNombre = n.zonas_seccion ? n.zonas_seccion.nombre : "Sin sección";
+      const pasNombre = n.zonas_seccion && n.zonas_seccion.zonas_pasillo 
+        ? n.zonas_seccion.zonas_pasillo.nombre 
+        : "Sin pasillo";
+      const almNombre = n.zonas_seccion && n.zonas_seccion.zonas_almacen 
+        ? n.zonas_seccion.zonas_almacen.nombre 
+        : "Sin almacén";
+        
+      return {
+        id_zona_nivel: n.id_zona_nivel,
+        nombre: n.nombre,
+        id_zona_seccion: n.id_zona_seccion,
+        tags: n.tags || { tipo_producto: "todos", genero: "todos", marca: "todos" },
+        seccion_nombre: secNombre,
+        pasillo_nombre: pasNombre,
+        almacen_nombre: almNombre,
+        id_zona_pasillo: n.zonas_seccion ? n.zonas_seccion.id_zona_pasillo : null,
+        id_zona_almacen: n.zonas_seccion ? n.zonas_seccion.id_zona_almacen : null,
+        created_at: n.created_at
+      };
+    });
+    
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/almacen/niveles - Create level
+app.post("/api/almacen/niveles", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    let { nombre, id_zona_seccion, tags } = req.body;
+    nombre = sanitizeIdentifier(nombre, 50);
+    if (!nombre) {
+      return res.status(400).json({ error: "El nombre de nivel es requerido" });
+    }
+    const parsedSec = parseInt(id_zona_seccion);
+    if (isNaN(parsedSec) || parsedSec <= 0) {
+      return res.status(400).json({ error: "ID de sección inválido" });
+    }
+    
+    const { data, error } = await supabase
+      .from("zonas_nivel")
+      .insert([{
+        nombre: nombre.toLowerCase(),
+        id_zona_seccion: parsedSec,
+        tags: tags || { tipo_producto: "todos", genero: "todos", marca: "todos" }
+      }])
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/almacen/niveles/bulk - Bulk create levels
+app.post("/api/almacen/niveles/bulk", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    let { id_zona_seccion, prefijo, inicio, fin, tags } = req.body;
+    
+    const parsedSec = parseInt(id_zona_seccion);
+    if (isNaN(parsedSec) || parsedSec <= 0) {
+      return res.status(400).json({ error: "ID de sección inválido" });
+    }
+    
+    const startIdx = parseInt(inicio);
+    const endIdx = parseInt(fin);
+    if (isNaN(startIdx) || isNaN(endIdx) || startIdx > endIdx) {
+      return res.status(400).json({ error: "Rango de numeración inválido" });
+    }
+    
+    const cleanPrefijo = sanitizeIdentifier(prefijo || "NIV-", 50);
+    const cleanTags = tags || { tipo_producto: "todos", genero: "todos", marca: "todos" };
+    
+    const inserts = [];
+    for (let i = startIdx; i <= endIdx; i++) {
+      const levelName = `${cleanPrefijo}${i}`.toLowerCase();
+      inserts.push({
+        nombre: levelName,
+        id_zona_seccion: parsedSec,
+        tags: cleanTags
+      });
+    }
+    
+    const { data, error } = await supabase
+      .from("zonas_nivel")
+      .insert(inserts)
+      .select();
+      
+    if (error) throw error;
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/almacen/niveles/:id - Update level
+app.put("/api/almacen/niveles/:id", async (req, res) => {
   try {
     const supabase = getSupabase();
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ error: "ID de sección inválido" });
+      return res.status(400).json({ error: "ID de nivel inválido" });
+    }
+    let { nombre, id_zona_seccion, tags } = req.body;
+    
+    const updateData: any = {};
+    if (nombre !== undefined) {
+      nombre = sanitizeIdentifier(nombre, 50);
+      if (!nombre) return res.status(400).json({ error: "El nombre debe ser válido" });
+      updateData.nombre = nombre.toLowerCase();
+    }
+    if (id_zona_seccion !== undefined) {
+      const parsedSec = parseInt(id_zona_seccion);
+      if (isNaN(parsedSec) || parsedSec <= 0) {
+        return res.status(400).json({ error: "ID de sección inválido" });
+      }
+      updateData.id_zona_seccion = parsedSec;
+    }
+    if (tags !== undefined) {
+      updateData.tags = tags;
+    }
+    
+    const { data, error } = await supabase
+      .from("zonas_nivel")
+      .update(updateData)
+      .eq("id_zona_nivel", id)
+      .select();
+      
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/almacen/niveles/:id - Delete level
+app.delete("/api/almacen/niveles/:id", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const id = parseInt(req.params.id);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ error: "ID de nivel inválido" });
     }
     
     const { error } = await supabase
-      .from("zonas_seccion")
+      .from("zonas_nivel")
       .delete()
-      .eq("id_zona_seccion", id);
+      .eq("id_zona_nivel", id);
       
     if (error) throw error;
     res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/almacen/secciones/bulk - Bulk create sections
+app.post("/api/almacen/secciones/bulk", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    let { id_zona_almacen, id_zona_pasillo, prefijo, inicio, fin, tags } = req.body;
+    
+    const startIdx = parseInt(inicio);
+    const endIdx = parseInt(fin);
+    if (isNaN(startIdx) || isNaN(endIdx) || startIdx > endIdx) {
+      return res.status(400).json({ error: "Rango de numeración inválido" });
+    }
+    
+    const cleanPrefijo = sanitizeIdentifier(prefijo || "SEC-", 50);
+    const cleanTags = tags || { tipo_producto: "todos", genero: "todos", marca: "todos" };
+    
+    const inserts = [];
+    for (let i = startIdx; i <= endIdx; i++) {
+      const secName = `${cleanPrefijo}${i}`.toLowerCase();
+      inserts.push({
+        nombre: secName,
+        id_zona_almacen: id_zona_almacen ? parseInt(id_zona_almacen) : null,
+        id_zona_pasillo: id_zona_pasillo ? parseInt(id_zona_pasillo) : null,
+        tags: cleanTags
+      });
+    }
+    
+    const { data, error } = await supabase
+      .from("zonas_seccion")
+      .insert(inserts)
+      .select();
+      
+    if (error) throw error;
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/productos/grupo - Register group of products with a single photo
+app.post("/api/productos/grupo", upload.single('foto'), async (req, res) => {
+  try {
+    await detectSchema();
+    const supabase = getSupabase();
+    let { modelo_grupo, temporada, tipo, marca_sub, variaciones, id_caja, id_zona_nivel, id_zona_seccion, id_zona_almacen } = req.body;
+    
+    modelo_grupo = sanitizeIdentifier(modelo_grupo, 100);
+    if (!modelo_grupo || modelo_grupo === "sin modelo") {
+      return res.status(400).json({ error: "El Modelo de Grupo es obligatorio para registro grupal" });
+    }
+    
+    let parsedVariaciones = [];
+    try {
+      parsedVariaciones = typeof variaciones === 'string' ? JSON.parse(variaciones) : (Array.isArray(variaciones) ? variaciones : []);
+    } catch (e) {
+      return res.status(400).json({ error: "El formato de variaciones es inválido" });
+    }
+    
+    if (parsedVariaciones.length === 0) {
+      return res.status(400).json({ error: "Debes agregar al menos una variación de producto" });
+    }
+    
+    temporada = (sanitizeIdentifier(temporada, 100) || "todouso").toLowerCase();
+    tipo = (sanitizeIdentifier(tipo, 100) || "otro").toLowerCase();
+    marca_sub = sanitizeIdentifier(marca_sub, 100) || "Guess";
+    
+    // Prepare product records to insert
+    const inserts = parsedVariaciones.map((v: any) => {
+      const cleanSku = sanitizeIdentifier(v.sku, 100);
+      const cleanTalla = sanitizeIdentifier(v.talla, 50) || "SinTalla";
+      const insertData: any = {
+        sku: cleanSku,
+        ean_13: cleanSku,
+        talla: cleanTalla,
+        temporada,
+        tipo,
+        marca_sub
+      };
+      if (req.file) {
+        insertData.foto = '\\x' + req.file.buffer.toString('hex');
+      }
+      if (hasModeloGrupoColumn) {
+        insertData.modelo_grupo = modelo_grupo;
+      }
+      return insertData;
+    });
+    
+    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
+    
+    const { data: createdProducts, error: pErr } = await supabase
+      .from("productos")
+      .insert(inserts)
+      .select(fields);
+      
+    if (pErr) throw pErr;
+    if (!createdProducts || createdProducts.length === 0) {
+      throw new Error("No se crearon productos");
+    }
+    
+    // Check if we need to associate them with a container
+    let targetCajaId = id_caja ? parseInt(id_caja) : null;
+    
+    if (!targetCajaId) {
+      if (id_zona_nivel) {
+        const lvlId = parseInt(id_zona_nivel);
+        if (!isNaN(lvlId)) {
+          // Look for existing virtual caja for this level
+          const { data: lvlObj } = await supabase.from("zonas_nivel").select("nombre, id_zona_seccion").eq("id_zona_nivel", lvlId).maybeSingle();
+          if (lvlObj) {
+            const nameToMatch = `NIVEL: ${lvlObj.nombre.toUpperCase()}`;
+            const { data: existingCaja } = await supabase
+              .from("cajas")
+              .select("id_caja")
+              .eq("id_zona_nivel", lvlId)
+              .eq("numero_caja", nameToMatch)
+              .maybeSingle();
+              
+            if (existingCaja) {
+              targetCajaId = existingCaja.id_caja;
+            } else {
+              const { data: newCaja } = await supabase
+                .from("cajas")
+                .insert([{
+                  numero_caja: nameToMatch,
+                  id_zona_nivel: lvlId,
+                  id_zona_seccion: lvlObj.id_zona_seccion,
+                  estado: 'vacia',
+                  tags: { tipo_producto: tipo, genero: "todos", marca: marca_sub }
+                }])
+                .select();
+              if (newCaja && newCaja[0]) {
+                targetCajaId = newCaja[0].id_caja;
+              }
+            }
+          }
+        }
+      } else if (id_zona_seccion) {
+        const secId = parseInt(id_zona_seccion);
+        if (!isNaN(secId)) {
+          const { data: secObj } = await supabase.from("zonas_seccion").select("nombre").eq("id_zona_seccion", secId).maybeSingle();
+          if (secObj) {
+            const nameToMatch = `SECCIÓN: ${secObj.nombre.toUpperCase()}`;
+            const { data: existingCaja } = await supabase
+              .from("cajas")
+              .select("id_caja")
+              .eq("id_zona_seccion", secId)
+              .eq("numero_caja", nameToMatch)
+              .maybeSingle();
+              
+            if (existingCaja) {
+              targetCajaId = existingCaja.id_caja;
+            } else {
+              const { data: newCaja } = await supabase
+                .from("cajas")
+                .insert([{
+                  numero_caja: nameToMatch,
+                  id_zona_seccion: secId,
+                  estado: 'vacia',
+                  tags: { tipo_producto: tipo, genero: "todos", marca: marca_sub }
+                }])
+                .select();
+              if (newCaja && newCaja[0]) {
+                targetCajaId = newCaja[0].id_caja;
+              }
+            }
+          }
+        }
+      } else if (id_zona_almacen) {
+        const almId = parseInt(id_zona_almacen);
+        if (!isNaN(almId)) {
+          const { data: almObj } = await supabase.from("zonas_almacen").select("nombre").eq("id_zona_almacen", almId).maybeSingle();
+          if (almObj) {
+            const nameToMatch = `ALMACÉN: ${almObj.nombre.toUpperCase()}`;
+            const { data: existingCaja } = await supabase
+              .from("cajas")
+              .select("id_caja")
+              .eq("id_zona_almacen", almId)
+              .is("id_zona_seccion", null)
+              .eq("numero_caja", nameToMatch)
+              .maybeSingle();
+              
+            if (existingCaja) {
+              targetCajaId = existingCaja.id_caja;
+            } else {
+              const { data: newCaja } = await supabase
+                .from("cajas")
+                .insert([{
+                  numero_caja: nameToMatch,
+                  id_zona_almacen: almId,
+                  estado: 'vacia',
+                  tags: { tipo_producto: tipo, genero: "todos", marca: marca_sub }
+                }])
+                .select();
+              if (newCaja && newCaja[0]) {
+                targetCajaId = newCaja[0].id_caja;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Associate products to target caja if resolved
+    if (targetCajaId) {
+      const associations = createdProducts.map((prod: any) => {
+        const matchingVar = parsedVariaciones.find((v: any) => sanitizeIdentifier(v.sku, 100) === prod.sku);
+        const qty = matchingVar ? parseInt(matchingVar.cantidad) || 1 : 1;
+        return {
+          id_caja: targetCajaId,
+          id_producto: prod.id_producto,
+          cantidad: qty
+        };
+      });
+      
+      const { error: assocErr } = await supabase
+        .from("caja_productos")
+        .insert(associations);
+        
+      if (assocErr) throw assocErr;
+      
+      // Update box state to 'activa' if it was vacant
+      await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", targetCajaId).eq("estado", "vacia");
+    }
+    
+    res.json({
+      success: true,
+      products: createdProducts
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
