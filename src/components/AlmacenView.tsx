@@ -131,6 +131,15 @@ export default function AlmacenView() {
   const [showBatchPrintModal, setShowBatchPrintModal] = useState(false);
   const [isPrintingLabels, setIsPrintingLabels] = useState(false);
   
+  // Batch print filter states
+  const [batchPrintSelectedIds, setBatchPrintSelectedIds] = useState<Set<number>>(new Set());
+  const [batchPrintCodes, setBatchPrintCodes] = useState<Record<number, string>>({});
+  const [batchFilterAlmacenIds, setBatchFilterAlmacenIds] = useState<Set<number>>(new Set());
+  const [batchFilterPasilloIds, setBatchFilterPasilloIds] = useState<Set<number>>(new Set());
+  
+  // Secciones form mode: individual or bulk
+  const [sectionFormMode, setSectionFormMode] = useState<"individual" | "bulk">("individual");
+  
   // Data lists
   const [zones, setZones] = useState<WarehouseZone[]>([]);
   const [pasillos, setPasillos] = useState<any[]>([]);
@@ -160,7 +169,7 @@ export default function AlmacenView() {
   const [submitting, setSubmitting] = useState(false);
   
   // Container type creation mode selector
-  const [containerTypeToCreate, setContainerTypeToCreate] = useState<"caja" | "nivel">("caja");
+  const [containerTypeToCreate, setContainerTypeToCreate] = useState<"caja" | "nivel" | "bulk_nivel">("caja");
 
   // Form states - Add Zone
   const [newZoneName, setNewZoneName] = useState("");
@@ -365,15 +374,29 @@ export default function AlmacenView() {
     }]);
   };
 
+  const openBatchPrintModal = () => {
+    // Initialize: select all sections, set default codes
+    const ids = new Set<number>(sections.map((s: any) => s.id_zona_seccion));
+    setBatchPrintSelectedIds(ids);
+    const codes: Record<number, string> = {};
+    sections.forEach((s: any) => {
+      codes[s.id_zona_seccion] = (/^[A-Z0-9_\-]+$/i.test(s.nombre) ? s.nombre.toUpperCase() : `SEC-${s.id_zona_seccion}`);
+    });
+    setBatchPrintCodes(codes);
+    setBatchFilterAlmacenIds(new Set());
+    setBatchFilterPasilloIds(new Set());
+    setShowBatchPrintModal(true);
+  };
+
   const handlePrintBatchLabels = () => {
-    // Generate high-resolution canvases for batch labels and open print window
-    if (!sections || sections.length === 0) {
-      toast.error("No hay secciones para imprimir");
+    const selected = sections.filter((s: any) => batchPrintSelectedIds.has(s.id_zona_seccion));
+    if (selected.length === 0) {
+      toast.error("Selecciona al menos una sección para imprimir");
       return;
     }
 
-    const payload = sections.map((section) => ({
-      codigo: (/^[A-Z0-9]+$/i.test(section.nombre) ? section.nombre.toUpperCase() : `SEC-${section.id_zona_seccion}`),
+    const payload = selected.map((section: any) => ({
+      codigo: batchPrintCodes[section.id_zona_seccion] || section.nombre.toUpperCase(),
       nombre: section.nombre,
       almacen: section.almacen_nombre
     }));
@@ -2275,11 +2298,32 @@ export default function AlmacenView() {
                   <CardHeader className="pb-3 bg-neutral-50/50">
                     <CardTitle className="text-lg font-bold flex items-center gap-2">
                       <Plus size={18} className="text-neutral-500" />
-                      Nueva Sección
+                      {sectionFormMode === "individual" ? "Nueva Sección" : "Secciones en Lote"}
                     </CardTitle>
-                    <CardDescription>Crea y asocia una sección física a una zona principal</CardDescription>
+                    <CardDescription>{sectionFormMode === "individual" ? "Crea y asocia una sección física a una zona principal" : "Genera múltiples secciones con prefijo y rango numérico"}</CardDescription>
+                    
+                    {/* Toggle: Individual / Bulk */}
+                    <div className="grid grid-cols-2 gap-1.5 p-1 bg-neutral-100 rounded-xl mt-3 text-xs font-black uppercase tracking-wider">
+                      <button 
+                        type="button"
+                        onClick={() => setSectionFormMode("individual")}
+                        className={`py-2 px-1 rounded-lg text-[9px] tracking-tight text-center transition-all ${sectionFormMode === 'individual' ? 'bg-white text-neutral-900 shadow-sm font-black' : 'text-neutral-500 hover:text-neutral-950 font-semibold'}`}
+                      >
+                        Nueva Sección
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setSectionFormMode("bulk")}
+                        className={`py-2 px-1 rounded-lg text-[9px] tracking-tight text-center transition-all ${sectionFormMode === 'bulk' ? 'bg-white text-neutral-900 shadow-sm font-black' : 'text-neutral-500 hover:text-neutral-950 font-semibold'}`}
+                      >
+                        + Secciones (Lote)
+                      </button>
+                    </div>
                   </CardHeader>
                   <CardContent className="p-5">
+                    
+                    {/* INDIVIDUAL SECTION FORM */}
+                    {sectionFormMode === "individual" && (
                     <form onSubmit={handleAddSection} className="space-y-4">
                       <div className="space-y-1.5">
                         <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Nombre de Sección</label>
@@ -2387,6 +2431,138 @@ export default function AlmacenView() {
                         {submitting ? <Loader2 className="animate-spin" size={18} /> : "Crear Sección"}
                       </Button>
                     </form>
+                    )}
+
+                    {/* BULK SECCIONES FORM */}
+                    {sectionFormMode === "bulk" && (
+                      <form onSubmit={handleBulkCreateSections} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1.5 col-span-2">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Clave / Prefijo</label>
+                            <Input 
+                              placeholder="Ej: AN, MESA" 
+                              value={bulkSecPrefix}
+                              onChange={e => setBulkSecPrefix(e.target.value)}
+                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200 uppercase font-black"
+                            />
+                          </div>
+                          
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Inicio (Nº)</label>
+                            <Input 
+                              type="number"
+                              value={bulkSecStart}
+                              onChange={e => setBulkSecStart(e.target.value)}
+                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Fin (Nº)</label>
+                            <Input 
+                              type="number"
+                              value={bulkSecEnd}
+                              onChange={e => setBulkSecEnd(e.target.value)}
+                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Zona Almacén</label>
+                          <select
+                            value={bulkSecZoneId}
+                            onChange={e => {
+                              setBulkSecZoneId(e.target.value);
+                              setBulkSecPasilloId("");
+                            }}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="">Selecciona una zona...</option>
+                            {zones.map(z => (
+                              <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                                {z.nombre.toUpperCase()}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Pasillo / Zona Intermedia</label>
+                          <select
+                            value={bulkSecPasilloId}
+                            onChange={e => setBulkSecPasilloId(e.target.value)}
+                            disabled={!bulkSecZoneId}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
+                          >
+                            <option value="">Selecciona un pasillo...</option>
+                            {pasillos
+                              .filter(p => p.id_zona_almacen === parseInt(bulkSecZoneId))
+                              .map(p => (
+                                <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
+                                  {p.nombre.toUpperCase()}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        {/* TAGS */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo de Producto</label>
+                          <select
+                            value={bulkSecTipo}
+                            onChange={e => {
+                              setBulkSecTipo(e.target.value);
+                              if (e.target.value !== "calzado") {
+                                setBulkSecMarca("todos");
+                              }
+                            }}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">TODOS / AMBOS</option>
+                            <option value="ropa">ROPA</option>
+                            <option value="calzado">CALZADO</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Género</label>
+                          <select
+                            value={bulkSecGenero}
+                            onChange={e => setBulkSecGenero(e.target.value)}
+                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="todos">UNISEX / TODOS</option>
+                            <option value="H">HOMBRE (H)</option>
+                            <option value="M">MUJER (M)</option>
+                          </select>
+                        </div>
+
+                        {bulkSecTipo === "calzado" && (
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Marca</label>
+                            <select
+                              value={bulkSecMarca}
+                              onChange={e => setBulkSecMarca(e.target.value)}
+                              className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="todos">TODAS / AMBAS</option>
+                              {conceptMarcas.map((m: string) => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <Button 
+                          type="submit" 
+                          disabled={submitting || !bulkSecPrefix.trim() || !bulkSecStart || !bulkSecEnd}
+                          className="w-full rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 text-white font-bold"
+                        >
+                          {submitting ? <Loader2 className="animate-spin" size={18} /> : "Generar Secciones en Lote"}
+                        </Button>
+                      </form>
+                    )}
                   </CardContent>
                 </Card>
               </motion.div>
@@ -2423,14 +2599,7 @@ export default function AlmacenView() {
                         Nuevo Nivel
                       </button>
                     </div>
-                    <div className="grid grid-cols-2 gap-1.5 p-1 bg-neutral-100 rounded-xl mt-1.5 text-xs font-black uppercase tracking-wider">
-                      <button 
-                        type="button"
-                        onClick={() => setContainerTypeToCreate("bulk_seccion")}
-                        className={`py-2 px-1 rounded-lg text-[9px] tracking-tight text-center transition-all ${containerTypeToCreate === 'bulk_seccion' ? 'bg-white text-neutral-900 shadow-sm font-black' : 'text-neutral-500 hover:text-neutral-950 font-semibold'}`}
-                      >
-                        + Secciones (Lote)
-                      </button>
+                    <div className="grid grid-cols-1 gap-1.5 p-1 bg-neutral-100 rounded-xl mt-1.5 text-xs font-black uppercase tracking-wider">
                       <button 
                         type="button"
                         onClick={() => setContainerTypeToCreate("bulk_nivel")}
@@ -2776,137 +2945,6 @@ export default function AlmacenView() {
                       </form>
                     )}
 
-                    {/* 3. BULK CREATE SECCIONES */}
-                    {containerTypeToCreate === "bulk_seccion" && (
-                      <form onSubmit={handleBulkCreateSections} className="space-y-4">
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="space-y-1.5 col-span-2">
-                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Clave / Prefijo</label>
-                            <Input 
-                              placeholder="Ej: AN, MESA" 
-                              value={bulkSecPrefix}
-                              onChange={e => setBulkSecPrefix(e.target.value)}
-                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200 uppercase font-black"
-                            />
-                          </div>
-                          
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Inicio (Nº)</label>
-                            <Input 
-                              type="number"
-                              value={bulkSecStart}
-                              onChange={e => setBulkSecStart(e.target.value)}
-                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
-                            />
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Fin (Nº)</label>
-                            <Input 
-                              type="number"
-                              value={bulkSecEnd}
-                              onChange={e => setBulkSecEnd(e.target.value)}
-                              className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Zona Almacén</label>
-                          <select
-                            value={bulkSecZoneId}
-                            onChange={e => {
-                              setBulkSecZoneId(e.target.value);
-                              setBulkSecPasilloId("");
-                            }}
-                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                          >
-                            <option value="">Selecciona una zona...</option>
-                            {zones.map(z => (
-                              <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
-                                {z.nombre.toUpperCase()}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Pasillo / Zona Intermedia</label>
-                          <select
-                            value={bulkSecPasilloId}
-                            onChange={e => setBulkSecPasilloId(e.target.value)}
-                            disabled={!bulkSecZoneId}
-                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
-                          >
-                            <option value="">Selecciona un pasillo...</option>
-                            {pasillos
-                              .filter(p => p.id_zona_almacen === parseInt(bulkSecZoneId))
-                              .map(p => (
-                                <option key={p.id_zona_pasillo} value={p.id_zona_pasillo}>
-                                  {p.nombre.toUpperCase()}
-                                </option>
-                              ))}
-                          </select>
-                        </div>
-
-                        {/* TAGS */}
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Tipo de Producto</label>
-                          <select
-                            value={bulkSecTipo}
-                            onChange={e => {
-                              setBulkSecTipo(e.target.value);
-                              if (e.target.value !== "calzado") {
-                                setBulkSecMarca("todos");
-                              }
-                            }}
-                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                          >
-                            <option value="todos">TODOS / AMBOS</option>
-                            <option value="ropa">ROPA</option>
-                            <option value="calzado">CALZADO</option>
-                          </select>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Género</label>
-                          <select
-                            value={bulkSecGenero}
-                            onChange={e => setBulkSecGenero(e.target.value)}
-                            className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                          >
-                            <option value="todos">UNISEX / TODOS</option>
-                            <option value="H">HOMBRE (H)</option>
-                            <option value="M">MUJER (M)</option>
-                          </select>
-                        </div>
-
-                        {bulkSecTipo === "calzado" && (
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Marca</label>
-                            <select
-                              value={bulkSecMarca}
-                              onChange={e => setBulkSecMarca(e.target.value)}
-                              className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                            >
-                              <option value="todos">TODAS / AMBAS</option>
-                              {conceptMarcas.map((m: string) => (
-                                <option key={m} value={m}>{m}</option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-
-                        <Button 
-                          type="submit" 
-                          disabled={submitting || !bulkSecPrefix.trim() || !bulkSecStart || !bulkSecEnd}
-                          className="w-full rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 text-white font-bold"
-                        >
-                          {submitting ? <Loader2 className="animate-spin" size={18} /> : "Generar Secciones en Lote"}
-                        </Button>
-                      </form>
-                    )}
-
                     {/* 4. BULK CREATE NIVELES */}
                     {containerTypeToCreate === "bulk_nivel" && (
                       <form onSubmit={handleBulkCreateNiveles} className="space-y-4">
@@ -3115,11 +3153,12 @@ export default function AlmacenView() {
               </div>
               {activeTab === "secciones" && sections.length > 0 && (
                 <Button
-                  onClick={() => setShowBatchPrintModal(true)}
-                  className="rounded-xl h-9 bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shrink-0"
+                  onClick={openBatchPrintModal}
+                  className="rounded-xl h-9 bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-[10px] md:text-xs flex items-center gap-1.5 shadow-md shrink-0"
                 >
                   <Printer size={14} />
-                  Imprimir Lote (4" x 1.5")
+                  <span className="hidden sm:inline">Imprimir Lote</span>
+                  <span className="sm:hidden">Lote</span>
                 </Button>
               )}
             </CardHeader>
@@ -3968,31 +4007,160 @@ export default function AlmacenView() {
         </DialogContent>
       </Dialog>
 
-      {/* Batch Barcode Print Dialog */}
+      {/* Batch Barcode Print Dialog - Enhanced with Filters */}
       <Dialog open={showBatchPrintModal} onOpenChange={setShowBatchPrintModal}>
-        <DialogContent className="max-w-md rounded-3xl p-6 bg-white border border-neutral-100 shadow-2xl">
+        <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto rounded-3xl p-4 md:p-6 bg-white border border-neutral-100 shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-lg font-black uppercase text-neutral-950 flex items-center gap-2">
+            <DialogTitle className="text-base md:text-lg font-black uppercase text-neutral-950 flex items-center gap-2">
               <Printer size={20} className="text-neutral-700" />
               Imprimir Lote de Secciones
             </DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500">
-              Se generarán e imprimirán etiquetas para las {sections.length} secciones registradas en formato 4" x 1.5".
+            <DialogDescription className="text-[10px] md:text-xs text-neutral-500">
+              Filtra y selecciona las secciones a imprimir. Edita el código alfanumérico Code_128 de cada etiqueta.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-col space-y-4 my-2">
-            <div className="max-h-60 overflow-y-auto border border-neutral-100 rounded-xl p-3 bg-neutral-50/50 space-y-2">
-              {sections.map((section: any) => (
-                <div key={section.id_zona_seccion} className="flex justify-between items-center bg-white p-2 rounded-lg border text-xs shadow-sm">
-                  <span className="font-extrabold text-neutral-800 uppercase">{section.nombre}</span>
-                  <span className="font-mono text-[10px] text-neutral-500 font-bold bg-neutral-100 px-2 py-0.5 rounded">
-                    {/^[A-Z0-9]+$/i.test(section.nombre) 
-                      ? section.nombre.toUpperCase() 
-                      : `SEC-${section.id_zona_seccion}`}
-                  </span>
+          <div className="flex flex-col space-y-3 my-2">
+            {/* FILTER: Almacén */}
+            <div className="space-y-1">
+              <label className="text-[9px] uppercase font-black tracking-wider text-neutral-400">Filtrar por Almacén</label>
+              <div className="flex flex-wrap gap-1.5 p-2 bg-neutral-50 rounded-xl border border-neutral-100">
+                {zones.length === 0 ? (
+                  <span className="text-[10px] text-neutral-400 italic">Sin zonas</span>
+                ) : zones.map((z) => {
+                  const active = batchFilterAlmacenIds.size === 0 || batchFilterAlmacenIds.has(z.id_zona_almacen);
+                  return (
+                    <button
+                      key={z.id_zona_almacen}
+                      type="button"
+                      onClick={() => {
+                        const next = new Set(batchFilterAlmacenIds);
+                        if (next.has(z.id_zona_almacen)) next.delete(z.id_zona_almacen);
+                        else next.add(z.id_zona_almacen);
+                        setBatchFilterAlmacenIds(next);
+                      }}
+                      className={`text-[9px] px-2 py-1 rounded-lg font-bold transition-all ${active ? 'bg-neutral-900 text-white shadow-sm' : 'bg-white text-neutral-400 border border-neutral-200'}`}
+                    >
+                      {z.nombre.toUpperCase()}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* FILTER: Pasillo */}
+            {(() => {
+              const filteredPasillos = batchFilterAlmacenIds.size > 0
+                ? pasillos.filter((p: any) => batchFilterAlmacenIds.has(p.id_zona_almacen))
+                : pasillos;
+              return filteredPasillos.length > 0 ? (
+                <div className="space-y-1">
+                  <label className="text-[9px] uppercase font-black tracking-wider text-neutral-400">Filtrar por Pasillo / Zona</label>
+                  <div className="flex flex-wrap gap-1.5 p-2 bg-neutral-50 rounded-xl border border-neutral-100">
+                    {filteredPasillos.map((p: any) => {
+                      const active = batchFilterPasilloIds.size === 0 || batchFilterPasilloIds.has(p.id_zona_pasillo);
+                      return (
+                        <button
+                          key={p.id_zona_pasillo}
+                          type="button"
+                          onClick={() => {
+                            const next = new Set(batchFilterPasilloIds);
+                            if (next.has(p.id_zona_pasillo)) next.delete(p.id_zona_pasillo);
+                            else next.add(p.id_zona_pasillo);
+                            setBatchFilterPasilloIds(next);
+                          }}
+                          className={`text-[9px] px-2 py-1 rounded-lg font-bold transition-all ${active ? 'bg-neutral-800 text-white shadow-sm' : 'bg-white text-neutral-400 border border-neutral-200'}`}
+                        >
+                          {p.nombre.toUpperCase()}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              ))}
+              ) : null;
+            })()}
+
+            {/* Select All / None */}
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black uppercase text-neutral-500">{batchPrintSelectedIds.size} / {sections.length} seleccionadas</span>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const visibleSections = sections.filter((s: any) => {
+                      if (batchFilterAlmacenIds.size > 0) {
+                        const zone = zones.find(z => z.nombre === s.almacen_nombre);
+                        if (!zone || !batchFilterAlmacenIds.has(zone.id_zona_almacen)) return false;
+                      }
+                      if (batchFilterPasilloIds.size > 0) {
+                        const pasillo = pasillos.find((p: any) => p.nombre === s.pasillo_nombre);
+                        if (!pasillo || !batchFilterPasilloIds.has(pasillo.id_zona_pasillo)) return false;
+                      }
+                      return true;
+                    });
+                    const next = new Set(batchPrintSelectedIds);
+                    visibleSections.forEach((s: any) => next.add(s.id_zona_seccion));
+                    setBatchPrintSelectedIds(next);
+                  }}
+                  className="text-[9px] px-2.5 py-1 bg-neutral-900 text-white rounded-lg font-bold"
+                >
+                  Seleccionar Visibles
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBatchPrintSelectedIds(new Set())}
+                  className="text-[9px] px-2.5 py-1 bg-neutral-200 text-neutral-700 rounded-lg font-bold"
+                >
+                  Ninguna
+                </button>
+              </div>
+            </div>
+
+            {/* SECTIONS LIST with checkboxes + editable codes */}
+            <div className="max-h-48 md:max-h-60 overflow-y-auto border border-neutral-100 rounded-xl p-2 bg-neutral-50/50 space-y-1.5">
+              {sections
+                .filter((s: any) => {
+                  if (batchFilterAlmacenIds.size > 0) {
+                    const zone = zones.find(z => z.nombre === s.almacen_nombre);
+                    if (!zone || !batchFilterAlmacenIds.has(zone.id_zona_almacen)) return false;
+                  }
+                  if (batchFilterPasilloIds.size > 0) {
+                    const pasillo = pasillos.find((p: any) => p.nombre === s.pasillo_nombre);
+                    if (!pasillo || !batchFilterPasilloIds.has(pasillo.id_zona_pasillo)) return false;
+                  }
+                  return true;
+                })
+                .map((section: any) => {
+                  const checked = batchPrintSelectedIds.has(section.id_zona_seccion);
+                  return (
+                    <div key={section.id_zona_seccion} className={`flex items-center gap-2 p-2 rounded-lg border text-xs transition-all ${checked ? 'bg-white border-neutral-200 shadow-sm' : 'bg-neutral-100/50 border-transparent opacity-60'}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          const next = new Set(batchPrintSelectedIds);
+                          if (checked) next.delete(section.id_zona_seccion);
+                          else next.add(section.id_zona_seccion);
+                          setBatchPrintSelectedIds(next);
+                        }}
+                        className="w-3.5 h-3.5 rounded accent-neutral-900 shrink-0"
+                      />
+                      <span className="font-extrabold text-neutral-800 uppercase text-[10px] min-w-[60px] shrink-0">{section.nombre}</span>
+                      <input
+                        type="text"
+                        value={batchPrintCodes[section.id_zona_seccion] || ''}
+                        onChange={(e) => {
+                          setBatchPrintCodes(prev => ({
+                            ...prev,
+                            [section.id_zona_seccion]: e.target.value.toUpperCase()
+                          }));
+                        }}
+                        className="flex-1 h-7 px-2 bg-neutral-50 border border-neutral-200 rounded-lg text-[10px] font-mono font-bold uppercase outline-none focus:ring-1 focus:ring-neutral-400 min-w-0"
+                        title="Código Code_128 para la etiqueta"
+                      />
+                    </div>
+                  );
+                })}
             </div>
 
             <div className="flex gap-2 w-full">
@@ -4000,11 +4168,12 @@ export default function AlmacenView() {
                 Cancelar
               </Button>
               <Button 
-                onClick={handlePrintBatchLabels} 
-                className="flex-1 rounded-xl h-10 bg-neutral-950 hover:bg-neutral-850 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md"
+                onClick={handlePrintBatchLabels}
+                disabled={batchPrintSelectedIds.size === 0}
+                className="flex-1 rounded-xl h-10 bg-neutral-950 hover:bg-neutral-850 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
               >
                 <Printer size={14} />
-                Confirmar e Imprimir
+                Imprimir ({batchPrintSelectedIds.size})
               </Button>
             </div>
           </div>
