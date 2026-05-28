@@ -3199,8 +3199,7 @@ export default function AlmacenView() {
             </CardHeader>
             <CardContent className="p-0">
               
-              {/* ZONAS TABLE */}
-              {["zonas", "pasillos", "secciones", "cajas"].includes(activeTab) && (
+              {activeTab === "zonas" && (
                 <div className="border-b last:border-b-0 border-neutral-100">
                   <button 
                     onClick={() => toggleTable('zonas')}
@@ -3317,7 +3316,7 @@ export default function AlmacenView() {
               )}
 
               {/* PASILLOS TABLE */}
-              {["zonas", "pasillos", "secciones", "cajas"].includes(activeTab) && (
+              {activeTab === "pasillos" && (
                 <div className="border-b last:border-b-0 border-neutral-100">
                   <button 
                     onClick={() => toggleTable('pasillos')}
@@ -3452,7 +3451,7 @@ export default function AlmacenView() {
               )}
 
               {/* SECCIONES TABLE */}
-              {["zonas", "pasillos", "secciones", "cajas"].includes(activeTab) && (
+              {activeTab === "secciones" && (
                 <div className="border-b last:border-b-0 border-neutral-100">
                   <button 
                     onClick={() => toggleTable('secciones')}
@@ -3661,7 +3660,7 @@ export default function AlmacenView() {
               )}
 
               {/* NIVELES TABLE */}
-              {["zonas", "pasillos", "secciones", "cajas"].includes(activeTab) && (
+              {activeTab === "cajas" && (
                 <div className="border-b last:border-b-0 border-neutral-100">
                   <button 
                     onClick={() => toggleTable('niveles')}
@@ -3882,7 +3881,7 @@ export default function AlmacenView() {
               )}
 
               {/* CAJAS TABLE */}
-              {["zonas", "pasillos", "secciones", "cajas"].includes(activeTab) && (
+              {activeTab === "cajas" && (
                 <div className="border-b last:border-b-0 border-neutral-100">
                   <button 
                     onClick={() => toggleTable('cajas')}
