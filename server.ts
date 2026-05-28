@@ -1931,7 +1931,7 @@ app.post("/api/containers/transfer", async (req, res) => {
 app.post("/api/pos/sell", async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { items, vendedor_id = "Vendedor General" } = req.body;
+    const { items, vendedor_id = "Vendedor General", tipo_salida = "venta en pos" } = req.body;
     
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "El carrito está vacío" });
@@ -1939,8 +1939,8 @@ app.post("/api/pos/sell", async (req, res) => {
     
     // 1. Crear Registro de Salida (precio/total = 0.00 ya que no es venta comercial)
     const { data: sale, error: sErr } = await supabase
-      .from("ventas")
-      .insert([{ vendedor_id, total: 0.00 }])
+      .from("registro_salidas")
+      .insert([{ vendedor_id, total: 0.00, tipo_salida }])
       .select();
       
     if (sErr || !sale) throw sErr;
@@ -1949,9 +1949,9 @@ app.post("/api/pos/sell", async (req, res) => {
     // 2. Guardar Detalles y descontar stock
     for (const item of items) {
       await supabase
-        .from("venta_detalles")
+        .from("registro_salidas_detalles")
         .insert([{
-          venta_id: saleId,
+          registro_salida_id: saleId,
           producto_id: item.producto_id,
           cantidad: item.cantidad,
           precio_unitario: 0.00
@@ -2057,6 +2057,128 @@ app.post("/api/pos/sell", async (req, res) => {
     }
     
     res.json({ success: true, saleId });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/dashboard/stats - Fetch stats for Alpha Dashboard
+app.get("/api/dashboard/stats", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+
+    // 1. Total product models (unique SKUs)
+    const { count: totalSKUs, error: skuErr } = await supabase
+      .from("productos")
+      .select("id_producto", { count: "exact", head: true })
+      .eq("activo", true);
+
+    if (skuErr) throw skuErr;
+
+    // 2. Total units in boxes
+    const { data: sumData, error: sumErr } = await supabase
+      .from("caja_productos")
+      .select("cantidad");
+
+    if (sumErr) throw sumErr;
+    const totalUnits = (sumData || []).reduce((sum: number, item: any) => sum + (item.cantidad || 0), 0);
+
+    // 3. Boxes by status
+    const { data: boxesData, error: boxesErr } = await supabase
+      .from("cajas")
+      .select("estado");
+
+    if (boxesErr) throw boxesErr;
+    const boxStats = {
+      total: boxesData?.length || 0,
+      vacia: boxesData?.filter((b: any) => b.estado === 'vacia').length || 0,
+      activa: boxesData?.filter((b: any) => b.estado === 'activa').length || 0,
+      llena: boxesData?.filter((b: any) => b.estado === 'llena').length || 0
+    };
+
+    // 4. Warehouse layout elements
+    const { count: totalZones } = await supabase.from("zonas_almacen").select("id_zona_almacen", { count: "exact", head: true });
+    const { count: totalPasillos } = await supabase.from("zonas_pasillo").select("id_zona_pasillo", { count: "exact", head: true });
+    const { count: totalSecciones } = await supabase.from("zonas_seccion").select("id_zona_seccion", { count: "exact", head: true });
+    const { count: totalNiveles } = await supabase.from("zonas_nivel").select("id_zona_nivel", { count: "exact", head: true });
+
+    const layoutStats = {
+      zonas: totalZones || 0,
+      pasillos: totalPasillos || 0,
+      secciones: totalSecciones || 0,
+      niveles: totalNiveles || 0
+    };
+
+    // 5. Recent exits history
+    let recentExits = [];
+    try {
+      const { data: exits, error: exitsErr } = await supabase
+        .from("registro_salidas")
+        .select(`
+          id,
+          vendedor_id,
+          tipo_salida,
+          created_at,
+          registro_salidas_detalles (
+            cantidad,
+            productos (
+              sku,
+              talla,
+              marca_sub
+            )
+          )
+        `)
+        .order("created_at", { ascending: false })
+        .limit(15);
+        
+      if (!exitsErr && exits) {
+        recentExits = exits.map((ex: any) => {
+          const itemsCount = (ex.registro_salidas_detalles || []).reduce((sum: number, det: any) => sum + (det.cantidad || 0), 0);
+          const detailsList = (ex.registro_salidas_detalles || []).map((det: any) => ({
+            sku: det.productos?.sku || "Sin SKU",
+            talla: det.productos?.talla || "",
+            marca: det.productos?.marca_sub || "",
+            cantidad: det.cantidad
+          }));
+          return {
+            id: ex.id,
+            vendedor_id: ex.vendedor_id,
+            tipo_salida: ex.tipo_salida,
+            created_at: ex.created_at,
+            total_unidades: itemsCount,
+            detalles: detailsList
+          };
+        });
+      }
+    } catch (e) {
+      console.error("Failed to fetch exits history:", e);
+    }
+
+    // 6. Brand and Type statistics (aggregations)
+    const { data: productsData } = await supabase
+      .from("productos")
+      .select("marca_sub, tipo")
+      .eq("activo", true);
+
+    const brandCounts: Record<string, number> = {};
+    const typeCounts: Record<string, number> = {};
+    if (productsData) {
+      productsData.forEach((p: any) => {
+        if (p.marca_sub) brandCounts[p.marca_sub] = (brandCounts[p.marca_sub] || 0) + 1;
+        if (p.tipo) typeCounts[p.tipo] = (typeCounts[p.tipo] || 0) + 1;
+      });
+    }
+
+    res.json({
+      totalSKUs: totalSKUs || 0,
+      totalUnits,
+      boxStats,
+      layoutStats,
+      recentExits,
+      brandCounts,
+      typeCounts
+    });
+
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

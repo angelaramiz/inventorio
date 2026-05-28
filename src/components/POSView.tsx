@@ -53,6 +53,7 @@ export default function POSView() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [vendedorId, setVendedorId] = useState("Vendedor 1");
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [tipoSalida, setTipoSalida] = useState<"venta en pos" | "transferencia de tienda">("venta en pos");
 
   // Camera scanner states
   const [isScannerActive, setIsScannerActive] = useState(false);
@@ -225,13 +226,14 @@ export default function POSView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           items: cart,
-          vendedor_id: vendedorId
+          vendedor_id: vendedorId,
+          tipo_salida: tipoSalida
         })
       });
 
       if (resp.ok) {
         const data = await resp.json();
-        toast.success(`Salida procesada con éxito! ID Registro: #${data.saleId}`);
+        toast.success(`${tipoSalida === "venta en pos" ? "Venta" : "Transferencia"} procesada con éxito! ID Registro: #${data.saleId}`);
         setCart([]);
       } else {
         const err = await resp.json();
@@ -249,9 +251,36 @@ export default function POSView() {
       {/* Selector/Buscador y Formulario */}
       <div className="lg:col-span-3 space-y-6">
         <div className="bg-white p-5 md:p-6 rounded-3xl border border-neutral-100 shadow-sm space-y-4">
-          <div>
-            <h2 className="text-2xl font-black uppercase text-neutral-900 leading-none">REGISTRO DE SALIDAS (POS)</h2>
-            <p className="text-xs text-neutral-500 font-medium mt-1">Registra la salida física de prendas del almacén al piso de venta</p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-black uppercase text-neutral-900 leading-none">REGISTRO DE SALIDAS (POS)</h2>
+              <p className="text-xs text-neutral-500 font-medium mt-1">Registra la salida física de prendas del almacén al piso de venta</p>
+            </div>
+
+            <div className="flex bg-neutral-100 p-1 rounded-2xl w-full sm:w-auto self-start sm:self-center">
+              <button
+                type="button"
+                onClick={() => setTipoSalida("venta en pos")}
+                className={`flex-1 sm:flex-initial text-center px-4 py-2 rounded-xl text-xs font-black uppercase transition-all duration-200 cursor-pointer ${
+                  tipoSalida === "venta en pos"
+                    ? "bg-white text-neutral-900 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-900"
+                }`}
+              >
+                Venta en POS
+              </button>
+              <button
+                type="button"
+                onClick={() => setTipoSalida("transferencia de tienda")}
+                className={`flex-1 sm:flex-initial text-center px-4 py-2 rounded-xl text-xs font-black uppercase transition-all duration-200 cursor-pointer ${
+                  tipoSalida === "transferencia de tienda"
+                    ? "bg-white text-neutral-900 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-900"
+                }`}
+              >
+                Transferencia
+              </button>
+            </div>
           </div>
 
           <div className="flex gap-2 items-center">
@@ -469,7 +498,7 @@ export default function POSView() {
                 <Loader2 className="animate-spin" size={18} />
               ) : (
                 <>
-                  <CheckCircle2 size={18} /> Finalizar Registro de Salida
+                  <CheckCircle2 size={18} /> {tipoSalida === "venta en pos" ? "Finalizar Venta (POS)" : "Finalizar Transferencia"}
                 </>
               )}
             </Button>

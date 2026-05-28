@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { 
   Plus, Box, ExternalLink, Archive, CheckCircle2, History, Loader2, 
-  Trash2, ArrowRightLeft, AlertTriangle, Check, RefreshCw 
+  Trash2, ArrowRightLeft, AlertTriangle, Check, RefreshCw, Network 
 } from "lucide-react";
 import { toast } from "sonner";
 import { Caja } from "../types";
@@ -23,10 +23,11 @@ interface CJXContainer {
 }
 
 export default function CajasView() {
-  const [activeSubTab, setActiveSubTab] = useState<"standard" | "cjx">("standard");
+  const [activeSubTab, setActiveSubTab] = useState<"standard" | "cjx" | "niveles">("standard");
 
   // Legacy cajas state
   const [cajas, setCajas] = useState<Caja[]>([]);
+  const [niveles, setNiveles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [newCajaNumber, setNewCajaNumber] = useState("");
   const [zones, setZones] = useState<any[]>([]);
@@ -41,6 +42,7 @@ export default function CajasView() {
   // CJ-X containers state
   const [cjxContainers, setCjxContainers] = useState<CJXContainer[]>([]);
   const [loadingCjx, setLoadingCjx] = useState(false);
+  const [loadingNiveles, setLoadingNiveles] = useState(false);
   const [skuToValidate, setSkuToValidate] = useState("");
   const [isValidatingSku, setIsValidatingSku] = useState(false);
   const [skuValidationResult, setSkuValidationResult] = useState<any>(null);
@@ -58,6 +60,7 @@ export default function CajasView() {
 
   useEffect(() => {
     fetchCajas();
+    fetchNiveles();
     fetchLocations();
     fetchTemporadas();
     fetchCjxContainers();
@@ -114,6 +117,21 @@ export default function CajasView() {
       toast.error("Error al cargar cajas");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchNiveles = async () => {
+    setLoadingNiveles(true);
+    try {
+      const resp = await fetch("/api/almacen/niveles");
+      if (resp.ok) {
+        const data = await resp.json();
+        setNiveles(data);
+      }
+    } catch (err) {
+      console.error("Error al cargar niveles:", err);
+    } finally {
+      setLoadingNiveles(false);
     }
   };
 
@@ -390,6 +408,14 @@ export default function CajasView() {
           >
             Cajas Especiales CJ-X
           </button>
+          <button
+            onClick={() => setActiveSubTab("niveles")}
+            className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
+              activeSubTab === "niveles" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-900"
+            }`}
+          >
+            Niveles
+          </button>
         </div>
       </div>
 
@@ -529,7 +555,7 @@ export default function CajasView() {
             ))}
           </div>
         </div>
-      ) : (
+      ) : activeSubTab === "cjx" ? (
         // CJ-X Containers Tab
         <div className="space-y-6">
           <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-neutral-100 shadow-sm">
@@ -567,7 +593,87 @@ export default function CajasView() {
             )}
           </div>
         </div>
-      )}
+      ) : activeSubTab === "niveles" ? (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-neutral-100 shadow-sm">
+            <span className="font-extrabold text-sm text-neutral-700">Gestión de Niveles (Nivel 4)</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {loadingNiveles ? (
+              Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="h-48 bg-neutral-100 animate-pulse rounded-2xl border" />
+              ))
+            ) : niveles.length === 0 ? (
+              <div className="col-span-full py-20 text-center text-neutral-400">
+                <Network size={48} className="mx-auto mb-4 opacity-20" />
+                <p>No hay niveles registrados aún.</p>
+              </div>
+            ) : niveles.map((nivel) => (
+              <Card 
+                key={nivel.id_zona_nivel} 
+                className={`group relative overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1 rounded-2xl border-2 border-neutral-100 bg-white`}
+              >
+                <div className="absolute top-0 right-0 p-3 flex gap-1 items-center z-10">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="rounded-full bg-white/85 backdrop-blur-sm h-8 w-8 hover:bg-rose-600 hover:text-white text-rose-600 border"
+                    onClick={() => {
+                      if(window.confirm(`¿Eliminar nivel ${nivel.nombre}?`)) {
+                        fetch(`/api/almacen/niveles/${nivel.id_zona_nivel}`, { method: 'DELETE' })
+                        .then(() => { toast.success('Nivel eliminado'); fetchNiveles(); })
+                        .catch(() => toast.error('Error al eliminar'));
+                      }
+                    }}
+                    title="Eliminar Nivel"
+                  >
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
+
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-start">
+                    <div className="bg-neutral-900 p-2.5 rounded-xl text-white shadow-lg">
+                      <Network size={24} />
+                    </div>
+                    <Badge variant="outline" className={`capitalize border font-bold ${getStatusColor(nivel.estado)}`}>
+                      {nivel.estado}
+                    </Badge>
+                  </div>
+                  <CardTitle className="text-2xl pt-4 font-black tracking-tight">{nivel.nombre}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="pb-3 flex flex-wrap gap-1">
+                    <span className="font-extrabold text-neutral-700 bg-neutral-100 px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider border">
+                      📍 {nivel.almacen_nombre || "N/A"} | {nivel.pasillo_nombre || "N/A"} | {nivel.seccion_nombre || "N/A"}
+                    </span>
+                  </div>
+
+                  {/* TAGS */}
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {nivel.tags?.tipo_producto && nivel.tags.tipo_producto !== "todos" && (
+                      <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 capitalize text-[9px] px-1.5 py-0">
+                        {nivel.tags.tipo_producto}
+                      </Badge>
+                    )}
+                    {nivel.tags?.genero && nivel.tags.genero !== "todos" && (
+                      <Badge className="bg-blue-50 text-blue-800 border border-blue-100 text-[9px] px-1.5 py-0 font-extrabold">
+                        {nivel.tags.genero === "H" ? "H" : "M"}
+                      </Badge>
+                    )}
+                    {nivel.tags?.marca && nivel.tags.marca !== "todos" && (
+                      <Badge className="bg-purple-50 text-purple-800 border border-purple-100 text-[9px] px-1.5 py-0 font-extrabold">
+                        {nivel.tags.marca}
+                      </Badge>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {/* Legacy Caja Details Modal */}
       {selectedCaja && (

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { 
-  Boxes, Package, Scan, LayoutDashboard, Tag, Warehouse
+  Boxes, Package, Scan, LayoutDashboard, Tag, Warehouse, TrendingUp
 } from "lucide-react";
 import InventoryView from "./components/InventoryView";
 import CajasView from "./components/CajasView";
@@ -12,11 +12,12 @@ import ConsultaDashboard from "./components/ConsultaDashboard";
 import ImageLightbox from "./components/ImageLightbox";
 import POSView from "./components/POSView";
 import InventoryControlView from "./components/InventoryControlView";
+import AlphaDashboardView from "./components/AlphaDashboardView";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
   const [currentPath, setCurrentPath] = useState(() => window.location.pathname.toLowerCase());
-  const [activeTab, setActiveTab] = useState("scanner");
+  const [activeTab, setActiveTab] = useState("dashboard");
 
   useEffect(() => {
     const handleLocationChange = () => {
@@ -99,6 +100,12 @@ export default function App() {
           
           <nav className="hidden xl:flex items-center gap-1 bg-neutral-100 p-1 rounded-xl">
             <TabButton 
+              active={activeTab === "dashboard"} 
+              onClick={() => setActiveTab("dashboard")}
+              icon={<TrendingUp size={15} />}
+              label="Dashboard"
+            />
+            <TabButton 
               active={activeTab === "scanner"} 
               onClick={() => setActiveTab("scanner")}
               icon={<Scan size={15} />}
@@ -135,6 +142,12 @@ export default function App() {
       {/* Main navigation menu for standard desktop sizes (flexible grid) */}
       <div className="hidden md:flex xl:hidden container mx-auto px-4 pt-4 justify-center">
         <nav className="flex items-center flex-wrap gap-1 bg-neutral-100 p-1 rounded-xl">
+          <TabButton 
+            active={activeTab === "dashboard"} 
+            onClick={() => setActiveTab("dashboard")}
+            icon={<TrendingUp size={15} />}
+            label="Dashboard"
+          />
           <TabButton 
             active={activeTab === "scanner"} 
             onClick={() => setActiveTab("scanner")}
@@ -177,6 +190,7 @@ export default function App() {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
           >
+            {activeTab === "dashboard" && <AlphaDashboardView />}
             {activeTab === "scanner" && <ScannerView />}
             {activeTab === "inventory" && <InventoryView />}
             {activeTab === "boxes" && <CajasView />}
@@ -188,6 +202,12 @@ export default function App() {
 
       {/* Mobile Navigation */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t flex gap-1 p-2 z-50 overflow-x-auto">
+        <MobileNavButton 
+          active={activeTab === "dashboard"} 
+          onClick={() => setActiveTab("dashboard")}
+          icon={<TrendingUp size={20} />}
+          label="Dash"
+        />
         <MobileNavButton 
           active={activeTab === "scanner"} 
           onClick={() => setActiveTab("scanner")}

@@ -9,7 +9,7 @@ import JsBarcode from "jsbarcode";
 import { 
   Plus, Edit2, Trash2, Home, MapPin, 
   Loader2, Check, X, AlertTriangle, FileText, Printer, Download,
-  Network, Box
+  Network, Box, ChevronDown, ChevronUp
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -170,6 +170,18 @@ export default function AlmacenView() {
   const [submitting, setSubmitting] = useState(false);
   
   const [productCounts, setProductCounts] = useState<any>({ zonas: {}, pasillos: {}, secciones: {}, niveles: {} });
+
+  const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({
+    zonas: false,
+    pasillos: false,
+    secciones: false,
+    niveles: false,
+    cajas: false
+  });
+
+  const toggleTable = (key: string) => {
+    setExpandedTables(prev => ({...prev, [key]: !prev[key]}));
+  };
 
   // Container type creation mode selector
   const [containerTypeToCreate, setContainerTypeToCreate] = useState<"caja" | "nivel" | "bulk_nivel">("caja");
@@ -3188,8 +3200,30 @@ export default function AlmacenView() {
             <CardContent className="p-0">
               
               {/* ZONAS TABLE */}
-              {activeTab === "zonas" && (
-                loadingZones ? (
+              {["zonas", "pasillos", "secciones", "cajas"].includes(activeTab) && (
+                <div className="border-b last:border-b-0 border-neutral-100">
+                  <button 
+                    onClick={() => toggleTable('zonas')}
+                    className="w-full flex items-center justify-between p-4 bg-neutral-50/50 hover:bg-neutral-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Home size={18} className="text-neutral-500" />
+                      <span className="font-bold text-sm">Zonas de Almacén</span>
+                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{zones.length}</Badge>
+                      <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.zonas || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
+                    </div>
+                    {expandedTables.zonas ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
+                  </button>
+                  <AnimatePresence>
+                    {expandedTables.zonas && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="p-0 border-t border-neutral-100">
+                {loadingZones ? (
                   <div className="flex justify-center items-center py-16 text-neutral-400">
                     <Loader2 className="animate-spin" size={24} />
                   </div>
@@ -3274,11 +3308,39 @@ export default function AlmacenView() {
                     </TableBody>
                   </Table>
                 )
+              }
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               )}
 
               {/* PASILLOS TABLE */}
-              {activeTab === "pasillos" && (
-                loadingPasillos ? (
+              {["zonas", "pasillos", "secciones", "cajas"].includes(activeTab) && (
+                <div className="border-b last:border-b-0 border-neutral-100">
+                  <button 
+                    onClick={() => toggleTable('pasillos')}
+                    className="w-full flex items-center justify-between p-4 bg-neutral-50/50 hover:bg-neutral-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Network size={18} className="text-neutral-500" />
+                      <span className="font-bold text-sm">Pasillos y Zonas Intermedias</span>
+                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{pasillos.length}</Badge>
+                      <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.pasillos || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
+                    </div>
+                    {expandedTables.pasillos ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
+                  </button>
+                  <AnimatePresence>
+                    {expandedTables.pasillos && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="p-0 border-t border-neutral-100">
+                {loadingPasillos ? (
                   <div className="flex justify-center items-center py-16 text-neutral-400">
                     <Loader2 className="animate-spin" size={24} />
                   </div>
@@ -3381,11 +3443,39 @@ export default function AlmacenView() {
                     </TableBody>
                   </Table>
                 )
+              }
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               )}
 
               {/* SECCIONES TABLE */}
-              {activeTab === "secciones" && (
-                loadingSections ? (
+              {["zonas", "pasillos", "secciones", "cajas"].includes(activeTab) && (
+                <div className="border-b last:border-b-0 border-neutral-100">
+                  <button 
+                    onClick={() => toggleTable('secciones')}
+                    className="w-full flex items-center justify-between p-4 bg-neutral-50/50 hover:bg-neutral-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <MapPin size={18} className="text-neutral-500" />
+                      <span className="font-bold text-sm">Secciones Físicas</span>
+                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{sections.length}</Badge>
+                      <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.secciones || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
+                    </div>
+                    {expandedTables.secciones ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
+                  </button>
+                  <AnimatePresence>
+                    {expandedTables.secciones && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="p-0 border-t border-neutral-100">
+                {loadingSections ? (
                   <div className="flex justify-center items-center py-16 text-neutral-400">
                     <Loader2 className="animate-spin" size={24} />
                   </div>
@@ -3562,18 +3652,38 @@ export default function AlmacenView() {
                     </TableBody>
                   </Table>
                 )
+              }
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               )}
 
-              {activeTab === "cajas" && (
-                <div className="flex flex-col">
-                  {/* 1. NIVELES TABLE (LEVEL 4) */}
-                  <div className="p-4 border-b bg-neutral-50/50 flex justify-between items-center">
-                    <h3 className="font-extrabold text-sm uppercase text-neutral-900 flex items-center gap-2">
-                      <Network size={16} className="text-neutral-500" />
-                      Niveles de Almacenamiento (Nivel 4)
-                    </h3>
-                    <Badge variant="outline" className="text-[10px] font-black uppercase">{niveles.length} Niveles</Badge>
-                  </div>
+              {/* NIVELES TABLE */}
+              {["zonas", "pasillos", "secciones", "cajas"].includes(activeTab) && (
+                <div className="border-b last:border-b-0 border-neutral-100">
+                  <button 
+                    onClick={() => toggleTable('niveles')}
+                    className="w-full flex items-center justify-between p-4 bg-neutral-50/50 hover:bg-neutral-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Network size={18} className="text-neutral-500" />
+                      <span className="font-bold text-sm">Niveles de Almacenamiento (Nivel 4)</span>
+                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{niveles.length}</Badge>
+                      <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.niveles || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
+                    </div>
+                    {expandedTables.niveles ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
+                  </button>
+                  <AnimatePresence>
+                    {expandedTables.niveles && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="p-0 border-t border-neutral-100 flex flex-col">
                   {loadingNiveles ? (
                     <div className="flex justify-center items-center py-10 text-neutral-400">
                       <Loader2 className="animate-spin" size={20} />
@@ -3764,15 +3874,36 @@ export default function AlmacenView() {
                       </TableBody>
                     </Table>
                   )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
 
-                  {/* 2. CAJAS TABLE (LEVEL 5) */}
-                  <div className="p-4 border-t border-b bg-neutral-50/50 flex justify-between items-center mt-6">
-                    <h3 className="font-extrabold text-sm uppercase text-neutral-900 flex items-center gap-2">
-                      <Box size={16} className="text-neutral-500" />
-                      Cajas de Almacenamiento (Nivel 5)
-                    </h3>
-                    <Badge variant="outline" className="text-[10px] font-black uppercase">{boxes.length} Cajas</Badge>
-                  </div>
+              {/* CAJAS TABLE */}
+              {["zonas", "pasillos", "secciones", "cajas"].includes(activeTab) && (
+                <div className="border-b last:border-b-0 border-neutral-100">
+                  <button 
+                    onClick={() => toggleTable('cajas')}
+                    className="w-full flex items-center justify-between p-4 bg-neutral-50/50 hover:bg-neutral-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Box size={18} className="text-neutral-500" />
+                      <span className="font-bold text-sm">Cajas de Almacenamiento (Nivel 5)</span>
+                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{boxes.length}</Badge>
+                    </div>
+                    {expandedTables.cajas ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
+                  </button>
+                  <AnimatePresence>
+                    {expandedTables.cajas && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="p-0 border-t border-neutral-100 flex flex-col">
                   {boxes.length === 0 ? (
                     <div className="text-center py-10 text-neutral-400 flex flex-col items-center">
                       <Box size={30} strokeWidth={1} className="opacity-40 mb-1" />
@@ -4002,6 +4133,10 @@ export default function AlmacenView() {
                       </TableBody>
                     </Table>
                   )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               )}
 
