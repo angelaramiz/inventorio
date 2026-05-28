@@ -3128,6 +3128,137 @@ app.post("/api/productos/grupo", upload.single('foto'), async (req, res) => {
   }
 });
 
+// GET /api/almacen/product-counts - Get total associated products for each warehouse level (1-4)
+app.get("/api/almacen/product-counts", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    
+    // 1. Fetch boxes with their products
+    const { data: boxesData, error: bErr } = await supabase
+      .from("cajas")
+      .select(`
+        id_caja,
+        id_zona_almacen,
+        id_zona_seccion,
+        id_zona_nivel,
+        caja_productos (cantidad)
+      `);
+      
+    if (bErr) throw bErr;
+    
+    // 2. Fetch warehouse layout
+    const { data: nivelesData, error: nErr } = await supabase
+      .from("zonas_nivel")
+      .select("id_zona_nivel, id_zona_seccion");
+    if (nErr) throw nErr;
+    
+    const { data: seccionesData, error: sErr } = await supabase
+      .from("zonas_seccion")
+      .select("id_zona_seccion, id_zona_pasillo, id_zona_almacen");
+    if (sErr) throw sErr;
+    
+    const { data: pasillosData, error: pErr } = await supabase
+      .from("zonas_pasillo")
+      .select("id_zona_pasillo, id_zona_almacen");
+    if (pErr) throw pErr;
+    
+    // Process mappings
+    const boxQtyMap = new Map<number, number>();
+    const boxLocations = new Map<number, { id_zona_almacen: number|null, id_zona_seccion: number|null, id_zona_nivel: number|null }>();
+    
+    (boxesData || []).forEach((box: any) => {
+      const qty = (box.caja_productos || []).reduce((sum: number, cp: any) => sum + (cp.cantidad || 0), 0);
+      boxQtyMap.set(box.id_caja, qty);
+      boxLocations.set(box.id_caja, {
+        id_zona_almacen: box.id_zona_almacen,
+        id_zona_seccion: box.id_zona_seccion,
+        id_zona_nivel: box.id_zona_nivel
+      });
+    });
+    
+    const nivelToSeccion = new Map<number, number>();
+    (nivelesData || []).forEach((n: any) => {
+      nivelToSeccion.set(n.id_zona_nivel, n.id_zona_seccion);
+    });
+    
+    const seccionToPasilloAndZone = new Map<number, { id_zona_pasillo: number|null, id_zona_almacen: number|null }>();
+    (seccionesData || []).forEach((s: any) => {
+      seccionToPasilloAndZone.set(s.id_zona_seccion, {
+        id_zona_pasillo: s.id_zona_pasillo,
+        id_zona_almacen: s.id_zona_almacen
+      });
+    });
+    
+    const pasilloToZone = new Map<number, number>();
+    (pasillosData || []).forEach((p: any) => {
+      pasilloToZone.set(p.id_zona_pasillo, p.id_zona_almacen);
+    });
+    
+    // Accumulators
+    const zoneCounts: Record<number, number> = {};
+    const pasilloCounts: Record<number, number> = {};
+    const seccionCounts: Record<number, number> = {};
+    const nivelCounts: Record<number, number> = {};
+    
+    boxLocations.forEach((loc, id_caja) => {
+      const qty = boxQtyMap.get(id_caja) || 0;
+      if (qty === 0) return;
+      
+      let resolvedZoneId: number | null = loc.id_zona_almacen;
+      let resolvedPasilloId: number | null = null;
+      let resolvedSeccionId: number | null = loc.id_zona_seccion;
+      let resolvedNivelId: number | null = loc.id_zona_nivel;
+      
+      if (resolvedNivelId) {
+        const secId = nivelToSeccion.get(resolvedNivelId);
+        if (secId) {
+          resolvedSeccionId = secId;
+        }
+      }
+      
+      if (resolvedSeccionId) {
+        const secInfo = seccionToPasilloAndZone.get(resolvedSeccionId);
+        if (secInfo) {
+          resolvedPasilloId = secInfo.id_zona_pasillo;
+          if (secInfo.id_zona_almacen) {
+            resolvedZoneId = secInfo.id_zona_almacen;
+          }
+        }
+      }
+      
+      if (resolvedPasilloId && !resolvedZoneId) {
+        const zoneId = pasilloToZone.get(resolvedPasilloId);
+        if (zoneId) {
+          resolvedZoneId = zoneId;
+        }
+      }
+      
+      // Accumulate counts
+      if (resolvedZoneId) {
+        zoneCounts[resolvedZoneId] = (zoneCounts[resolvedZoneId] || 0) + qty;
+      }
+      if (resolvedPasilloId) {
+        pasilloCounts[resolvedPasilloId] = (pasilloCounts[resolvedPasilloId] || 0) + qty;
+      }
+      if (resolvedSeccionId) {
+        seccionCounts[resolvedSeccionId] = (seccionCounts[resolvedSeccionId] || 0) + qty;
+      }
+      if (resolvedNivelId) {
+        nivelCounts[resolvedNivelId] = (nivelCounts[resolvedNivelId] || 0) + qty;
+      }
+    });
+    
+    res.json({
+      zonas: zoneCounts,
+      pasillos: pasilloCounts,
+      secciones: seccionCounts,
+      niveles: nivelCounts
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- VITE MIDDLEWARE ---
 
 async function startServer() {

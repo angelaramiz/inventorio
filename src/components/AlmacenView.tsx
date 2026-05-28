@@ -166,8 +166,11 @@ export default function AlmacenView() {
   const [loadingPasillos, setLoadingPasillos] = useState(false);
   const [loadingSections, setLoadingSections] = useState(false);
   const [loadingNiveles, setLoadingNiveles] = useState(false);
+  const [loadingCounts, setLoadingCounts] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   
+  const [productCounts, setProductCounts] = useState<any>({ zonas: {}, pasillos: {}, secciones: {}, niveles: {} });
+
   // Container type creation mode selector
   const [containerTypeToCreate, setContainerTypeToCreate] = useState<"caja" | "nivel" | "bulk_nivel">("caja");
 
@@ -558,9 +561,25 @@ export default function AlmacenView() {
       if (resp.ok) {
         const data = await resp.json();
         setBoxes(data);
+        fetchProductCounts();
       }
     } catch (e) {
       console.error("Error fetching boxes:", e);
+    }
+  };
+
+  const fetchProductCounts = async () => {
+    setLoadingCounts(true);
+    try {
+      const resp = await fetch("/api/almacen/product-counts");
+      if (resp.ok) {
+        const data = await resp.json();
+        setProductCounts(data);
+      }
+    } catch (e) {
+      console.error("Error fetching product counts:", e);
+    } finally {
+      setLoadingCounts(false);
     }
   };
 
@@ -1028,6 +1047,7 @@ export default function AlmacenView() {
       if (resp.ok) {
         const data = await resp.json();
         setZones(data);
+        fetchProductCounts();
       } else {
         toast.error("Error al cargar zonas de almacén");
       }
@@ -1045,6 +1065,7 @@ export default function AlmacenView() {
       if (resp.ok) {
         const data = await resp.json();
         setSections(data);
+        fetchProductCounts();
       } else {
         toast.error("Error al cargar secciones de almacén");
       }
@@ -1062,6 +1083,7 @@ export default function AlmacenView() {
       if (resp.ok) {
         const data = await resp.json();
         setPasillos(data);
+        fetchProductCounts();
       } else {
         toast.error("Error al cargar pasillos");
       }
@@ -1422,6 +1444,7 @@ export default function AlmacenView() {
       if (resp.ok) {
         const data = await resp.json();
         setNiveles(data);
+        fetchProductCounts();
       }
     } catch (e) {
       console.error("Error fetching levels:", e);
@@ -3180,6 +3203,7 @@ export default function AlmacenView() {
                     <TableHeader className="bg-neutral-50/20">
                       <TableRow>
                         <TableHead>Nombre</TableHead>
+                        <TableHead>Productos</TableHead>
                         <TableHead className="text-right w-[150px]">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -3196,6 +3220,11 @@ export default function AlmacenView() {
                             ) : (
                               zone.nombre
                             )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 text-xs font-bold shrink-0">
+                              {productCounts.zonas?.[zone.id_zona_almacen] || 0} uds
+                            </Badge>
                           </TableCell>
                           <TableCell className="text-right pr-6">
                             <div className="flex justify-end gap-1.5">
@@ -3264,6 +3293,7 @@ export default function AlmacenView() {
                       <TableRow>
                         <TableHead>Nombre Pasillo</TableHead>
                         <TableHead>Almacén Principal</TableHead>
+                        <TableHead>Productos</TableHead>
                         <TableHead className="text-right w-[150px]">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -3297,6 +3327,11 @@ export default function AlmacenView() {
                             ) : (
                               pasillo.almacen_nombre
                             )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 text-xs font-bold shrink-0">
+                              {productCounts.pasillos?.[pasillo.id_zona_pasillo] || 0} uds
+                            </Badge>
                           </TableCell>
                           <TableCell className="text-right pr-6">
                             <div className="flex justify-end gap-1.5">
@@ -3364,9 +3399,10 @@ export default function AlmacenView() {
                     <TableHeader className="bg-neutral-50/20">
                       <TableRow>
                         <TableHead>Nombre Sección</TableHead>
-                        <TableHead>Almacén Principal</TableHead>
-                        <TableHead>Pasillo / Subzona</TableHead>
-                        <TableHead>Etiquetas (Tags)</TableHead>
+                        <TableHead className="hidden md:table-cell">Almacén Principal</TableHead>
+                        <TableHead className="hidden md:table-cell">Pasillo / Subzona</TableHead>
+                        <TableHead className="hidden md:table-cell">Etiquetas (Tags)</TableHead>
+                        <TableHead>Productos</TableHead>
                         <TableHead className="text-right w-[180px]">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -3385,7 +3421,7 @@ export default function AlmacenView() {
                             )}
                           </TableCell>
                           
-                          <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                          <TableCell className="font-semibold text-xs uppercase text-neutral-500 hidden md:table-cell">
                             {editingSectionId === section.id_zona_seccion ? (
                               <select
                                 value={editingSectionZoneId}
@@ -3407,7 +3443,7 @@ export default function AlmacenView() {
                             )}
                           </TableCell>
 
-                          <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                          <TableCell className="font-semibold text-xs uppercase text-neutral-500 hidden md:table-cell">
                             {editingSectionId === section.id_zona_seccion ? (
                               <select
                                 value={editingSectionPasilloId}
@@ -3430,7 +3466,7 @@ export default function AlmacenView() {
                           </TableCell>
 
                           {/* TAGS COLUMN */}
-                          <TableCell className="py-2">
+                          <TableCell className="py-2 hidden md:table-cell">
                             {section.tags ? (
                               <div className="flex flex-wrap gap-1">
                                 {section.tags.tipo_producto && section.tags.tipo_producto !== "todos" && (
@@ -3455,6 +3491,12 @@ export default function AlmacenView() {
                             ) : (
                               <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
                             )}
+                          </TableCell>
+
+                          <TableCell>
+                            <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 text-xs font-bold shrink-0">
+                              {productCounts.secciones?.[section.id_zona_seccion] || 0} uds
+                            </Badge>
                           </TableCell>
 
                           <TableCell className="text-right pr-6">
@@ -3546,10 +3588,11 @@ export default function AlmacenView() {
                       <TableHeader className="bg-neutral-50/20">
                         <TableRow>
                           <TableHead>Nombre</TableHead>
-                          <TableHead>Almacén Principal</TableHead>
-                          <TableHead>Pasillo / Subzona</TableHead>
+                          <TableHead className="hidden md:table-cell">Almacén Principal</TableHead>
+                          <TableHead className="hidden md:table-cell">Pasillo / Subzona</TableHead>
                           <TableHead>Sección Física</TableHead>
-                          <TableHead>Etiquetas (Tags)</TableHead>
+                          <TableHead className="hidden md:table-cell">Etiquetas (Tags)</TableHead>
+                          <TableHead>Productos</TableHead>
                           <TableHead className="text-right w-[150px]">Acciones</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -3569,7 +3612,7 @@ export default function AlmacenView() {
                                   lvl.nombre
                                 )}
                               </TableCell>
-                              <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                              <TableCell className="font-semibold text-xs uppercase text-neutral-500 hidden md:table-cell">
                                 {isEditing ? (
                                   <select
                                     value={editingNivelZoneId}
@@ -3591,7 +3634,7 @@ export default function AlmacenView() {
                                   lvl.almacen_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
                                 )}
                               </TableCell>
-                              <TableCell className="font-semibold text-xs uppercase text-neutral-500">
+                              <TableCell className="font-semibold text-xs uppercase text-neutral-500 hidden md:table-cell">
                                 {isEditing ? (
                                   <select
                                     value={editingNivelPasilloId}
@@ -3636,7 +3679,7 @@ export default function AlmacenView() {
                                   lvl.seccion_nombre || <span className="text-neutral-300 italic text-[10px]">N/A</span>
                                 )}
                               </TableCell>
-                              <TableCell className="py-2">
+                              <TableCell className="py-2 hidden md:table-cell">
                                 {lvl.tags ? (
                                   <div className="flex flex-wrap gap-1">
                                     {lvl.tags.tipo_producto && lvl.tags.tipo_producto !== "todos" && (
@@ -3666,6 +3709,11 @@ export default function AlmacenView() {
                                 ) : (
                                   <span className="text-neutral-400 italic text-[10px]">Sin tags</span>
                                 )}
+                              </TableCell>
+                              <TableCell>
+                                <Badge className="bg-neutral-100 text-neutral-800 border border-neutral-200 text-xs font-bold shrink-0">
+                                  {productCounts.niveles?.[lvl.id_zona_nivel] || 0} uds
+                                </Badge>
                               </TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex justify-end gap-1.5">
