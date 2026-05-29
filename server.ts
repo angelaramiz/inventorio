@@ -3448,8 +3448,23 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath, { maxAge: '1d' }));
+    // Serve static assets with cache, but disable cache for index.html
+    app.use(express.static(distPath, {
+      maxAge: '1d',
+      setHeaders: (res, filepath) => {
+        if (filepath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      }
+    }));
     app.get("*", (req, res) => {
+      res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

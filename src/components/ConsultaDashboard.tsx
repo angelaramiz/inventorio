@@ -645,7 +645,7 @@ export default function ConsultaDashboard() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 self-start sm:self-auto">
+                    <div className="flex items-center gap-3 self-start sm:self-auto flex-wrap">
                       <Badge className={`rounded-full px-3 py-1 text-xs uppercase font-extrabold border ${
                         currentBox.estado === 'llena' ? 'bg-rose-500 text-white border-rose-600' :
                         currentBox.estado === 'activa' ? 'bg-amber-400 text-neutral-900 border-amber-500' :
@@ -653,7 +653,10 @@ export default function ConsultaDashboard() {
                       }`}>
                         {currentBox.estado}
                       </Badge>
-                      <div className="text-[10px] text-neutral-400 bg-neutral-800 px-3 py-1.5 rounded-xl border border-neutral-800 font-medium font-mono">
+                      <div className="text-[10px] text-neutral-200 bg-neutral-800 px-3 py-1.5 rounded-xl border border-neutral-700 font-extrabold uppercase shrink-0">
+                        Cantidad: {currentBox.productos.reduce((sum, item) => sum + (item.cantidad || 0), 0)} uds
+                      </div>
+                      <div className="text-[10px] text-neutral-400 bg-neutral-800 px-3 py-1.5 rounded-xl border border-neutral-800 font-medium font-mono shrink-0">
                         Leído: {new Date(currentBox.consultado_at || new Date()).toLocaleTimeString()}
                       </div>
                     </div>
