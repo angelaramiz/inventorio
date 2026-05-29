@@ -255,8 +255,8 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
     }
   };
 
-  const fetchProductos = async () => {
-    setLoading(true);
+  const fetchProductos = async (showLoader = true) => {
+    if (showLoader) setLoading(true);
     try {
       const resp = await fetch(`/api/cajas/${caja.id_caja}/productos`);
       const data = await resp.json();
@@ -264,7 +264,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
     } catch (err) {
       toast.error("Error al cargar productos de la caja");
     } finally {
-      setLoading(false);
+      if (showLoader) setLoading(false);
     }
   };
 
@@ -332,6 +332,9 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       if (!confirmDelete) return;
     }
     
+    // Optimistic UI state update
+    setProductos(prev => prev.map(p => p.id_producto === id_producto ? { ...p, cantidad: newQty } : p));
+    
     try {
       const resp = await fetch(`/api/cajas/${caja.id_caja}/productos/${id_producto}`, {
         method: "PUT",
@@ -340,13 +343,15 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       });
       if (resp.ok) {
         toast.success(newQty === 0 ? "Producto removido" : "Cantidad actualizada");
-        fetchProductos();
+        fetchProductos(false); // Background update
       } else {
         const err = await resp.json();
         toast.error(err.error || "Error al actualizar cantidad");
+        fetchProductos(true); // Full reload to sync state on error
       }
     } catch (e) {
       toast.error("Error al actualizar cantidad");
+      fetchProductos(true); // Full reload to sync state on error
     }
   };
 
