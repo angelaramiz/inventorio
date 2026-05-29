@@ -29,7 +29,7 @@ export default function ScannerView() {
   const [showQuickRegister, setShowQuickRegister] = useState(false);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [manualInput, setManualInput] = useState("");
-  const [manualQty, setManualQty] = useState(1);
+  const [manualQty, setManualQty] = useState<number | "">(1);
   const [pendingQty, setPendingQty] = useState(1);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const preventReactivateRef = useRef(false);
@@ -42,7 +42,7 @@ export default function ScannerView() {
   // Modales de cantidad
   const [showQtyModal, setShowQtyModal] = useState(false);
   const [showPostRegisterModal, setShowPostRegisterModal] = useState(false);
-  const [qtyModalValue, setQtyModalValue] = useState(1);
+  const [qtyModalValue, setQtyModalValue] = useState<number | "">(1);
   const [registeredProduct, setRegisteredProduct] = useState<Producto | null>(null);
 
   const handleManualSubmit = (e: FormEvent) => {
@@ -50,8 +50,9 @@ export default function ScannerView() {
     if (!manualInput.trim()) return;
     
     const query = manualInput.trim();
+    const finalQty = manualQty === "" ? 1 : manualQty;
     setScannedResult(query);
-    verifyProduct(query, manualQty);
+    verifyProduct(query, finalQty);
     setManualInput("");
     setManualQty(1);
   };
@@ -882,13 +883,16 @@ export default function ScannerView() {
                       type="number"
                       min={1}
                       value={manualQty}
-                      onChange={(e) => setManualQty(parseInt(e.target.value) || 1)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setManualQty(val === "" ? "" : (parseInt(val) || 1));
+                      }}
                       className="rounded-2xl h-11 border-neutral-200 focus-visible:ring-neutral-400 text-center font-bold"
                       disabled={isChecking}
                       title="Cantidad a asociar"
                     />
                   </div>
-                  <Button type="submit" disabled={isChecking || !manualInput.trim()} className="rounded-2xl h-11 px-5 bg-neutral-900 hover:bg-neutral-800 text-white shrink-0 font-semibold transition-all">
+                  <Button type="submit" disabled={isChecking || !manualInput.trim() || manualQty === ""} className="rounded-2xl h-11 px-5 bg-neutral-900 hover:bg-neutral-800 text-white shrink-0 font-semibold transition-all">
                     Asociar
                   </Button>
                 </form>
@@ -1108,7 +1112,10 @@ export default function ScannerView() {
                 type="number"
                 min={1}
                 value={qtyModalValue}
-                onChange={e => setQtyModalValue(parseInt(e.target.value) || 1)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setQtyModalValue(val === "" ? "" : (parseInt(val) || 1));
+                }}
                 className="rounded-xl h-11 text-center font-bold text-lg focus-visible:ring-neutral-400"
               />
             </div>
@@ -1127,11 +1134,12 @@ export default function ScannerView() {
               <Button 
                 onClick={() => {
                   setShowQtyModal(false);
+                  const finalVal = qtyModalValue === "" ? 1 : qtyModalValue;
                   if (verificationResult?.ubicacion && verificationResult.ubicacion.numero_caja !== resolvedTargetCaja?.numero_caja) {
-                    setPendingQty(qtyModalValue);
+                    setPendingQty(finalVal);
                     setShowConflictDialog(true);
                   } else {
-                    asignarProducto(verificationResult.product.id_producto, false, qtyModalValue, undefined, resolvedTargetCaja);
+                    asignarProducto(verificationResult.product.id_producto, false, finalVal, undefined, resolvedTargetCaja);
                   }
                 }} 
                 className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold text-xs"
@@ -1169,7 +1177,10 @@ export default function ScannerView() {
                 type="number"
                 min={1}
                 value={qtyModalValue}
-                onChange={e => setQtyModalValue(parseInt(e.target.value) || 1)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setQtyModalValue(val === "" ? "" : (parseInt(val) || 1));
+                }}
                 className="rounded-xl h-11 text-center font-bold text-lg focus-visible:ring-neutral-400"
               />
             </div>
@@ -1193,7 +1204,8 @@ export default function ScannerView() {
                   onClick={() => {
                     setShowPostRegisterModal(false);
                     if (registeredProduct) {
-                      asignarProducto(registeredProduct.id_producto, false, qtyModalValue, undefined, resolvedTargetCaja);
+                      const finalVal = qtyModalValue === "" ? 1 : qtyModalValue;
+                      asignarProducto(registeredProduct.id_producto, false, finalVal, undefined, resolvedTargetCaja);
                     }
                   }} 
                   className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold text-xs"

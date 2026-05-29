@@ -26,7 +26,7 @@ interface Props {
 interface Variacion {
   sku: string;
   talla: string;
-  cantidad: number;
+  cantidad: number | "";
 }
 
 const TALLAS_LETRA = ["SinTalla", "XS", "S", "M", "L", "XL", "XXL"];
@@ -49,7 +49,7 @@ export default function ProductQuickRegister({
   const [loading, setLoading] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
-  const [cantidad, setCantidad] = useState(defaultQty);
+  const [cantidad, setCantidad] = useState<number | "">(defaultQty);
   const videoRef = useRef<HTMLVideoElement>(null);
   
   const [isGroup, setIsGroup] = useState(initialIsGroup);
@@ -342,7 +342,11 @@ export default function ProductQuickRegister({
         fd.append("temporada", formData.temporada);
         fd.append("tipo", formData.tipo);
         fd.append("marca_sub", formData.marca_sub);
-        fd.append("variaciones", JSON.stringify(variaciones));
+        const sanitizedVariaciones = variaciones.map(v => ({
+          ...v,
+          cantidad: v.cantidad === "" ? 1 : v.cantidad
+        }));
+        fd.append("variaciones", JSON.stringify(sanitizedVariaciones));
 
         if (photo) {
           const res = await fetch(photo);
@@ -367,7 +371,7 @@ export default function ProductQuickRegister({
           if (onSuccessGroup) {
             onSuccessGroup(result.products);
           } else {
-            onSuccess(result.products[0], cantidad);
+            onSuccess(result.products[0], cantidad === "" ? 1 : cantidad);
           }
         } else {
           const error = await resp.json();
@@ -407,7 +411,7 @@ export default function ProductQuickRegister({
         if (resp.ok) {
           const product = await resp.json();
           toast.success("Artículo registrado correctamente");
-          onSuccess(product, cantidad);
+          onSuccess(product, cantidad === "" ? 1 : cantidad);
         } else {
           const error = await resp.json();
           toast.error(error.error || "Fallo en registro");
@@ -613,9 +617,12 @@ export default function ProductQuickRegister({
                   type="number"
                   min={1}
                   value={cantidad} 
-                  onChange={e => setCantidad(parseInt(e.target.value) || 1)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setCantidad(val === "" ? "" : (parseInt(val) || 1));
+                  }}
                   placeholder="1"
-                  className="rounded-xl bg-neutral-50 border-neutral-200"
+                  className="rounded-xl bg-neutral-55 border-neutral-200"
                 />
               </div>
             </div>
@@ -684,7 +691,10 @@ export default function ProductQuickRegister({
                         type="number"
                         min={1}
                         value={vari.cantidad}
-                        onChange={e => updateVariationField(idx, "cantidad", parseInt(e.target.value) || 1)}
+                        onChange={e => {
+                          const val = e.target.value;
+                          updateVariationField(idx, "cantidad", val === "" ? "" : (parseInt(val) || 1));
+                        }}
                         className="h-9 rounded-lg text-xs text-center font-bold"
                       />
                     </div>

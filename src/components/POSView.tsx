@@ -48,12 +48,12 @@ export default function POSView() {
   const [searchResult, setSearchResult] = useState<any | null>(null);
   
   const [selectedBox, setSelectedBox] = useState<any | null>(null);
-  const [sellQty, setSellQty] = useState(1);
+  const [sellQty, setSellQty] = useState<number | "">(1);
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [vendedorId, setVendedorId] = useState("Vendedor 1");
   const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [tipoSalida, setTipoSalida] = useState<"venta en pos" | "transferencia de tienda">("venta en pos");
+  const [tipoSalida, setTipoSalida] = useState<"venta en pos" | "transferencia de tienda" | "transferencia a pdv">("venta en pos");
 
   // Camera scanner states
   const [isScannerActive, setIsScannerActive] = useState(false);
@@ -164,7 +164,9 @@ export default function POSView() {
       return;
     }
 
-    if (sellQty <= 0 || sellQty > selectedBox.cantidad) {
+    const finalQty = sellQty === "" ? 1 : sellQty;
+
+    if (finalQty <= 0 || finalQty > selectedBox.cantidad) {
       toast.error(`Cantidad inválida. Máximo disponible: ${selectedBox.cantidad}`);
       return;
     }
@@ -174,7 +176,7 @@ export default function POSView() {
       item => item.producto_id === product.id_producto && item.caja_origen_id === selectedBox.cajas.id_caja
     );
 
-    const newQty = existingIndex !== -1 ? cart[existingIndex].cantidad + sellQty : sellQty;
+    const newQty = existingIndex !== -1 ? cart[existingIndex].cantidad + finalQty : finalQty;
 
     if (newQty > selectedBox.cantidad) {
       toast.error(`No puedes agregar más de la cantidad disponible en esta caja (${selectedBox.cantidad})`);
@@ -187,7 +189,7 @@ export default function POSView() {
       talla: product.talla,
       tipo: product.tipo,
       marca_sub: product.marca_sub,
-      cantidad: sellQty,
+      cantidad: finalQty,
       precio_unitario: 0,
       caja_origen_id: selectedBox.cajas.id_caja,
       caja_origen_nombre: selectedBox.cajas.numero_caja,
@@ -233,7 +235,7 @@ export default function POSView() {
 
       if (resp.ok) {
         const data = await resp.json();
-        toast.success(`${tipoSalida === "venta en pos" ? "Venta" : "Transferencia"} procesada con éxito! ID Registro: #${data.saleId}`);
+        toast.success(`${tipoSalida === "venta en pos" ? "Venta" : tipoSalida === "transferencia a pdv" ? "Transferencia a PDV" : "Transferencia"} procesada con éxito! ID Registro: #${data.saleId}`);
         setCart([]);
       } else {
         const err = await resp.json();
@@ -279,6 +281,17 @@ export default function POSView() {
                 }`}
               >
                 Transferencia
+              </button>
+              <button
+                type="button"
+                onClick={() => setTipoSalida("transferencia a pdv")}
+                className={`flex-1 sm:flex-initial text-center px-4 py-2 rounded-xl text-xs font-black uppercase transition-all duration-200 cursor-pointer ${
+                  tipoSalida === "transferencia a pdv"
+                    ? "bg-white text-neutral-900 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-900"
+                }`}
+              >
+                Transferencia a PDV
               </button>
             </div>
           </div>
@@ -404,7 +417,10 @@ export default function POSView() {
                       min={1}
                       max={selectedBox ? selectedBox.cantidad : 1}
                       value={sellQty}
-                      onChange={e => setSellQty(parseInt(e.target.value) || 1)}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setSellQty(val === "" ? "" : (parseInt(val) || 1));
+                      }}
                       className="rounded-xl h-11 text-center font-bold"
                     />
                   </div>
@@ -498,7 +514,7 @@ export default function POSView() {
                 <Loader2 className="animate-spin" size={18} />
               ) : (
                 <>
-                  <CheckCircle2 size={18} /> {tipoSalida === "venta en pos" ? "Finalizar Venta (POS)" : "Finalizar Transferencia"}
+                  <CheckCircle2 size={18} /> {tipoSalida === "venta en pos" ? "Finalizar Venta (POS)" : tipoSalida === "transferencia a pdv" ? "Finalizar Transferencia a PDV" : "Finalizar Transferencia"}
                 </>
               )}
             </Button>

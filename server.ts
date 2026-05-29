@@ -1263,6 +1263,26 @@ app.get("/api/consultar-producto/:query", async (req, res) => {
         .eq("modelo_grupo", product.modelo_grupo)
         .neq("id_producto", product.id_producto);
       variantes = vData || [];
+
+      if (variantes.length > 0) {
+        const variantIds = variantes.map((v: any) => v.id_producto);
+        const { data: qData } = await supabase
+          .from("caja_productos")
+          .select("id_producto, cantidad")
+          .in("id_producto", variantIds);
+        
+        const qtyMap: { [key: number]: number } = {};
+        if (qData) {
+          for (const item of qData) {
+            qtyMap[item.id_producto] = (qtyMap[item.id_producto] || 0) + (item.cantidad || 0);
+          }
+        }
+        
+        variantes = variantes.map((v: any) => ({
+          ...v,
+          total_cantidad: qtyMap[v.id_producto] || 0
+        }));
+      }
     }
 
     res.json({
@@ -1449,6 +1469,26 @@ app.get("/api/consultar-dinamico/:query", async (req, res) => {
           .eq("modelo_grupo", product.modelo_grupo)
           .neq("id_producto", product.id_producto);
         variantes = vData || [];
+
+        if (variantes.length > 0) {
+          const variantIds = variantes.map((v: any) => v.id_producto);
+          const { data: qData } = await supabase
+            .from("caja_productos")
+            .select("id_producto, cantidad")
+            .in("id_producto", variantIds);
+          
+          const qtyMap: { [key: number]: number } = {};
+          if (qData) {
+            for (const item of qData) {
+              qtyMap[item.id_producto] = (qtyMap[item.id_producto] || 0) + (item.cantidad || 0);
+            }
+          }
+          
+          variantes = variantes.map((v: any) => ({
+            ...v,
+            total_cantidad: qtyMap[v.id_producto] || 0
+          }));
+        }
       }
 
       return res.json({

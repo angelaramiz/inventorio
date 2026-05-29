@@ -240,6 +240,8 @@ export default function AlphaDashboardView() {
                           className={`text-[9px] uppercase font-black px-2 py-0.5 rounded-full ${
                             exit.tipo_salida === "venta en pos"
                               ? "bg-amber-100 text-amber-800 border border-amber-200"
+                              : exit.tipo_salida === "transferencia a pdv"
+                              ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
                               : "bg-indigo-100 text-indigo-800 border border-indigo-200"
                           }`}
                         >

@@ -1114,9 +1114,16 @@ export default function ConsultaDashboard() {
                               )}
                               <div className="flex-1 min-w-0">
                                 <p className="font-extrabold text-[11px] text-neutral-955 truncate leading-tight">{v.sku}</p>
-                                <div className="flex gap-1.5 mt-1">
+                                <div className="flex flex-wrap gap-1.5 mt-1">
                                   <span className="text-[9px] font-black uppercase bg-white border px-1.5 py-0.5 rounded text-neutral-600">Talla {v.talla}</span>
                                   <span className="text-[9px] font-black uppercase bg-white border px-1.5 py-0.5 rounded text-neutral-400">{v.marca_sub}</span>
+                                  <span className={`text-[9px] font-black uppercase border px-1.5 py-0.5 rounded ${
+                                    (v.total_cantidad || 0) > 0 
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-250" 
+                                      : "bg-rose-50 text-rose-700 border-rose-200"
+                                  }`}>
+                                    Stock: {v.total_cantidad || 0} uds
+                                  </span>
                                 </div>
                               </div>
                             </button>

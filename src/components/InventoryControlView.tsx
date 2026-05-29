@@ -46,7 +46,7 @@ export default function InventoryControlView({ userRole }: Props) {
   const [zones, setZones] = useState<any[]>([]); // cajas to count
   const [boxProducts, setBoxProducts] = useState<any[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
-  const [countedQuantities, setCountedQuantities] = useState<Record<number, number>>({}); // id_producto -> qty
+  const [countedQuantities, setCountedQuantities] = useState<Record<number, number | "">>({}); // id_producto -> qty
   const [sendingCount, setSendingCount] = useState(false);
 
   // New Operator barcode scanning states
@@ -510,6 +510,11 @@ export default function InventoryControlView({ userRole }: Props) {
     const zoneName = `Caja ${selectedZone.numero_caja} (${selectedZone.almacen_nombre || "Sin almacén"})`;
     
     try {
+      const finalQuantities: Record<number, number> = {};
+      for (const [key, val] of Object.entries(countedQuantities)) {
+        finalQuantities[Number(key)] = (val as any) === "" ? 0 : (val as number);
+      }
+
       const resp = await fetch("/api/inventory/count-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -518,7 +523,7 @@ export default function InventoryControlView({ userRole }: Props) {
           operator_id: operatorId,
           zone_id: selectedZone.id_caja,
           zone_name: zoneName,
-          cantidades: countedQuantities
+          cantidades: finalQuantities
         })
       });
 
@@ -850,10 +855,13 @@ export default function InventoryControlView({ userRole }: Props) {
                                               type="number"
                                               min={0}
                                               value={countedQuantities[item.id_producto] ?? 0}
-                                              onChange={(e) => setCountedQuantities({
-                                                ...countedQuantities,
-                                                [item.id_producto]: parseInt(e.target.value) || 0
-                                              })}
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                setCountedQuantities({
+                                                  ...countedQuantities,
+                                                  [item.id_producto]: val === "" ? "" : (parseInt(val) || 0)
+                                                });
+                                              }}
                                               className="w-20 text-center font-black h-9 border-neutral-200 focus-visible:ring-neutral-400 rounded-lg ml-auto text-xs"
                                             />
                                           </TableCell>

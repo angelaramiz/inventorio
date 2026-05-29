@@ -41,7 +41,7 @@ export default function HierarchyView() {
   const [selectedParentId, setSelectedParentId] = useState<string>("null");
   const [newTipo, setNewTipo] = useState("caja");
   const [newSku, setNewSku] = useState("");
-  const [newStock, setNewStock] = useState(0);
+  const [newStock, setNewStock] = useState<number | "">(0);
   const [customBarcode, setCustomBarcode] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
@@ -187,7 +187,7 @@ export default function HierarchyView() {
           parent_id,
           tipo_almacen: newTipo,
           sku_asociado: newSku || null,
-          stock_real: newStock,
+          stock_real: newStock === "" ? 0 : newStock,
           codigo_barras: customBarcode || null
         })
       });
@@ -230,10 +230,16 @@ export default function HierarchyView() {
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const sanitizedSecuencias = Object.fromEntries(
+        Object.entries(settings.secuencias).map(([k, v]) => [k, v === "" ? 1 : v])
+      );
       const resp = await fetch("/api/hierarchy/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings)
+        body: JSON.stringify({
+          ...settings,
+          secuencias: sanitizedSecuencias
+        })
       });
       if (resp.ok) {
         toast.success("Ajustes guardados correctamente");
@@ -508,11 +514,14 @@ export default function HierarchyView() {
                     <label className="text-[8px] uppercase font-black text-neutral-400 block mb-0.5">Secuencia Actual</label>
                     <Input 
                       type="number"
-                      value={settings.secuencias[tipo] || 1}
-                      onChange={(e) => setSettings({
-                        ...settings,
-                        secuencias: { ...settings.secuencias, [tipo]: parseInt(e.target.value) || 1 }
-                      })}
+                      value={settings.secuencias[tipo] !== undefined ? settings.secuencias[tipo] : 1}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSettings({
+                          ...settings,
+                          secuencias: { ...settings.secuencias, [tipo]: val === "" ? "" : (parseInt(val) || 1) }
+                        });
+                      }}
                       className="rounded-xl h-9 text-center font-bold"
                     />
                   </div>
@@ -603,7 +612,10 @@ export default function HierarchyView() {
                   type="number"
                   min={0}
                   value={newStock}
-                  onChange={e => setNewStock(parseInt(e.target.value) || 0)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setNewStock(val === "" ? "" : (parseInt(val) || 0));
+                  }}
                   className="rounded-xl h-11 text-center font-bold"
                 />
               </div>

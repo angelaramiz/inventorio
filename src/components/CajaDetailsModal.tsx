@@ -21,7 +21,8 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   const [boxSku, setBoxSku] = useState(caja.sku || "");
   const [isEditingSku, setIsEditingSku] = useState(!caja.sku);
   const [isSavingSku, setIsSavingSku] = useState(false);
-  const [qtyInput, setQtyInput] = useState(1);
+  const [qtyInput, setQtyInput] = useState<number | "">(1);
+  const [editingQty, setEditingQty] = useState<Record<number, string>>({});
   const [cajaTemporada, setCajaTemporada] = useState(caja.temporada_default || "");
   const [isSavingTemporada, setIsSavingTemporada] = useState(false);
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
@@ -49,7 +50,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   // Product transfer states
   const [transferringItem, setTransferringItem] = useState<CajaProducto | null>(null);
   const [transferTargetBoxId, setTransferTargetBoxId] = useState<string>("");
-  const [transferQty, setTransferQty] = useState<number>(1);
+  const [transferQty, setTransferQty] = useState<number | "">(1);
   const [isTransferring, setIsTransferring] = useState(false);
   const [allBoxes, setAllBoxes] = useState<Caja[]>([]);
 
@@ -150,7 +151,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
           id_caja_origen: caja.id_caja,
           id_caja_destino: parseInt(transferTargetBoxId),
           id_producto: transferringItem.id_producto,
-          cantidad: transferQty
+          cantidad: transferQty === "" ? 1 : transferQty
         })
       });
       if (resp.ok) {
@@ -303,7 +304,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       const assignResp = await fetch(`/api/cajas/${caja.id_caja}/asignar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id_producto, force, cantidad: qtyInput })
+        body: JSON.stringify({ id_producto, force, cantidad: qtyInput === "" ? 1 : qtyInput })
       });
 
       if (assignResp.ok) {
@@ -539,7 +540,10 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                         type="number"
                         min={1}
                         value={qtyInput}
-                        onChange={(e) => setQtyInput(parseInt(e.target.value) || 1)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setQtyInput(val === "" ? "" : (parseInt(val) || 1));
+                        }}
                         className="bg-white rounded-xl text-xs h-9 text-center font-bold focus-visible:ring-neutral-400"
                         disabled={isAdding}
                       />
@@ -615,25 +619,63 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                             <div className="flex items-center justify-end gap-1">
                               <button
                                 type="button"
-                                onClick={() => handleUpdateQty(item.id_producto, item.cantidad - 1)}
+                                onClick={() => {
+                                  const newQty = item.cantidad - 1;
+                                  handleUpdateQty(item.id_producto, newQty);
+                                  setEditingQty(prev => {
+                                    const updated = { ...prev };
+                                    delete updated[item.id_producto];
+                                    return updated;
+                                  });
+                                }}
                                 className="w-6 h-6 flex items-center justify-center rounded-md border bg-white hover:bg-neutral-100 active:scale-95 transition-all text-neutral-600 font-bold text-xs select-none"
                               >
                                 -
                               </button>
                               <input
                                 type="number"
-                                value={item.cantidad}
+                                value={editingQty[item.id_producto] !== undefined ? editingQty[item.id_producto] : item.cantidad.toString()}
                                 onChange={(e) => {
-                                  const val = parseInt(e.target.value);
-                                  if (!isNaN(val) && val >= 0) {
-                                    handleUpdateQty(item.id_producto, val);
+                                  const val = e.target.value;
+                                  setEditingQty(prev => ({
+                                    ...prev,
+                                    [item.id_producto]: val
+                                  }));
+                                }}
+                                onBlur={() => {
+                                  const valStr = editingQty[item.id_producto];
+                                  if (valStr !== undefined) {
+                                    const val = parseInt(valStr);
+                                    if (!isNaN(val) && val >= 0) {
+                                      if (val !== item.cantidad) {
+                                        handleUpdateQty(item.id_producto, val);
+                                      }
+                                    }
+                                    setEditingQty(prev => {
+                                      const updated = { ...prev };
+                                      delete updated[item.id_producto];
+                                      return updated;
+                                    });
+                                  }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.currentTarget.blur();
                                   }
                                 }}
                                 className="w-10 h-6 text-center font-black text-xs bg-neutral-55 border rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-900 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               />
                               <button
                                 type="button"
-                                onClick={() => handleUpdateQty(item.id_producto, item.cantidad + 1)}
+                                onClick={() => {
+                                  const newQty = item.cantidad + 1;
+                                  handleUpdateQty(item.id_producto, newQty);
+                                  setEditingQty(prev => {
+                                    const updated = { ...prev };
+                                    delete updated[item.id_producto];
+                                    return updated;
+                                  });
+                                }}
                                 className="w-6 h-6 flex items-center justify-center rounded-md border bg-white hover:bg-neutral-100 active:scale-95 transition-all text-neutral-600 font-bold text-xs select-none"
                               >
                                 +
@@ -702,7 +744,10 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                   max={transferringItem.cantidad}
                   required
                   value={transferQty}
-                  onChange={(e) => setTransferQty(parseInt(e.target.value) || 1)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setTransferQty(val === "" ? "" : (parseInt(val) || 1));
+                  }}
                   className="rounded-xl h-11 bg-white border-neutral-200 text-sm font-semibold"
                 />
               </div>
