@@ -1,11 +1,12 @@
-import React, { useState, useEffect, FormEvent } from "react";
+import React, { useState, useEffect, FormEvent, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Save, Loader2, Image as ImageIcon, Trash2, Layers, Search, CheckCircle, AlertCircle, Edit } from "lucide-react";
+import { Save, Loader2, Image as ImageIcon, Trash2, Layers, Search, CheckCircle, AlertCircle, Edit, Scan } from "lucide-react";
 import { toast } from "sonner";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Producto, Temporada, TipoProducto } from "../types";
 
 interface Props {
@@ -23,6 +24,10 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
   const [resolvedModel, setResolvedModel] = useState<string | null>(null);
   const [groupProducts, setGroupProducts] = useState<Producto[]>([]);
   const [activeTab, setActiveTab] = useState<"express" | "advanced">("express");
+
+  // Camera scanner states
+  const [isScannerActive, setIsScannerActive] = useState(false);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
 
   // Express edit options
   const [updateModelName, setUpdateModelName] = useState(false);
@@ -73,6 +78,87 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
     };
     loadOptions();
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current) {
+        try {
+          if (scannerRef.current.isScanning) {
+            scannerRef.current.stop();
+          }
+        } catch (e) {}
+      }
+    };
+  }, []);
+
+  const startScanner = async () => {
+    try {
+      setIsScannerActive(true);
+      await new Promise(resolve => setTimeout(resolve, 100)); // wait for DOM to update
+      try {
+        const html5QrCode = new Html5Qrcode("group-edit-reader");
+        scannerRef.current = html5QrCode;
+        
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 150 },
+            formatsToSupport: [
+              Html5QrcodeSupportedFormats.EAN_13,
+              Html5QrcodeSupportedFormats.UPC_A,
+              Html5QrcodeSupportedFormats.UPC_E,
+              Html5QrcodeSupportedFormats.CODE_128
+            ]
+          } as any,
+          async (decodedText) => {
+            await stopScanner();
+            setSearchQuery(decodedText);
+            // Auto validate the scanned code
+            setIsValidating(true);
+            try {
+              const verifyResp = await fetch(`/api/verificar/${decodedText.trim()}`);
+              if (verifyResp.ok) {
+                const verifyData = await verifyResp.json();
+                if (verifyData.exists && verifyData.product) {
+                  const modelName = verifyData.product.modelo_grupo;
+                  if (modelName && modelName !== "sin modelo") {
+                    await loadProductsForModel(modelName);
+                    return;
+                  }
+                }
+              }
+              await loadProductsForModel(decodedText.trim());
+            } catch (err) {
+              toast.error("Error al validar el código escaneado");
+            } finally {
+              setIsValidating(false);
+            }
+          },
+          () => {}
+        );
+        toast.success("Cámara de escaneo iniciada");
+      } catch (err) {
+        toast.error("Error al iniciar cámara");
+        setIsScannerActive(false);
+      }
+    } catch (e) {
+      setIsScannerActive(false);
+    }
+  };
+
+  const stopScanner = async () => {
+    if (scannerRef.current) {
+      try {
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
+        }
+        scannerRef.current.clear();
+      } catch (err) {}
+      scannerRef.current = null;
+    }
+    setIsScannerActive(false);
+  };
 
   const handleValidateModelOrSku = async (e: FormEvent) => {
     e.preventDefault();
@@ -262,12 +348,28 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
             <div className="relative flex-1">
               <Search className="absolute left-3.5 top-3 text-neutral-400" size={18} />
               <Input
-                placeholder="Escribe el modelo (ej: M12345) o escanea el SKU de una prenda..."
+                placeholder="Escribe el modelo o escanea el SKU de una prenda..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 rounded-xl h-11 bg-white border-neutral-200 focus-visible:ring-neutral-400"
+                className="pl-10 pr-10 rounded-xl h-11 bg-white border-neutral-200 focus-visible:ring-neutral-400"
                 disabled={isValidating}
               />
+              <button
+                type="button"
+                onClick={() => {
+                  if (isScannerActive) {
+                    stopScanner();
+                  } else {
+                    startScanner();
+                  }
+                }}
+                className={`absolute right-3.5 top-3 text-neutral-400 hover:text-neutral-950 transition-colors ${
+                  isScannerActive ? "text-amber-500 hover:text-amber-600" : ""
+                }`}
+                title="Abrir Escáner"
+              >
+                <Scan size={18} />
+              </button>
             </div>
             <Button
               type="submit"
@@ -277,6 +379,12 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
               {isValidating ? <Loader2 className="animate-spin" size={16} /> : "Validar"}
             </Button>
           </form>
+
+          {isScannerActive && (
+            <div className="mt-3 relative rounded-2xl overflow-hidden border bg-neutral-950 aspect-[4/3] max-h-48 w-full mx-auto animate-in fade-in duration-200">
+              <div id="group-edit-reader" className="w-full h-full object-cover" />
+            </div>
+          )}
 
           {resolvedModel ? (
             <div className="flex items-center gap-2 mt-3 p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-800 text-xs font-semibold">
@@ -300,7 +408,10 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
             <div className="flex border-b shrink-0 bg-neutral-50/20 px-6">
               <button
                 type="button"
-                onClick={() => setActiveTab("express")}
+                onClick={() => {
+                  stopScanner();
+                  setActiveTab("express");
+                }}
                 className={`py-3 px-4 font-bold text-xs uppercase tracking-wider border-b-2 transition-colors ${
                   activeTab === "express"
                     ? "border-neutral-900 text-neutral-900"
@@ -311,7 +422,10 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab("advanced")}
+                onClick={() => {
+                  stopScanner();
+                  setActiveTab("advanced");
+                }}
                 className={`py-3 px-4 font-bold text-xs uppercase tracking-wider border-b-2 transition-colors ${
                   activeTab === "advanced"
                     ? "border-neutral-900 text-neutral-900"
@@ -323,7 +437,7 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
             </div>
 
             {/* TAB CONTENTS */}
-            <div className="flex-1 overflow-y-auto p-6 min-h-0">
+            <div className="flex-1 overflow-y-auto p-6 min-h-0 animate-in fade-in duration-200">
               {activeTab === "express" ? (
                 <form onSubmit={handleSaveExpress} className="space-y-4">
                   <p className="text-[10.5px] font-black text-neutral-400 uppercase tracking-wider">Campos a Actualizar</p>
@@ -412,7 +526,7 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
                       Cambiar Marca
                     </label>
                     {updateMarca && (
-                      <Select value={marcaVal} onValueChange={marcaVal => setMarcaVal(marcaVal)}>
+                      <Select value={marcaVal} onValueChange={v => setMarcaVal(v)}>
                         <SelectTrigger className="rounded-xl bg-neutral-50 h-10 animate-in slide-in-from-top-2 duration-150">
                           <SelectValue />
                         </SelectTrigger>
@@ -482,7 +596,7 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
                     <Button 
                       type="submit" 
                       disabled={loading || !(updateModelName || updateTemporada || updateTipo || updateMarca || updateFoto)} 
-                      className="flex-1 rounded-xl h-11 bg-neutral-900"
+                      className="flex-1 rounded-xl h-11 bg-neutral-900 animate-in fade-in"
                     >
                       {loading ? <Loader2 className="animate-spin mr-2" /> : <Save className="mr-2" />}
                       Aplicar Cambios Express
@@ -490,7 +604,7 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
                   </div>
                 </form>
               ) : (
-                <form onSubmit={handleSaveAdvanced} className="flex flex-col h-full min-h-0 space-y-4">
+                <form onSubmit={handleSaveAdvanced} className="flex flex-col h-full min-h-0 space-y-4 animate-in fade-in">
                   <div className="flex-1 overflow-auto rounded-xl border max-h-[35vh]">
                     <Table>
                       <TableHeader className="bg-neutral-50 sticky top-0 z-10">
