@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { AlertCircle, CheckCircle2, Box, Package, Camera, Power, RefreshCw, Scan, MapPin, Home, Repeat, Layers } from "lucide-react";
+import { AlertCircle, CheckCircle2, Box, Package, Camera, Power, RefreshCw, Scan, MapPin, Home, Repeat, Layers, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import ProductQuickRegister from "./ProductQuickRegister";
 import { Caja, Producto } from "../types";
@@ -721,114 +721,173 @@ export default function ScannerView() {
 
         {/* Dynamic Selectors depending on Active Mode */}
         {activeMode === "nivel" && (
-          <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto items-end">
-            {/* Dropdown 1: Almacén */}
-            <div className="w-full sm:w-48">
-              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1 mb-1 block">1. Almacén</label>
-              <select
-                value={filterAlmacenId}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setFilterAlmacenId(val);
-                  setFilterPasilloId("");
-                  setFilterSeccionId("");
-                  setSelectedNivelId("");
-                  localStorage.removeItem("activeScannerNivelId");
-                }}
-                className="w-full rounded-2xl h-11 px-4 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-              >
-                <option value="">Selecciona Almacén...</option>
-                {zones.map((z) => (
-                  <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
-                    {z.nombre.toUpperCase()}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Dropdown 2: Pasillo (Only if Almacén is selected) */}
-            {filterAlmacenId && (
-              <div className="w-full sm:w-48 animate-in fade-in slide-in-from-left-2 duration-200">
-                <label className="text-[10px] uppercase font-bold text-neutral-400 px-1 mb-1 block">2. Pasillo / Subzona</label>
+          <div className="w-full sm:w-80 animate-in fade-in duration-200">
+            {!filterAlmacenId ? (
+              // Step 1: Select Almacén
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400 block px-1">1. Almacén</label>
                 <select
-                  value={filterPasilloId}
+                  value={filterAlmacenId}
                   onChange={(e) => {
                     const val = e.target.value;
-                    setFilterPasilloId(val);
+                    setFilterAlmacenId(val);
+                    setFilterPasilloId("");
                     setFilterSeccionId("");
                     setSelectedNivelId("");
                     localStorage.removeItem("activeScannerNivelId");
                   }}
                   className="w-full rounded-2xl h-11 px-4 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
                 >
-                  <option value="">Selecciona Pasillo...</option>
-                  {Array.from(
-                    new Map<string, string>(
-                      sections
-                        .filter((s) => s.id_zona_almacen === parseInt(filterAlmacenId))
-                        .map((s) => [String(s.id_zona_pasillo || "null"), String(s.pasillo_nombre || "Sin Pasillo")])
-                    ).entries()
-                  ).map(([id, name]) => (
-                    <option key={id} value={id}>
-                      {name.toUpperCase()}
+                  <option value="">Selecciona Almacén...</option>
+                  {zones.map((z) => (
+                    <option key={z.id_zona_almacen} value={z.id_zona_almacen}>
+                      {z.nombre.toUpperCase()}
                     </option>
                   ))}
                 </select>
               </div>
-            )}
-
-            {/* Dropdown 3: Sección (Only if Pasillo is selected) */}
-            {filterAlmacenId && filterPasilloId && (
-              <div className="w-full sm:w-48 animate-in fade-in slide-in-from-left-2 duration-200">
-                <label className="text-[10px] uppercase font-bold text-neutral-400 px-1 mb-1 block">3. Sección Física</label>
-                <select
-                  value={filterSeccionId}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFilterSeccionId(val);
-                    setSelectedNivelId("");
-                    localStorage.removeItem("activeScannerNivelId");
-                  }}
-                  className="w-full rounded-2xl h-11 px-4 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                >
-                  <option value="">Selecciona Sección...</option>
-                  {sections
-                    .filter(
-                      (s) =>
-                        s.id_zona_almacen === parseInt(filterAlmacenId) &&
-                        String(s.id_zona_pasillo || "null") === filterPasilloId
-                    )
-                    .map((s) => (
-                      <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
-                        {s.nombre.toUpperCase()}
+            ) : !filterPasilloId ? (
+              // Step 2: Select Pasillo
+              <div className="space-y-1">
+                <div className="flex justify-between items-center px-1">
+                  <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400 block">2. Pasillo / Subzona</label>
+                  <span className="text-[9px] text-neutral-500 font-bold max-w-[150px] truncate" title={zones.find(z => String(z.id_zona_almacen) === filterAlmacenId)?.nombre}>
+                    📍 {zones.find(z => String(z.id_zona_almacen) === filterAlmacenId)?.nombre.toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setFilterAlmacenId("");
+                      setFilterPasilloId("");
+                      setFilterSeccionId("");
+                      setSelectedNivelId("");
+                      localStorage.removeItem("activeScannerNivelId");
+                    }}
+                    className="h-11 w-11 rounded-2xl shrink-0 p-0 border-neutral-200 hover:bg-neutral-100 flex items-center justify-center"
+                    title="Regresar a Almacén"
+                  >
+                    <ArrowLeft size={16} />
+                  </Button>
+                  <select
+                    value={filterPasilloId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFilterPasilloId(val);
+                      setFilterSeccionId("");
+                      setSelectedNivelId("");
+                      localStorage.removeItem("activeScannerNivelId");
+                    }}
+                    className="flex-1 rounded-2xl h-11 px-4 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                  >
+                    <option value="">Selecciona Pasillo...</option>
+                    {Array.from(
+                      new Map<string, string>(
+                        sections
+                          .filter((s) => s.id_zona_almacen === parseInt(filterAlmacenId))
+                          .map((s) => [String(s.id_zona_pasillo || "null"), String(s.pasillo_nombre || "Sin Pasillo")])
+                      ).entries()
+                    ).map(([id, name]) => (
+                      <option key={id} value={id}>
+                        {name.toUpperCase()}
                       </option>
                     ))}
-                </select>
+                  </select>
+                </div>
               </div>
-            )}
-
-            {/* Dropdown 4: Nivel (Only if Sección is selected) */}
-            {filterAlmacenId && filterPasilloId && filterSeccionId && (
-              <div className="w-full sm:w-48 animate-in fade-in slide-in-from-left-2 duration-200">
-                <label className="text-[10px] uppercase font-bold text-neutral-400 px-1 mb-1 block">4. Nivel (Receptor)</label>
-                <select
-                  value={selectedNivelId}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSelectedNivelId(val);
-                    localStorage.setItem("activeScannerNivelId", val);
-                  }}
-                  className="w-full rounded-2xl h-11 px-4 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                >
-                  <option value="">Selecciona Nivel...</option>
-                  {niveles
-                    .filter((n) => n.id_zona_seccion === parseInt(filterSeccionId))
-                    .map((n) => (
-                      <option key={n.id_zona_nivel} value={n.id_zona_nivel}>
-                        {n.nombre.toUpperCase()}
-                      </option>
-                    ))}
-                </select>
+            ) : !filterSeccionId ? (
+              // Step 3: Select Sección
+              <div className="space-y-1">
+                <div className="flex justify-between items-center px-1">
+                  <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400 block">3. Sección Física</label>
+                  <span className="text-[9px] text-neutral-500 font-bold max-w-[150px] truncate">
+                    📍 {sections.find(s => String(s.id_zona_pasillo || "null") === filterPasilloId && String(s.id_zona_almacen) === filterAlmacenId)?.pasillo_nombre?.toUpperCase() || "SIN PASILLO"}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setFilterPasilloId("");
+                      setFilterSeccionId("");
+                      setSelectedNivelId("");
+                      localStorage.removeItem("activeScannerNivelId");
+                    }}
+                    className="h-11 w-11 rounded-2xl shrink-0 p-0 border-neutral-200 hover:bg-neutral-100 flex items-center justify-center"
+                    title="Regresar a Pasillo"
+                  >
+                    <ArrowLeft size={16} />
+                  </Button>
+                  <select
+                    value={filterSeccionId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFilterSeccionId(val);
+                      setSelectedNivelId("");
+                      localStorage.removeItem("activeScannerNivelId");
+                    }}
+                    className="flex-1 rounded-2xl h-11 px-4 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                  >
+                    <option value="">Selecciona Sección...</option>
+                    {sections
+                      .filter(
+                        (s) =>
+                          s.id_zona_almacen === parseInt(filterAlmacenId) &&
+                          String(s.id_zona_pasillo || "null") === filterPasilloId
+                      )
+                      .map((s) => (
+                        <option key={s.id_zona_seccion} value={s.id_zona_seccion}>
+                          {s.nombre.toUpperCase()}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+            ) : (
+              // Step 4: Select Nivel
+              <div className="space-y-1">
+                <div className="flex justify-between items-center px-1">
+                  <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400 block">4. Nivel (Receptor)</label>
+                  <span className="text-[9px] text-neutral-500 font-bold max-w-[150px] truncate">
+                    📍 {sections.find(s => String(s.id_zona_seccion) === filterSeccionId)?.nombre?.toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setFilterSeccionId("");
+                      setSelectedNivelId("");
+                      localStorage.removeItem("activeScannerNivelId");
+                    }}
+                    className="h-11 w-11 rounded-2xl shrink-0 p-0 border-neutral-200 hover:bg-neutral-100 flex items-center justify-center"
+                    title="Regresar a Sección"
+                  >
+                    <ArrowLeft size={16} />
+                  </Button>
+                  <select
+                    value={selectedNivelId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedNivelId(val);
+                      localStorage.setItem("activeScannerNivelId", val);
+                    }}
+                    className="flex-1 rounded-2xl h-11 px-4 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                  >
+                    <option value="">Selecciona Nivel...</option>
+                    {niveles
+                      .filter((n) => n.id_zona_seccion === parseInt(filterSeccionId))
+                      .map((n) => (
+                        <option key={n.id_zona_nivel} value={n.id_zona_nivel}>
+                          {n.nombre.toUpperCase()}
+                        </option>
+                      ))}
+                  </select>
+                </div>
               </div>
             )}
           </div>
