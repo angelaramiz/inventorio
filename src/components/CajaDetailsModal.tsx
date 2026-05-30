@@ -2,7 +2,7 @@ import React, { useState, useEffect, FormEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode, ArrowLeftRight, Trash2, Calendar, ChevronDown, ChevronRight } from "lucide-react";
+import { Box, Package, Image as ImageIcon, Loader2, Plus, Edit2, Barcode, ArrowLeftRight, Trash2, Calendar, ChevronDown, ChevronRight, ArrowLeft } from "lucide-react";
 import { Caja, CajaProducto } from "../types";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -54,11 +54,31 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
 
   // Product transfer states
   const [transferringItem, setTransferringItem] = useState<CajaProducto | null>(null);
-  const [transferTargetBoxId, setTransferTargetBoxId] = useState<string>("");
   const [transferQty, setTransferQty] = useState<number | "">(1);
   const [isTransferring, setIsTransferring] = useState(false);
   const [allBoxes, setAllBoxes] = useState<Caja[]>([]);
   const [allLevels, setAllLevels] = useState<any[]>([]);
+  const [pasillos, setPasillos] = useState<any[]>([]);
+
+  // Transfer all states
+  const [showTransferAllModal, setShowTransferAllModal] = useState(false);
+  const [isTransferringAll, setIsTransferringAll] = useState(false);
+
+  // Hierarchical destination states
+  const [transferType, setTransferType] = useState<"caja" | "seccion" | "nivel" | "">("");
+  const [transAlmacenId, setTransAlmacenId] = useState("");
+  const [transPasilloId, setTransPasilloId] = useState("");
+  const [transSeccionId, setTransSeccionId] = useState("");
+  const [transNivelId, setTransNivelId] = useState("");
+  const [transCajaId, setTransCajaId] = useState("");
+
+  const resetTransferSelection = () => {
+    setTransAlmacenId("");
+    setTransPasilloId("");
+    setTransSeccionId("");
+    setTransNivelId("");
+    setTransCajaId("");
+  };
 
   const handleSaveBoxSku = async (e: FormEvent) => {
     e.preventDefault();
@@ -129,9 +149,10 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
 
   const fetchBoxesForTransfer = async () => {
     try {
-      const [boxesResp, levelsResp] = await Promise.all([
+      const [boxesResp, levelsResp, pasillosResp] = await Promise.all([
         fetch("/api/cajas"),
-        fetch("/api/almacen/niveles")
+        fetch("/api/almacen/niveles"),
+        fetch("/api/almacen/pasillos")
       ]);
       if (boxesResp.ok) {
         const data = await boxesResp.json();
@@ -141,6 +162,10 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
         const data = await levelsResp.json();
         setAllLevels(data.filter((l: any) => l.id_zona_nivel !== (caja as any).id_zona_nivel));
       }
+      if (pasillosResp.ok) {
+        const data = await pasillosResp.json();
+        setPasillos(data);
+      }
     } catch (e) {
       console.error("Error fetching destinations for transfer:", e);
     }
@@ -148,56 +173,106 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
 
   const startTransfer = (item: CajaProducto) => {
     setTransferringItem(item);
-    setTransferTargetBoxId("");
     setTransferQty(1);
+    setTransferType("");
+    resetTransferSelection();
     fetchBoxesForTransfer();
+  };
+
+  const startTransferAll = () => {
+    setTransferType("");
+    resetTransferSelection();
+    setShowTransferAllModal(true);
+    fetchBoxesForTransfer();
+  };
+
+  const getOrCreateTargetCajaId = async (
+    type: "caja" | "seccion" | "nivel",
+    cajaId: string,
+    seccionId: string,
+    nivelId: string
+  ): Promise<number> => {
+    if (type === "caja") {
+      return parseInt(cajaId);
+    }
+    
+    if (type === "nivel") {
+      const lvlId = parseInt(nivelId);
+      const lvl = allLevels.find(l => l.id_zona_nivel === lvlId);
+      if (!lvl) throw new Error("Nivel no encontrado");
+      
+      const nameToMatch = `NIVEL: ${lvl.nombre.toUpperCase()}`;
+      const existing = allBoxes.find(b => b.id_zona_nivel === lvlId && b.numero_caja === nameToMatch);
+      if (existing) {
+        return existing.id_caja;
+      }
+      
+      const resp = await fetch("/api/cajas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          numero_caja: nameToMatch,
+          id_zona_nivel: lvlId,
+          id_zona_seccion: lvl.id_zona_seccion,
+          tags: { tipo_producto: "todos", genero: "todos", marca: "todos" }
+        })
+      });
+      if (resp.ok) {
+        const newBox = await resp.json();
+        return newBox.id_caja;
+      } else {
+        const err = await resp.json();
+        throw new Error(err.error || "No se pudo crear la caja virtual para el nivel");
+      }
+    }
+    
+    if (type === "seccion") {
+      const secId = parseInt(seccionId);
+      const sec = sections.find(s => s.id_zona_seccion === secId);
+      if (!sec) throw new Error("Sección no encontrada");
+      
+      const nameToMatch = `SECCIÓN: ${sec.nombre.toUpperCase()}`;
+      const existing = allBoxes.find(b => b.id_zona_seccion === secId && b.numero_caja === nameToMatch);
+      if (existing) {
+        return existing.id_caja;
+      }
+      
+      const resp = await fetch("/api/cajas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          numero_caja: nameToMatch,
+          id_zona_seccion: secId,
+          id_zona_almacen: null,
+          tags: { tipo_producto: "todos", genero: "todos", marca: "todos" }
+        })
+      });
+      if (resp.ok) {
+        const newBox = await resp.json();
+        return newBox.id_caja;
+      } else {
+        const err = await resp.json();
+        throw new Error(err.error || "No se pudo crear la caja virtual para la sección");
+      }
+    }
+    
+    throw new Error("Tipo de destino no soportado");
   };
 
   const handleExecuteTransfer = async (e: FormEvent) => {
     e.preventDefault();
-    if (!transferringItem || !transferTargetBoxId || transferQty <= 0) return;
+    if (!transferringItem || !transferType || (transferType === "caja" && !transCajaId) || (transferType === "seccion" && !transSeccionId) || (transferType === "nivel" && !transNivelId) || transferQty <= 0) return;
     
     setIsTransferring(true);
-    let targetBoxId = transferTargetBoxId;
-
-    if (transferTargetBoxId.startsWith("nivel_")) {
-      const parts = transferTargetBoxId.split("_");
-      const lvlId = parseInt(parts[1]);
-      const lvlName = parts.slice(2).join("_");
-      
-      try {
-        const createBoxResp = await fetch("/api/cajas", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            numero_caja: `NIVEL: ${lvlName.toUpperCase()}`,
-            id_zona_nivel: lvlId,
-            tags: { tipo_producto: "todos", genero: "todos", marca: "todos" }
-          })
-        });
-        if (createBoxResp.ok) {
-          const newBox = await createBoxResp.json();
-          targetBoxId = String(newBox.id_caja);
-        } else {
-          const err = await createBoxResp.json();
-          toast.error(`Error al preparar el nivel de destino: ${err.error}`);
-          setIsTransferring(false);
-          return;
-        }
-      } catch (e) {
-        toast.error("Error de conexión al crear contenedor del nivel");
-        setIsTransferring(false);
-        return;
-      }
-    }
-
     try {
+      const targetCajaId = await getOrCreateTargetCajaId(transferType, transCajaId, transSeccionId, transNivelId);
+      
       const resp = await fetch("/api/transferir-producto", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id_caja_origen: caja.id_caja,
-          id_caja_destino: parseInt(targetBoxId),
+          id_caja_destino: targetCajaId,
           id_producto: transferringItem.id_producto,
           cantidad: transferQty === "" ? 1 : transferQty
         })
@@ -205,15 +280,50 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       if (resp.ok) {
         toast.success("Producto transferido con éxito");
         setTransferringItem(null);
+        resetTransferSelection();
+        setTransferType("");
         fetchProductos();
       } else {
         const err = await resp.json();
         toast.error(err.error || "Error al transferir");
       }
-    } catch (e) {
-      toast.error("Error de conexión");
+    } catch (e: any) {
+      toast.error(e.message || "Error al transferir");
     } finally {
       setIsTransferring(false);
+    }
+  };
+
+  const handleExecuteTransferAll = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!transferType || (transferType === "caja" && !transCajaId) || (transferType === "seccion" && !transSeccionId) || (transferType === "nivel" && !transNivelId)) return;
+    
+    setIsTransferringAll(true);
+    try {
+      const targetCajaId = await getOrCreateTargetCajaId(transferType, transCajaId, transSeccionId, transNivelId);
+      
+      const resp = await fetch("/api/cajas/transferir-todo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id_caja_origen: caja.id_caja,
+          id_caja_destino: targetCajaId
+        })
+      });
+      if (resp.ok) {
+        toast.success("Todos los productos han sido transferidos");
+        setShowTransferAllModal(false);
+        resetTransferSelection();
+        setTransferType("");
+        fetchProductos();
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al transferir todo");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Error al transferir todo");
+    } finally {
+      setIsTransferringAll(false);
     }
   };
 
@@ -468,16 +578,27 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
               </div>
             </div>
             
-            {!caja.numero_caja?.toUpperCase().startsWith("NIVEL:") && (
-              <Button
-                onClick={handleDeleteCaja}
-                variant="destructive"
-                className="mr-8 h-9 text-xs rounded-xl font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5"
-              >
-                <Trash2 size={14} />
-                Eliminar Caja
-              </Button>
-            )}
+            <div className="flex items-center gap-2 mr-8">
+              {totalUnidades > 0 && (
+                <Button
+                  onClick={startTransferAll}
+                  className="h-9 text-xs rounded-xl font-bold bg-amber-500 hover:bg-amber-600 text-neutral-900 flex items-center gap-1.5"
+                >
+                  <ArrowLeftRight size={14} />
+                  Transferir Todo
+                </Button>
+              )}
+              {!caja.numero_caja?.toUpperCase().startsWith("NIVEL:") && (
+                <Button
+                  onClick={handleDeleteCaja}
+                  variant="destructive"
+                  className="h-9 text-xs rounded-xl font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5"
+                >
+                  <Trash2 size={14} />
+                  Eliminar Caja
+                </Button>
+              )}
+            </div>
           </div>
         </DialogHeader>
 
@@ -852,7 +973,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       </DialogContent>
 
       {transferringItem && (
-        <Dialog open={true} onOpenChange={() => setTransferringItem(null)}>
+        <Dialog open={true} onOpenChange={() => { setTransferringItem(null); setTransferType(""); resetTransferSelection(); }}>
           <DialogContent className="max-w-md rounded-2xl p-6">
             <DialogHeader>
               <DialogTitle className="text-lg font-black flex items-center gap-2">
@@ -867,38 +988,218 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                 <p className="text-[11px] text-neutral-500 font-mono">Cantidad disponible: {transferringItem.cantidad}</p>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-neutral-700 block">Destino (Caja o Nivel)</label>
-                <select
-                  required
-                  value={transferTargetBoxId}
-                  onChange={(e) => setTransferTargetBoxId(e.target.value)}
-                  className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                >
-                  <option value="">Selecciona el destino</option>
-                  
-                  <optgroup label="Cajas Estándar">
-                    {allBoxes
-                      .filter((b) => !b.numero_caja?.toUpperCase().startsWith("NIVEL:"))
-                      .map((b) => (
-                        <option key={b.id_caja} value={String(b.id_caja)}>
-                          CAJA {b.numero_caja} {b.sku ? `(SKU: ${b.sku})` : ""} - {b.estado.toUpperCase()}
-                        </option>
-                      ))}
-                  </optgroup>
-                  
-                  <optgroup label="Niveles de Almacenamiento">
-                    {allLevels.map((lvl) => {
-                      const matchingBox = allBoxes.find(b => b.id_zona_nivel === lvl.id_zona_nivel);
-                      const optionValue = matchingBox ? String(matchingBox.id_caja) : `nivel_${lvl.id_zona_nivel}_${lvl.nombre}`;
-                      return (
-                        <option key={lvl.id_zona_nivel} value={optionValue}>
-                          NIVEL: {lvl.nombre.toUpperCase()} {matchingBox ? "(Existente)" : "(Crear contenedor)"}
-                        </option>
-                      );
-                    })}
-                  </optgroup>
-                </select>
+              {/* Selector Jerárquico de Destino */}
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-neutral-700 block">Destino (Caja, Sección o Nivel)</label>
+                <div className="space-y-3 bg-neutral-50 p-4 rounded-xl border">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-black text-neutral-400 block">Tipo de Destino</label>
+                    <select
+                      value={transferType}
+                      onChange={(e) => {
+                        setTransferType(e.target.value as any);
+                        resetTransferSelection();
+                      }}
+                      required
+                      className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                    >
+                      <option value="">Selecciona tipo...</option>
+                      <option value="caja">Caja Estándar</option>
+                      <option value="seccion">Sección Física</option>
+                      <option value="nivel">Nivel de Almacenamiento</option>
+                    </select>
+                  </div>
+
+                  {transferType === "caja" && (
+                    <div className="space-y-1 animate-in fade-in duration-200">
+                      <label className="text-[10px] uppercase font-black text-neutral-400 block">Caja Destino</label>
+                      <select
+                        value={transCajaId}
+                        onChange={(e) => setTransCajaId(e.target.value)}
+                        required
+                        className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                      >
+                        <option value="">Selecciona una caja...</option>
+                        {allBoxes
+                          .filter((b) => !b.numero_caja?.toUpperCase().startsWith("NIVEL:") && !b.numero_caja?.toUpperCase().startsWith("SECCIÓN:"))
+                          .map((b) => (
+                            <option key={b.id_caja} value={String(b.id_caja)}>
+                              CAJA {b.numero_caja} {b.sku ? `(SKU: ${b.sku})` : ""} - {b.estado.toUpperCase()}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {(transferType === "seccion" || transferType === "nivel") && (
+                    <div className="space-y-3 animate-in fade-in duration-200">
+                      {!transAlmacenId ? (
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase font-black text-neutral-400 block">1. Almacén</label>
+                          <select
+                            value={transAlmacenId}
+                            onChange={(e) => setTransAlmacenId(e.target.value)}
+                            required
+                            className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="">Selecciona Almacén...</option>
+                            {zones.map((z) => (
+                              <option key={z.id_zona_almacen} value={String(z.id_zona_almacen)}>
+                                {z.nombre.toUpperCase()}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : !transPasilloId ? (
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] uppercase font-black text-neutral-400 block">2. Pasillo / Subzona</label>
+                            <span className="text-[9px] text-neutral-500 font-bold truncate max-w-[150px]">
+                              📍 {zones.find(z => String(z.id_zona_almacen) === transAlmacenId)?.nombre.toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                setTransAlmacenId("");
+                                setTransPasilloId("");
+                              }}
+                              className="h-11 w-11 rounded-2xl shrink-0 p-0 border-neutral-200 hover:bg-neutral-100 flex items-center justify-center"
+                            >
+                              <ArrowLeft size={16} />
+                            </Button>
+                            <select
+                              value={transPasilloId}
+                              onChange={(e) => setTransPasilloId(e.target.value)}
+                              required
+                              className="flex-1 rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="">Selecciona Pasillo...</option>
+                              {Array.from(
+                                new Map<string, string>(
+                                  sections
+                                    .filter((s) => s.id_zona_almacen === parseInt(transAlmacenId))
+                                    .map((s) => [String(s.id_zona_pasillo || "null"), String(s.pasillo_nombre || "Sin Pasillo")])
+                                ).entries()
+                              ).map(([id, name]) => (
+                                <option key={id} value={id}>
+                                  {name.toUpperCase()}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      ) : (transferType === "seccion" && !transSeccionId) || (transferType === "nivel" && !transSeccionId) ? (
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] uppercase font-black text-neutral-400 block">
+                              {transferType === "seccion" ? "3. Sección (Receptora)" : "3. Sección Física"}
+                            </label>
+                            <span className="text-[9px] text-neutral-500 font-bold truncate max-w-[150px]">
+                              📍 {pasillos.find(p => String(p.id_zona_pasillo || "null") === transPasilloId)?.nombre?.toUpperCase() || "SIN PASILLO"}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                setTransPasilloId("");
+                                setTransSeccionId("");
+                              }}
+                              className="h-11 w-11 rounded-2xl shrink-0 p-0 border-neutral-200 hover:bg-neutral-100 flex items-center justify-center"
+                            >
+                              <ArrowLeft size={16} />
+                            </Button>
+                            <select
+                              value={transSeccionId}
+                              onChange={(e) => setTransSeccionId(e.target.value)}
+                              required
+                              className="flex-1 rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="">Selecciona Sección...</option>
+                              {sections
+                                .filter(
+                                  (s) =>
+                                    s.id_zona_almacen === parseInt(transAlmacenId) &&
+                                    String(s.id_zona_pasillo || "null") === transPasilloId
+                                )
+                                .map((s) => (
+                                  <option key={s.id_zona_seccion} value={String(s.id_zona_seccion)}>
+                                    {s.nombre.toUpperCase()}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        </div>
+                      ) : transferType === "nivel" && !transNivelId ? (
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] uppercase font-black text-neutral-400 block">4. Nivel (Receptor)</label>
+                            <span className="text-[9px] text-neutral-500 font-bold truncate max-w-[150px]">
+                              📍 {sections.find(s => String(s.id_zona_seccion) === transSeccionId)?.nombre?.toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                setTransSeccionId("");
+                                setTransNivelId("");
+                              }}
+                              className="h-11 w-11 rounded-2xl shrink-0 p-0 border-neutral-200 hover:bg-neutral-100 flex items-center justify-center"
+                            >
+                              <ArrowLeft size={16} />
+                            </Button>
+                            <select
+                              value={transNivelId}
+                              onChange={(e) => setTransNivelId(e.target.value)}
+                              required
+                              className="flex-1 rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="">Selecciona Nivel...</option>
+                              {allLevels
+                                .filter((n) => n.id_zona_seccion === parseInt(transSeccionId))
+                                .map((n) => (
+                                  <option key={n.id_zona_nivel} value={String(n.id_zona_nivel)}>
+                                    {n.nombre.toUpperCase()}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-neutral-100 rounded-xl border space-y-2">
+                          <p className="text-[10px] uppercase font-black text-neutral-400">Destino Seleccionado</p>
+                          <div className="text-sm font-extrabold text-neutral-900">
+                            {transferType === "seccion" ? (
+                              <span>SECCIÓN: {sections.find(s => String(s.id_zona_seccion) === transSeccionId)?.nombre.toUpperCase()}</span>
+                            ) : (
+                              <span>NIVEL: {allLevels.find(n => String(n.id_zona_nivel) === transNivelId)?.nombre.toUpperCase()}</span>
+                            )}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => {
+                              if (transferType === "seccion") {
+                                setTransSeccionId("");
+                              } else {
+                                setTransNivelId("");
+                              }
+                            }}
+                            className="h-8 text-[10px] font-bold text-neutral-600 hover:bg-neutral-200/50"
+                          >
+                            Cambiar Destino
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -921,17 +1222,287 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                 <Button 
                   type="button" 
                   variant="outline" 
-                  onClick={() => setTransferringItem(null)} 
+                  onClick={() => { setTransferringItem(null); setTransferType(""); resetTransferSelection(); }} 
                   className="flex-1 rounded-xl h-11 font-bold text-xs"
                 >
                   Cancelar
                 </Button>
                 <Button 
                   type="submit" 
-                  disabled={isTransferring || !transferTargetBoxId || transferQty <= 0 || transferQty > transferringItem.cantidad}
+                  disabled={
+                    isTransferring || 
+                    transferQty <= 0 || 
+                    transferQty > transferringItem.cantidad ||
+                    !(transferType === "caja" ? !!transCajaId : transferType === "seccion" ? !!transSeccionId : transferType === "nivel" ? !!transNivelId : false)
+                  }
                   className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold text-xs"
                 >
                   {isTransferring ? <Loader2 className="animate-spin" size={16} /> : "Transferir"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {showTransferAllModal && (
+        <Dialog open={true} onOpenChange={() => { setShowTransferAllModal(false); setTransferType(""); resetTransferSelection(); }}>
+          <DialogContent className="max-w-md rounded-2xl p-6">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black flex items-center gap-2">
+                <ArrowLeftRight className="text-amber-500" size={20} />
+                Transferir Todos los Productos
+              </DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleExecuteTransferAll} className="space-y-4 mt-2">
+              <div className="bg-neutral-50 p-4 rounded-xl border space-y-2 max-h-48 overflow-y-auto">
+                <p className="text-xs text-neutral-400 font-bold uppercase">Resumen de Inventario a Mover</p>
+                <div className="space-y-1.5">
+                  {productos.map((item) => (
+                    <div key={item.id_producto} className="flex justify-between text-xs font-semibold text-neutral-750">
+                      <span>{item.productos.sku} (Talla: {item.productos.talla})</span>
+                      <span className="font-bold text-neutral-900">x{item.cantidad}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="border-t pt-2 flex justify-between text-xs font-black text-neutral-900 uppercase">
+                  <span>Total Prendas</span>
+                  <span>{totalUnidades} uds</span>
+                </div>
+              </div>
+
+              {/* Selector Jerárquico de Destino */}
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-neutral-700 block">Destino (Caja, Sección o Nivel)</label>
+                <div className="space-y-3 bg-neutral-50 p-4 rounded-xl border">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-black text-neutral-400 block">Tipo de Destino</label>
+                    <select
+                      value={transferType}
+                      onChange={(e) => {
+                        setTransferType(e.target.value as any);
+                        resetTransferSelection();
+                      }}
+                      required
+                      className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                    >
+                      <option value="">Selecciona tipo...</option>
+                      <option value="caja">Caja Estándar</option>
+                      <option value="seccion">Sección Física</option>
+                      <option value="nivel">Nivel de Almacenamiento</option>
+                    </select>
+                  </div>
+
+                  {transferType === "caja" && (
+                    <div className="space-y-1 animate-in fade-in duration-200">
+                      <label className="text-[10px] uppercase font-black text-neutral-400 block">Caja Destino</label>
+                      <select
+                        value={transCajaId}
+                        onChange={(e) => setTransCajaId(e.target.value)}
+                        required
+                        className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                      >
+                        <option value="">Selecciona una caja...</option>
+                        {allBoxes
+                          .filter((b) => !b.numero_caja?.toUpperCase().startsWith("NIVEL:") && !b.numero_caja?.toUpperCase().startsWith("SECCIÓN:"))
+                          .map((b) => (
+                            <option key={b.id_caja} value={String(b.id_caja)}>
+                              CAJA {b.numero_caja} {b.sku ? `(SKU: ${b.sku})` : ""} - {b.estado.toUpperCase()}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {(transferType === "seccion" || transferType === "nivel") && (
+                    <div className="space-y-3 animate-in fade-in duration-200">
+                      {!transAlmacenId ? (
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase font-black text-neutral-400 block">1. Almacén</label>
+                          <select
+                            value={transAlmacenId}
+                            onChange={(e) => setTransAlmacenId(e.target.value)}
+                            required
+                            className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                          >
+                            <option value="">Selecciona Almacén...</option>
+                            {zones.map((z) => (
+                              <option key={z.id_zona_almacen} value={String(z.id_zona_almacen)}>
+                                {z.nombre.toUpperCase()}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : !transPasilloId ? (
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] uppercase font-black text-neutral-400 block">2. Pasillo / Subzona</label>
+                            <span className="text-[9px] text-neutral-500 font-bold truncate max-w-[150px]">
+                              📍 {zones.find(z => String(z.id_zona_almacen) === transAlmacenId)?.nombre.toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                setTransAlmacenId("");
+                                setTransPasilloId("");
+                              }}
+                              className="h-11 w-11 rounded-2xl shrink-0 p-0 border-neutral-200 hover:bg-neutral-100 flex items-center justify-center"
+                            >
+                              <ArrowLeft size={16} />
+                            </Button>
+                            <select
+                              value={transPasilloId}
+                              onChange={(e) => setTransPasilloId(e.target.value)}
+                              required
+                              className="flex-1 rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="">Selecciona Pasillo...</option>
+                              {Array.from(
+                                new Map<string, string>(
+                                  sections
+                                    .filter((s) => s.id_zona_almacen === parseInt(transAlmacenId))
+                                    .map((s) => [String(s.id_zona_pasillo || "null"), String(s.pasillo_nombre || "Sin Pasillo")])
+                                ).entries()
+                              ).map(([id, name]) => (
+                                <option key={id} value={id}>
+                                  {name.toUpperCase()}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      ) : (transferType === "seccion" && !transSeccionId) || (transferType === "nivel" && !transSeccionId) ? (
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] uppercase font-black text-neutral-400 block">
+                              {transferType === "seccion" ? "3. Sección (Receptora)" : "3. Sección Física"}
+                            </label>
+                            <span className="text-[9px] text-neutral-500 font-bold truncate max-w-[150px]">
+                              📍 {pasillos.find(p => String(p.id_zona_pasillo || "null") === transPasilloId)?.nombre?.toUpperCase() || "SIN PASILLO"}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                setTransPasilloId("");
+                                setTransSeccionId("");
+                              }}
+                              className="h-11 w-11 rounded-2xl shrink-0 p-0 border-neutral-200 hover:bg-neutral-100 flex items-center justify-center"
+                            >
+                              <ArrowLeft size={16} />
+                            </Button>
+                            <select
+                              value={transSeccionId}
+                              onChange={(e) => setTransSeccionId(e.target.value)}
+                              required
+                              className="flex-1 rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="">Selecciona Sección...</option>
+                              {sections
+                                .filter(
+                                  (s) =>
+                                    s.id_zona_almacen === parseInt(transAlmacenId) &&
+                                    String(s.id_zona_pasillo || "null") === transPasilloId
+                                )
+                                .map((s) => (
+                                  <option key={s.id_zona_seccion} value={String(s.id_zona_seccion)}>
+                                    {s.nombre.toUpperCase()}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        </div>
+                      ) : transferType === "nivel" && !transNivelId ? (
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] uppercase font-black text-neutral-400 block">4. Nivel (Receptor)</label>
+                            <span className="text-[9px] text-neutral-500 font-bold truncate max-w-[150px]">
+                              📍 {sections.find(s => String(s.id_zona_seccion) === transSeccionId)?.nombre?.toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                setTransSeccionId("");
+                                setTransNivelId("");
+                              }}
+                              className="h-11 w-11 rounded-2xl shrink-0 p-0 border-neutral-200 hover:bg-neutral-100 flex items-center justify-center"
+                            >
+                              <ArrowLeft size={16} />
+                            </Button>
+                            <select
+                              value={transNivelId}
+                              onChange={(e) => setTransNivelId(e.target.value)}
+                              required
+                              className="flex-1 rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                            >
+                              <option value="">Selecciona Nivel...</option>
+                              {allLevels
+                                .filter((n) => n.id_zona_seccion === parseInt(transSeccionId))
+                                .map((n) => (
+                                  <option key={n.id_zona_nivel} value={String(n.id_zona_nivel)}>
+                                    {n.nombre.toUpperCase()}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-neutral-100 rounded-xl border space-y-2">
+                          <p className="text-[10px] uppercase font-black text-neutral-400">Destino Seleccionado</p>
+                          <div className="text-sm font-extrabold text-neutral-900">
+                            {transferType === "seccion" ? (
+                              <span>SECCIÓN: {sections.find(s => String(s.id_zona_seccion) === transSeccionId)?.nombre.toUpperCase()}</span>
+                            ) : (
+                              <span>NIVEL: {allLevels.find(n => String(n.id_zona_nivel) === transNivelId)?.nombre.toUpperCase()}</span>
+                            )}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => {
+                              if (transferType === "seccion") {
+                                setTransSeccionId("");
+                              } else {
+                                setTransNivelId("");
+                              }
+                            }}
+                            className="h-8 text-[10px] font-bold text-neutral-600 hover:bg-neutral-200/50"
+                          >
+                            Cambiar Destino
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => { setShowTransferAllModal(false); setTransferType(""); resetTransferSelection(); }} 
+                  className="flex-1 rounded-xl h-11 font-bold text-xs"
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  type="submit" 
+                  disabled={
+                    isTransferringAll || 
+                    !(transferType === "caja" ? !!transCajaId : transferType === "seccion" ? !!transSeccionId : transferType === "nivel" ? !!transNivelId : false)
+                  }
+                  className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold text-xs"
+                >
+                  {isTransferringAll ? <Loader2 className="animate-spin" size={16} /> : "Confirmar Transferencia"}
                 </Button>
               </div>
             </form>

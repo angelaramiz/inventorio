@@ -121,7 +121,7 @@ export default function App() {
               active={activeTab === "boxes"} 
               onClick={() => setActiveTab("boxes")}
               icon={<LayoutDashboard size={15} />}
-              label="Cajas"
+              label="Contenedores"
             />
             <TabButton 
               active={activeTab === "concepts"} 
@@ -164,7 +164,7 @@ export default function App() {
             active={activeTab === "boxes"} 
             onClick={() => setActiveTab("boxes")}
             icon={<LayoutDashboard size={15} />}
-            label="Cajas"
+            label="Contenedores"
           />
           <TabButton 
             active={activeTab === "concepts"} 
@@ -224,7 +224,7 @@ export default function App() {
           active={activeTab === "boxes"} 
           onClick={() => setActiveTab("boxes")}
           icon={<LayoutDashboard size={20} />}
-          label="Cajas"
+          label="Contenedores"
         />
         <MobileNavButton 
           active={activeTab === "concepts"} 

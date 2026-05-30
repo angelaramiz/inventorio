@@ -421,7 +421,7 @@ export default function CajasView() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-neutral-100 shadow-sm">
         <div>
           <h2 className="text-3xl font-black tracking-tight flex items-center gap-3">
-            <Archive size={32} className="text-neutral-400" /> GESTIÓN DE CAJAS
+            <Archive size={32} className="text-neutral-400" /> GESTIÓN DE CONTENEDORES
           </h2>
           <p className="text-sm text-neutral-500 font-medium">Administra contenedores, estados y transferencias de stock</p>
         </div>
@@ -457,7 +457,7 @@ export default function CajasView() {
       {activeSubTab === "standard" ? (
         <div className="space-y-6">
           <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-neutral-100 shadow-sm">
-            <span className="font-extrabold text-sm text-neutral-700">Gestión de Cajas del Inventario</span>
+            <span className="font-extrabold text-sm text-neutral-700">Gestión de Contenedores del Inventario</span>
             <Button onClick={() => setShowAddCajaModal(true)} className="rounded-xl h-10 bg-neutral-900 hover:bg-neutral-850 text-white font-bold text-xs shadow-md">
               <Plus className="mr-1.5" size={16} /> Nueva Caja Estándar
             </Button>

@@ -1650,6 +1650,102 @@ app.post("/api/transferir-producto", async (req, res) => {
   }
 });
 
+// POST /api/cajas/transferir-todo - Transfer all products from origin box to destination box
+app.post("/api/cajas/transferir-todo", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id_caja_origen, id_caja_destino } = req.body;
+
+    if (!id_caja_origen || !id_caja_destino) {
+      return res.status(400).json({ error: "Faltan parámetros requeridos" });
+    }
+
+    if (parseInt(id_caja_origen) === parseInt(id_caja_destino)) {
+      return res.status(400).json({ error: "La caja de origen y destino no pueden ser la misma" });
+    }
+
+    // 1. Fetch all products from origin box
+    const { data: origItems, error: origErr } = await supabase
+      .from("caja_productos")
+      .select("*")
+      .eq("id_caja", id_caja_origen);
+
+    if (origErr) throw origErr;
+
+    if (!origItems || origItems.length === 0) {
+      // If there are no products to transfer, just update states and return success
+      await supabase.from("cajas").update({ estado: 'vacia' }).eq("id_caja", id_caja_origen);
+      
+      const { data: destBox } = await supabase
+        .from("cajas")
+        .select("estado")
+        .eq("id_caja", id_caja_destino)
+        .single();
+      if (destBox && destBox.estado === 'vacia') {
+        await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", id_caja_destino);
+      }
+      return res.json({ success: true, message: "No había productos que transferir" });
+    }
+
+    // 2. Perform transfer for each product
+    for (const item of origItems) {
+      const id_producto = item.id_producto;
+      const cantidad = item.cantidad;
+
+      // Check if product already exists in destination box
+      const { data: destItem, error: destErr } = await supabase
+        .from("caja_productos")
+        .select("*")
+        .eq("id_caja", id_caja_destino)
+        .eq("id_producto", id_producto)
+        .maybeSingle();
+
+      if (destErr) throw destErr;
+
+      if (destItem) {
+        // Update destination quantity
+        const { error: destUpdErr } = await supabase
+          .from("caja_productos")
+          .update({ cantidad: destItem.cantidad + cantidad })
+          .eq("id_caja", id_caja_destino)
+          .eq("id_producto", id_producto);
+        if (destUpdErr) throw destUpdErr;
+      } else {
+        // Insert new relation at destination
+        const { error: insErr } = await supabase
+          .from("caja_productos")
+          .insert([{ id_caja: id_caja_destino, id_producto, cantidad }]);
+        if (insErr) throw insErr;
+      }
+    }
+
+    // 3. Delete all relations from origin box
+    const { error: delErr } = await supabase
+      .from("caja_productos")
+      .delete()
+      .eq("id_caja", id_caja_origen);
+    if (delErr) throw delErr;
+
+    // 4. Update states of both boxes
+    await supabase.from("cajas").update({ estado: 'vacia' }).eq("id_caja", id_caja_origen);
+
+    const { data: destBox } = await supabase
+      .from("cajas")
+      .select("estado")
+      .eq("id_caja", id_caja_destino)
+      .single();
+    if (destBox && destBox.estado === 'vacia') {
+      await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", id_caja_destino);
+    }
+
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+
 
 // --- FASE 1: JERARQUÍA DE ALMACENAMIENTO, AJUSTES Y SSE ---
 
