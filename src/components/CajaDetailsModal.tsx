@@ -26,8 +26,9 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   const [cajaTemporada, setCajaTemporada] = useState(caja.temporada_default || "");
   const [isSavingTemporada, setIsSavingTemporada] = useState(false);
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
+  const [tiposOpts, setTiposOpts] = useState<string[]>([]);
   const [boxTags, setBoxTags] = useState(() => {
-    const defaultTags = { tipo_producto: "todos", genero: "todos", marca: "todos" };
+    const defaultTags = { tipo_producto: "todos", tipo_producto_exacto: "todos", genero: "todos", marca: "todos" };
     return { ...defaultTags, ...(caja as any).tags };
   });
   const [isSavingTags, setIsSavingTags] = useState(false);
@@ -333,6 +334,10 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
     if (field === "tipo_producto" && value !== "calzado") {
       updatedTags.marca = "todos";
     }
+    // If tipo_producto changes to something other than ropa, clear the tipo_producto_exacto tag to "todos"
+    if (field === "tipo_producto" && value !== "ropa") {
+      updatedTags.tipo_producto_exacto = "todos";
+    }
     
     setIsSavingTags(true);
     try {
@@ -369,6 +374,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
     fetchProductos();
     fetchLocations();
     fetchTemporadas();
+    fetchTipos();
   }, [caja.id_caja]);
 
   const fetchLocations = async () => {
@@ -399,6 +405,18 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       }
     } catch (err) {
       console.error("Error fetching temporadas:", err);
+    }
+  };
+
+  const fetchTipos = async () => {
+    try {
+      const resp = await fetch("/api/conceptos/tipos");
+      if (resp.ok) {
+        const data = await resp.json();
+        setTiposOpts(data.map((v: any) => typeof v === 'object' ? v.nombre : v));
+      }
+    } catch (err) {
+      console.error("Error fetching product types:", err);
     }
   };
 
@@ -736,6 +754,28 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                       <option value="calzado">CALZADO</option>
                     </select>
                   </div>
+
+                  {/* Tipo de Producto Exacto (Specific Type) Tag (Conditional) */}
+                  {boxTags.tipo_producto === "ropa" && (
+                    <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                      <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                        👕 Tipo Específico
+                      </h4>
+                      <select
+                        value={boxTags.tipo_producto_exacto || "todos"}
+                        disabled={isSavingTags}
+                        onChange={(e) => handleUpdateTagField("tipo_producto_exacto", e.target.value)}
+                        className="rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full disabled:opacity-55"
+                      >
+                        <option value="todos">TODOS</option>
+                        {tiposOpts.map((t) => (
+                          <option key={t} value={t}>
+                            {t.toUpperCase()}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* Género Destinado Tag */}
                   <div className="space-y-1.5 pt-2 border-t border-neutral-100">
