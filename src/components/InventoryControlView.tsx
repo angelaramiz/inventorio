@@ -607,9 +607,9 @@ export default function InventoryControlView({ userRole }: Props) {
     return Object.entries(groups).filter(([_, group]) => group.items.length > 0);
   })();
 
-  const filteredZones = activeSection
+  const filteredZones = (activeSection
     ? zones.filter(box => box.id_zona_seccion === activeSection.id_zona_seccion)
-    : zones;
+    : zones).filter(box => !box.numero_caja?.toUpperCase().startsWith("NIVEL:"));
 
   return (
     <div className="space-y-6">

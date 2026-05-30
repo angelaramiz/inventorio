@@ -26,6 +26,11 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   const [cajaTemporada, setCajaTemporada] = useState(caja.temporada_default || "");
   const [isSavingTemporada, setIsSavingTemporada] = useState(false);
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
+  const [boxTags, setBoxTags] = useState(() => {
+    const defaultTags = { tipo_producto: "todos", genero: "todos", marca: "todos" };
+    return { ...defaultTags, ...(caja as any).tags };
+  });
+  const [isSavingTags, setIsSavingTags] = useState(false);
   
   // Collapsible section states (retracted by default)
   const [isSection1Expanded, setIsSection1Expanded] = useState(false);
@@ -53,6 +58,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   const [transferQty, setTransferQty] = useState<number | "">(1);
   const [isTransferring, setIsTransferring] = useState(false);
   const [allBoxes, setAllBoxes] = useState<Caja[]>([]);
+  const [allLevels, setAllLevels] = useState<any[]>([]);
 
   const handleSaveBoxSku = async (e: FormEvent) => {
     e.preventDefault();
@@ -123,12 +129,21 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
 
   const fetchBoxesForTransfer = async () => {
     try {
-      const resp = await fetch("/api/cajas");
-      if (resp.ok) {
-        const data = await resp.json();
+      const [boxesResp, levelsResp] = await Promise.all([
+        fetch("/api/cajas"),
+        fetch("/api/almacen/niveles")
+      ]);
+      if (boxesResp.ok) {
+        const data = await boxesResp.json();
         setAllBoxes(data.filter((b: any) => b.id_caja !== caja.id_caja));
       }
-    } catch (e) {}
+      if (levelsResp.ok) {
+        const data = await levelsResp.json();
+        setAllLevels(data.filter((l: any) => l.id_zona_nivel !== (caja as any).id_zona_nivel));
+      }
+    } catch (e) {
+      console.error("Error fetching destinations for transfer:", e);
+    }
   };
 
   const startTransfer = (item: CajaProducto) => {
@@ -143,13 +158,46 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
     if (!transferringItem || !transferTargetBoxId || transferQty <= 0) return;
     
     setIsTransferring(true);
+    let targetBoxId = transferTargetBoxId;
+
+    if (transferTargetBoxId.startsWith("nivel_")) {
+      const parts = transferTargetBoxId.split("_");
+      const lvlId = parseInt(parts[1]);
+      const lvlName = parts.slice(2).join("_");
+      
+      try {
+        const createBoxResp = await fetch("/api/cajas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            numero_caja: `NIVEL: ${lvlName.toUpperCase()}`,
+            id_zona_nivel: lvlId,
+            tags: { tipo_producto: "todos", genero: "todos", marca: "todos" }
+          })
+        });
+        if (createBoxResp.ok) {
+          const newBox = await createBoxResp.json();
+          targetBoxId = String(newBox.id_caja);
+        } else {
+          const err = await createBoxResp.json();
+          toast.error(`Error al preparar el nivel de destino: ${err.error}`);
+          setIsTransferring(false);
+          return;
+        }
+      } catch (e) {
+        toast.error("Error de conexión al crear contenedor del nivel");
+        setIsTransferring(false);
+        return;
+      }
+    }
+
     try {
       const resp = await fetch("/api/transferir-producto", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id_caja_origen: caja.id_caja,
-          id_caja_destino: parseInt(transferTargetBoxId),
+          id_caja_destino: parseInt(targetBoxId),
           id_producto: transferringItem.id_producto,
           cantidad: transferQty === "" ? 1 : transferQty
         })
@@ -166,6 +214,44 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       toast.error("Error de conexión");
     } finally {
       setIsTransferring(false);
+    }
+  };
+
+  const handleUpdateTagField = async (field: string, value: string) => {
+    const updatedTags = { ...boxTags, [field]: value };
+    // If tipo_producto changes to something other than calzado, clear the brand tag to "todos"
+    if (field === "tipo_producto" && value !== "calzado") {
+      updatedTags.marca = "todos";
+    }
+    
+    setIsSavingTags(true);
+    try {
+      const resp = await fetch(`/api/cajas/${caja.id_caja}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags: updatedTags })
+      });
+      if (resp.ok) {
+        toast.success("Etiquetas actualizadas");
+        (caja as any).tags = updatedTags;
+        setBoxTags(updatedTags);
+
+        // Sync tags with the physical level if this box represents a level
+        if ((caja as any).id_zona_nivel) {
+          await fetch(`/api/almacen/niveles/${(caja as any).id_zona_nivel}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tags: updatedTags })
+          }).catch(e => console.error("Error syncing level tags:", e));
+        }
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "Error al actualizar etiquetas");
+      }
+    } catch (e) {
+      toast.error("Error de conexión al guardar etiquetas");
+    } finally {
+      setIsSavingTags(false);
     }
   };
 
@@ -367,7 +453,9 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                 <Box size={32} />
               </div>
               <div>
-                <DialogTitle className="text-2xl font-black tracking-tight">CAJA {caja.numero_caja}</DialogTitle>
+                <DialogTitle className="text-2xl font-black tracking-tight">
+                  {caja.numero_caja.toUpperCase().startsWith("NIVEL:") ? "" : "CAJA "}{caja.numero_caja}
+                </DialogTitle>
                 <div className="flex items-center gap-2 mt-1">
                   <Badge className="bg-emerald-500 hover:bg-emerald-600 border-none uppercase text-[10px]">{caja.estado}</Badge>
                   <span className="text-neutral-400 text-xs">{totalUnidades} unidades totales</span>
@@ -380,14 +468,16 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
               </div>
             </div>
             
-            <Button
-              onClick={handleDeleteCaja}
-              variant="destructive"
-              className="mr-8 h-9 text-xs rounded-xl font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5"
-            >
-              <Trash2 size={14} />
-              Eliminar Caja
-            </Button>
+            {!caja.numero_caja?.toUpperCase().startsWith("NIVEL:") && (
+              <Button
+                onClick={handleDeleteCaja}
+                variant="destructive"
+                className="mr-8 h-9 text-xs rounded-xl font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5"
+              >
+                <Trash2 size={14} />
+                Eliminar Caja
+              </Button>
+            )}
           </div>
         </DialogHeader>
 
@@ -508,6 +598,59 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                       </span>
                     )}
                   </div>
+
+                  {/* Tipo de Producto Tag */}
+                  <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                    <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                      🏷️ Tipo de Producto
+                    </h4>
+                    <select
+                      value={boxTags.tipo_producto || "todos"}
+                      disabled={isSavingTags}
+                      onChange={(e) => handleUpdateTagField("tipo_producto", e.target.value)}
+                      className="rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full disabled:opacity-55"
+                    >
+                      <option value="todos">TODOS / AMBOS</option>
+                      <option value="ropa">ROPA</option>
+                      <option value="calzado">CALZADO</option>
+                    </select>
+                  </div>
+
+                  {/* Género Destinado Tag */}
+                  <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                    <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                      👥 Género Destinado
+                    </h4>
+                    <select
+                      value={boxTags.genero || "todos"}
+                      disabled={isSavingTags}
+                      onChange={(e) => handleUpdateTagField("genero", e.target.value)}
+                      className="rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full disabled:opacity-55"
+                    >
+                      <option value="todos">UNISEX / TODOS</option>
+                      <option value="H">HOMBRE (H)</option>
+                      <option value="M">MUJER (M)</option>
+                    </select>
+                  </div>
+
+                  {/* Marca de Calzado Tag (Conditional) */}
+                  {boxTags.tipo_producto === "calzado" && (
+                    <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                      <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                        👟 Marca de Calzado
+                      </h4>
+                      <select
+                        value={boxTags.marca || "todos"}
+                        disabled={isSavingTags}
+                        onChange={(e) => handleUpdateTagField("marca", e.target.value)}
+                        className="rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full disabled:opacity-55"
+                      >
+                        <option value="todos">TODAS / AMBAS</option>
+                        <option value="Marciano">MARCIANO (M)</option>
+                        <option value="Guess">GUESS (G)</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -725,19 +868,36 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-bold text-neutral-700 block">Caja de Destino</label>
+                <label className="text-xs font-bold text-neutral-700 block">Destino (Caja o Nivel)</label>
                 <select
                   required
                   value={transferTargetBoxId}
                   onChange={(e) => setTransferTargetBoxId(e.target.value)}
                   className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
                 >
-                  <option value="">Selecciona la caja destino</option>
-                  {allBoxes.map((b) => (
-                    <option key={b.id_caja} value={b.id_caja}>
-                      CAJA {b.numero_caja} {b.sku ? `(SKU: ${b.sku})` : ""} - {b.estado.toUpperCase()}
-                    </option>
-                  ))}
+                  <option value="">Selecciona el destino</option>
+                  
+                  <optgroup label="Cajas Estándar">
+                    {allBoxes
+                      .filter((b) => !b.numero_caja?.toUpperCase().startsWith("NIVEL:"))
+                      .map((b) => (
+                        <option key={b.id_caja} value={String(b.id_caja)}>
+                          CAJA {b.numero_caja} {b.sku ? `(SKU: ${b.sku})` : ""} - {b.estado.toUpperCase()}
+                        </option>
+                      ))}
+                  </optgroup>
+                  
+                  <optgroup label="Niveles de Almacenamiento">
+                    {allLevels.map((lvl) => {
+                      const matchingBox = allBoxes.find(b => b.id_zona_nivel === lvl.id_zona_nivel);
+                      const optionValue = matchingBox ? String(matchingBox.id_caja) : `nivel_${lvl.id_zona_nivel}_${lvl.nombre}`;
+                      return (
+                        <option key={lvl.id_zona_nivel} value={optionValue}>
+                          NIVEL: {lvl.nombre.toUpperCase()} {matchingBox ? "(Existente)" : "(Crear contenedor)"}
+                        </option>
+                      );
+                    })}
+                  </optgroup>
                 </select>
               </div>
 

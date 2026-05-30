@@ -4041,7 +4041,9 @@ export default function AlmacenView() {
                     <div className="flex items-center gap-2">
                       <Box size={18} className="text-neutral-500" />
                       <span className="font-bold text-sm">Cajas de Almacenamiento (Nivel 5)</span>
-                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{boxes.length}</Badge>
+                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">
+                        {boxes.filter((box: any) => !box.numero_caja?.toUpperCase().startsWith("NIVEL:")).length}
+                      </Badge>
                     </div>
                     {expandedTables.cajas ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
                   </button>
@@ -4054,7 +4056,7 @@ export default function AlmacenView() {
                         className="overflow-hidden"
                       >
                         <div className="p-0 border-t border-neutral-100 flex flex-col">
-                  {boxes.length === 0 ? (
+                  {boxes.filter((box: any) => !box.numero_caja?.toUpperCase().startsWith("NIVEL:")).length === 0 ? (
                     <div className="text-center py-10 text-neutral-400 flex flex-col items-center">
                       <Box size={30} strokeWidth={1} className="opacity-40 mb-1" />
                       <p className="text-xs font-bold">No hay cajas registradas</p>
@@ -4074,7 +4076,9 @@ export default function AlmacenView() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {boxes.map((box: any) => {
+                        {boxes
+                          .filter((box: any) => !box.numero_caja?.toUpperCase().startsWith("NIVEL:"))
+                          .map((box: any) => {
                           const isEditing = editingCajaId === box.id_caja;
                           return (
                             <TableRow key={box.id_caja}>

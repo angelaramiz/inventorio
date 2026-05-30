@@ -135,6 +135,41 @@ export default function CajasView() {
     }
   };
 
+  const handleOpenNivelDetails = async (nivel: any) => {
+    // Find matching virtual box
+    const matchingCaja = cajas.find((c: any) => c.id_zona_nivel === nivel.id_zona_nivel);
+    if (matchingCaja) {
+      setSelectedCaja(matchingCaja);
+      return;
+    }
+
+    setLoadingNiveles(true);
+    try {
+      const resp = await fetch("/api/cajas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          numero_caja: `NIVEL: ${nivel.nombre.toUpperCase()}`,
+          id_zona_nivel: nivel.id_zona_nivel,
+          tags: nivel.tags || { tipo_producto: "todos", genero: "todos", marca: "todos" }
+        })
+      });
+      if (resp.ok) {
+        const newBox = await resp.json();
+        setCajas((prev) => [...prev, newBox]);
+        setSelectedCaja(newBox);
+      } else {
+        const err = await resp.json();
+        toast.error(`No se pudo abrir el detalle del nivel: ${err.error || 'Error desconocido'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error de conexión al abrir el detalle del nivel");
+    } finally {
+      setLoadingNiveles(false);
+    }
+  };
+
   const fetchLocations = async () => {
     try {
       const [zonesResp, sectionsResp] = await Promise.all([
@@ -433,12 +468,12 @@ export default function CajasView() {
               Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="h-48 bg-neutral-100 animate-pulse rounded-2xl border" />
               ))
-            ) : cajas.length === 0 ? (
+            ) : cajas.filter((c: any) => !c.numero_caja?.toUpperCase().startsWith("NIVEL:")).length === 0 ? (
               <div className="col-span-full py-20 text-center text-neutral-400">
                 <Box size={48} className="mx-auto mb-4 opacity-20" />
                 <p>No hay cajas registradas aún.</p>
               </div>
-            ) : cajas.map((caja) => (
+            ) : cajas.filter((c: any) => !c.numero_caja?.toUpperCase().startsWith("NIVEL:")).map((caja) => (
               <Card 
                 key={caja.id_caja} 
                 className={`group relative overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1 rounded-2xl border-2 ${
@@ -618,6 +653,15 @@ export default function CajasView() {
                   <Button 
                     variant="ghost" 
                     size="icon" 
+                    className="rounded-full bg-white/85 backdrop-blur-sm h-8 w-8 hover:bg-neutral-900 hover:text-white border"
+                    onClick={() => handleOpenNivelDetails(nivel)}
+                    title="Detalles de Nivel"
+                  >
+                    <ExternalLink size={14} />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
                     className="rounded-full bg-white/85 backdrop-blur-sm h-8 w-8 hover:bg-rose-600 hover:text-white text-rose-600 border"
                     onClick={() => {
                       if(window.confirm(`¿Eliminar nivel ${nivel.nombre}?`)) {
@@ -768,7 +812,7 @@ export default function CajasView() {
                 className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none"
               >
                 <option value="">Selecciona la caja de origen</option>
-                {cajas.filter(c => c.estado !== "vacia").map(c => (
+                {cajas.filter(c => c.estado !== "vacia" && !c.numero_caja?.toUpperCase().startsWith("NIVEL:")).map(c => (
                   <option key={c.id_caja} value={c.id_caja}>
                     Caja {c.numero_caja} {c.sku ? `(${c.sku})` : ""} - {c.estado.toUpperCase()}
                   </option>
@@ -785,7 +829,7 @@ export default function CajasView() {
                 className="w-full rounded-xl h-11 px-3 bg-white border border-neutral-200 text-xs font-semibold outline-none"
               >
                 <option value="">Selecciona la caja de destino vacía</option>
-                {cajas.filter(c => c.estado === "vacia" && c.id_caja.toString() !== transferOriginId).map(c => (
+                {cajas.filter(c => c.estado === "vacia" && c.id_caja.toString() !== transferOriginId && !c.numero_caja?.toUpperCase().startsWith("NIVEL:")).map(c => (
                   <option key={c.id_caja} value={c.id_caja}>
                     Caja {c.numero_caja} - VACÍA
                   </option>

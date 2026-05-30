@@ -599,16 +599,26 @@ export default function ProductQuickRegister({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Talla</label>
-                <Select value={tallaValue} onValueChange={setTallaValue}>
-                  <SelectTrigger className="rounded-xl bg-neutral-50 border-neutral-200">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(tallaTipo === "letra" ? TALLAS_LETRA : TALLAS_NUMERO).map(t => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {tallaTipo === "letra" ? (
+                  <Select value={tallaValue} onValueChange={setTallaValue}>
+                    <SelectTrigger className="rounded-xl bg-neutral-50 border-neutral-200">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TALLAS_LETRA.map(t => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input 
+                    type="text"
+                    value={tallaValue === "SinTalla" ? "" : tallaValue}
+                    onChange={e => setTallaValue(e.target.value.toUpperCase())}
+                    placeholder="Ej: 38, 40.5, 42..."
+                    className="rounded-xl bg-neutral-50 border-neutral-200"
+                  />
+                )}
               </div>
 
               <div className="space-y-1">
@@ -674,15 +684,24 @@ export default function ProductQuickRegister({
 
                     {/* Talla select */}
                     <div className="w-24 shrink-0">
-                      <select
-                        value={vari.talla}
-                        onChange={e => updateVariationField(idx, "talla", e.target.value)}
-                        className="w-full h-9 rounded-lg border text-xs px-2 bg-neutral-50 font-semibold outline-none"
-                      >
-                        {(tallaTipo === "letra" ? TALLAS_LETRA : TALLAS_NUMERO).map(t => (
-                          <option key={t} value={t}>{t}</option>
-                        ))}
-                      </select>
+                      {tallaTipo === "letra" ? (
+                        <select
+                          value={vari.talla}
+                          onChange={e => updateVariationField(idx, "talla", e.target.value)}
+                          className="w-full h-9 rounded-lg border text-xs px-2 bg-neutral-50 font-semibold outline-none"
+                        >
+                          {TALLAS_LETRA.map(t => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <Input 
+                          placeholder="Talla"
+                          value={vari.talla === "SinTalla" ? "" : vari.talla}
+                          onChange={e => updateVariationField(idx, "talla", e.target.value.toUpperCase())}
+                          className="w-full h-9 rounded-lg text-xs font-semibold"
+                        />
+                      )}
                     </div>
 
                     {/* Cantidad input */}
@@ -824,6 +843,7 @@ export default function ProductQuickRegister({
                     <option value="">Asociar directamente a Nivel / Sección</option>
                     {cajas
                       .filter(b => {
+                        if (b.numero_caja?.toUpperCase().startsWith("NIVEL:")) return false;
                         if (selectedNivelId) return b.id_zona_nivel === parseInt(selectedNivelId);
                         return b.id_zona_seccion === parseInt(selectedSeccionId);
                       })

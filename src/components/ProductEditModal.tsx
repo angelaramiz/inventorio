@@ -180,16 +180,26 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
             
             <div className="space-y-1">
               <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Valor Talla</label>
-              <Select value={tallaValue} onValueChange={setTallaValue}>
-                <SelectTrigger className="rounded-xl bg-neutral-50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(tallaTipo === "letra" ? TALLAS_LETRA : TALLAS_NUMERO).map(t => (
-                    <SelectItem key={t} value={t}>{t}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {tallaTipo === "letra" ? (
+                <Select value={tallaValue} onValueChange={setTallaValue}>
+                  <SelectTrigger className="rounded-xl bg-neutral-50">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TALLAS_LETRA.map(t => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input 
+                  type="text" 
+                  value={tallaValue === "SinTalla" ? "" : tallaValue} 
+                  onChange={e => setTallaValue(e.target.value.toUpperCase())}
+                  placeholder="Ej: 38, 40.5..."
+                  className="rounded-xl bg-neutral-50 border-neutral-200 h-10"
+                />
+              )}
             </div>
 
             <div className="space-y-1">
