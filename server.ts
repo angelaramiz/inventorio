@@ -809,6 +809,59 @@ app.get("/api/reporte-inventario", async (req, res) => {
   }
 });
 
+// PUT /api/productos/group-edit - Group edit products by their modelo_grupo
+app.put("/api/productos/group-edit", upload.single('foto'), async (req, res) => {
+  try {
+    await detectSchema();
+    const supabase = getSupabase();
+    let { modelo_grupo_origen, temporada, tipo, marca_sub, modelo_grupo_nuevo, delete_foto } = req.body;
+    
+    if (!hasModeloGrupoColumn) {
+      return res.status(400).json({ error: "La base de datos no soporta columnas de modelo de grupo" });
+    }
+
+    if (!modelo_grupo_origen || modelo_grupo_origen === "sin modelo") {
+      return res.status(400).json({ error: "Debe proveer un modelo de grupo de origen válido" });
+    }
+
+    const updateData: any = {};
+    if (temporada !== undefined && temporada !== "") {
+      updateData.temporada = (sanitizeIdentifier(temporada, 100) || "todouso").toLowerCase();
+    }
+    if (tipo !== undefined && tipo !== "") {
+      updateData.tipo = (sanitizeIdentifier(tipo, 100) || "otro").toLowerCase();
+    }
+    if (marca_sub !== undefined && marca_sub !== "") {
+      updateData.marca_sub = sanitizeIdentifier(marca_sub, 100);
+    }
+    if (modelo_grupo_nuevo !== undefined && modelo_grupo_nuevo !== "") {
+      updateData.modelo_grupo = sanitizeIdentifier(modelo_grupo_nuevo, 100) || "sin modelo";
+    }
+
+    if (req.file) {
+      updateData.foto = '\\x' + req.file.buffer.toString('hex');
+    } else if (delete_foto === 'true') {
+      updateData.foto = null;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ error: "No se proporcionaron campos válidos para actualizar" });
+    }
+
+    const { data, error } = await supabase
+      .from("productos")
+      .update(updateData)
+      .eq("modelo_grupo", modelo_grupo_origen)
+      .select("id_producto");
+
+    if (error) throw error;
+    
+    res.json({ success: true, count: data ? data.length : 0 });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // PUT /api/productos/:id - Editing product info and/or photo
 app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
   try {

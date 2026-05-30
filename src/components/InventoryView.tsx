@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import ProductEditModal from "./ProductEditModal";
 import ProductQuickRegister from "./ProductQuickRegister";
+import ProductGroupEditModal from "./ProductGroupEditModal";
 
 const TALLAS_LETRA = ["SinTalla", "XS", "S", "M", "L", "XL", "XXL"];
 const TALLAS_NUMERO = ["SinTalla", "38", "40", "42", "44", "46", "48"];
@@ -24,6 +25,7 @@ export default function InventoryView() {
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showQuickRegister, setShowQuickRegister] = useState(false);
+  const [showGroupEditModal, setShowGroupEditModal] = useState(false);
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
   const [marcasOpts, setMarcasOpts] = useState<string[]>([]);
   const [tiposOpts, setTiposOpts] = useState<string[]>([]);
@@ -131,6 +133,13 @@ export default function InventoryView() {
           >
             <Package size={16} />
             Crear Grupo
+          </Button>
+          <Button
+            onClick={() => setShowGroupEditModal(true)}
+            className="rounded-xl h-12 bg-amber-500 hover:bg-amber-600 text-neutral-950 font-extrabold text-xs uppercase tracking-wider px-5 shrink-0 flex items-center gap-1.5 shadow-md"
+          >
+            <SlidersHorizontal size={16} />
+            Editar Grupo
           </Button>
           <div className="flex gap-3 bg-white p-1.5 rounded-2xl shadow-sm border border-neutral-100 flex-1 md:w-96 overflow-hidden focus-within:border-neutral-900 transition-colors">
             <div className="flex items-center pl-3 text-neutral-400">
@@ -357,6 +366,20 @@ export default function InventoryView() {
             setShowQuickRegister(false);
             fetchProductos();
           }}
+        />
+      )}
+
+      {showGroupEditModal && (
+        <ProductGroupEditModal
+          uniqueModels={Array.from(
+            new Set(
+              productos
+                .map((p: any) => p.modelo_grupo)
+                .filter((m): m is string => typeof m === "string" && m !== "" && m !== "sin modelo")
+            )
+          )}
+          onClose={() => setShowGroupEditModal(false)}
+          onSuccess={fetchProductos}
         />
       )}
     </div>
