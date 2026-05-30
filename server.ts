@@ -398,6 +398,43 @@ app.put("/api/cajas/:id", async (req, res) => {
     }
     if (tags !== undefined) {
       updateData.tags = tags;
+      
+      // Propagate specific clothing type or calzado type to products inside the container
+      if (tags.tipo_producto_exacto && tags.tipo_producto_exacto !== "todos") {
+        try {
+          const { data: boxProds, error: bpErr } = await supabase
+            .from("caja_productos")
+            .select("id_producto")
+            .eq("id_caja", id);
+          
+          if (!bpErr && boxProds && boxProds.length > 0) {
+            const productIds = boxProds.map((bp: any) => bp.id_producto);
+            await supabase
+              .from("productos")
+              .update({ tipo: tags.tipo_producto_exacto })
+              .in("id_producto", productIds);
+          }
+        } catch (err: any) {
+          console.error("Error inheriting tipo_producto_exacto:", err.message);
+        }
+      } else if (tags.tipo_producto === "calzado") {
+        try {
+          const { data: boxProds, error: bpErr } = await supabase
+            .from("caja_productos")
+            .select("id_producto")
+            .eq("id_caja", id);
+          
+          if (!bpErr && boxProds && boxProds.length > 0) {
+            const productIds = boxProds.map((bp: any) => bp.id_producto);
+            await supabase
+              .from("productos")
+              .update({ tipo: "calzado" })
+              .in("id_producto", productIds);
+          }
+        } catch (err: any) {
+          console.error("Error inheriting calzado type:", err.message);
+        }
+      }
     }
     if (id_zona_nivel !== undefined) {
       if (id_zona_nivel === null || id_zona_nivel === "") {

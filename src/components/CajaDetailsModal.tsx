@@ -350,6 +350,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
         toast.success("Etiquetas actualizadas");
         (caja as any).tags = updatedTags;
         setBoxTags(updatedTags);
+        fetchProductos(false); // Reload products in the background to show new inherited tipo
 
         // Sync tags with the physical level if this box represents a level
         if ((caja as any).id_zona_nivel) {
@@ -620,9 +621,9 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
           </div>
         </DialogHeader>
 
-        <div className="flex-1 flex flex-col md:grid md:grid-cols-3 overflow-hidden bg-white">
+        <div className="flex-1 flex flex-col md:grid md:grid-cols-3 overflow-hidden bg-white min-h-0">
           {/* COLUMNA IZQUIERDA: Detalles (1) y Asociación (3) */}
-          <div className="md:col-span-1 border-b md:border-b-0 md:border-r bg-neutral-50/50 p-5 flex flex-col gap-5 overflow-y-auto shrink-0 md:shrink">
+          <div className="md:col-span-1 border-b md:border-b-0 md:border-r bg-neutral-50/50 p-5 flex flex-col gap-5 overflow-y-auto shrink-0 md:shrink min-h-0">
             
             {/* SECCIÓN 1: DETALLES DEL CONTENEDOR */}
             <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
@@ -868,7 +869,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
           </div>
 
           {/* COLUMNA DERECHA: Tabla de Productos (2) */}
-          <div className="md:col-span-2 flex flex-col overflow-hidden p-5 gap-3">
+          <div className="md:col-span-2 flex flex-col overflow-hidden p-5 gap-3 min-h-0">
             <h3 className="font-black text-neutral-400 text-[10px] uppercase tracking-wider">2. Productos en Contenedor</h3>
             
             <div className="flex-1 overflow-auto">
