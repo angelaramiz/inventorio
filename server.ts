@@ -141,7 +141,7 @@ app.get("/api/productos", async (req, res) => {
   try {
     await detectSchema();
     const supabase = getSupabase();
-    const { q, marca, talla, temporada, tipo } = req.query as Record<string, string>;
+    const { q, marca, talla, temporada, tipo, modelo_grupo } = req.query as Record<string, string>;
     
     const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
     let query = supabase
@@ -164,6 +164,9 @@ app.get("/api/productos", async (req, res) => {
     }
     if (tipo) {
       query = query.ilike("tipo", tipo);
+    }
+    if (hasModeloGrupoColumn && modelo_grupo) {
+      query = query.eq("modelo_grupo", modelo_grupo);
     }
     
     const { data, error } = await query;
@@ -857,6 +860,47 @@ app.put("/api/productos/group-edit", upload.single('foto'), async (req, res) => 
     if (error) throw error;
     
     res.json({ success: true, count: data ? data.length : 0 });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/productos/bulk-save - Save multiple products at once (SKU, EAN-13, Talla)
+app.post("/api/productos/bulk-save", async (req, res) => {
+  try {
+    await detectSchema();
+    const supabase = getSupabase();
+    const { products } = req.body;
+
+    if (!Array.isArray(products)) {
+      return res.status(400).json({ error: "Parámetro 'products' inválido" });
+    }
+
+    for (const p of products) {
+      const { id_producto, sku, ean_13, talla } = p;
+      if (!id_producto || !sku) continue;
+
+      const updateData: any = {
+        sku: sanitizeIdentifier(sku, 100),
+        talla: sanitizeIdentifier(talla, 50)
+      };
+      
+      if (ean_13 !== undefined) {
+        if (ean_13) {
+          const cleanEan = sanitizeIdentifier(ean_13, 13);
+          updateData.ean_13 = cleanEan;
+        } else {
+          updateData.ean_13 = null;
+        }
+      }
+
+      await supabase
+        .from("productos")
+        .update(updateData)
+        .eq("id_producto", id_producto);
+    }
+
+    res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
