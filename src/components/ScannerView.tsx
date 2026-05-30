@@ -707,21 +707,30 @@ export default function ScannerView() {
               <option value="">Selecciona un nivel...</option>
               {zones.map((zone) => {
                 const zoneSections = sections.filter(s => s.id_zona_almacen === zone.id_zona_almacen);
+                
+                // Flatten levels within this zone across sections
+                const zoneNiveles: any[] = [];
+                zoneSections.forEach((sec) => {
+                  const secNiveles = niveles.filter(n => n.id_zona_seccion === sec.id_zona_seccion);
+                  secNiveles.forEach((n) => {
+                    zoneNiveles.push({
+                      ...n,
+                      seccion_nombre: sec.nombre,
+                      pasillo_nombre: sec.pasillo_nombre
+                    });
+                  });
+                });
+
+                if (zoneNiveles.length === 0) return null;
+
                 return (
                   <optgroup key={zone.id_zona_almacen} label={zone.nombre.toUpperCase()}>
-                    {zoneSections.map((sec) => {
-                      const secNiveles = niveles.filter(n => n.id_zona_seccion === sec.id_zona_seccion);
-                      if (secNiveles.length === 0) return null;
-                      return (
-                        <optgroup key={sec.id_zona_seccion} label={`  ↳ ${sec.nombre.toUpperCase()}`}>
-                          {secNiveles.map((n) => (
-                            <option key={n.id_zona_nivel} value={n.id_zona_nivel}>
-                              {n.nombre.toUpperCase()}
-                            </option>
-                          ))}
-                        </optgroup>
-                      );
-                    })}
+                    {zoneNiveles.map((n) => (
+                      <option key={n.id_zona_nivel} value={n.id_zona_nivel}>
+                        {n.pasillo_nombre && n.pasillo_nombre !== "Sin pasillo" ? `${n.pasillo_nombre.toUpperCase()} > ` : ""}
+                        {n.seccion_nombre.toUpperCase()} &gt; {n.nombre.toUpperCase()}
+                      </option>
+                    ))}
                   </optgroup>
                 );
               })}

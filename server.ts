@@ -478,24 +478,65 @@ app.get("/api/verificar/:ean", async (req, res) => {
     const supabase = getSupabase();
     const { ean } = req.params;
     
-    // 1. Buscar producto por EAN o SKU
     const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
-    const { data: product, error: pError } = await supabase
+    
+    // Layered search to find the product
+    let foundProduct = null;
+
+    // 1. Exact case-insensitive match on sku or ean_13
+    const { data: exactMatch, error: exactError } = await supabase
       .from("productos")
       .select(fields)
-      .or(`ean_13.eq.${ean},sku.eq.${ean}`)
-      .single();
-    
-    if (pError) {
-      if (pError.code === 'PGRST116') {
-        return res.json({ exists: false });
+      .or(`ean_13.ilike.${ean},sku.ilike.${ean}`)
+      .limit(1);
+
+    if (exactError) throw exactError;
+
+    if (exactMatch && exactMatch.length > 0) {
+      foundProduct = exactMatch[0];
+    }
+
+    // 2. Partial match on sku or ean_13 or exact match on modelo_grupo
+    if (!foundProduct) {
+      let orFilter = `ean_13.ilike.%${ean}%,sku.ilike.%${ean}%`;
+      if (hasModeloGrupoColumn) {
+        orFilter += `,modelo_grupo.ilike.${ean}`;
       }
-      throw pError;
+      const { data: partialMatch, error: partialError } = await supabase
+        .from("productos")
+        .select(fields)
+        .or(orFilter)
+        .limit(1);
+
+      if (partialError) throw partialError;
+
+      if (partialMatch && partialMatch.length > 0) {
+        foundProduct = partialMatch[0];
+      }
+    }
+
+    // 3. Partial match on modelo_grupo
+    if (!foundProduct && hasModeloGrupoColumn) {
+      const { data: modelMatch, error: modelError } = await supabase
+        .from("productos")
+        .select(fields)
+        .ilike("modelo_grupo", `%${ean}%`)
+        .limit(1);
+
+      if (modelError) throw modelError;
+
+      if (modelMatch && modelMatch.length > 0) {
+        foundProduct = modelMatch[0];
+      }
+    }
+
+    if (!foundProduct) {
+      return res.json({ exists: false });
     }
     
     const mappedProduct = {
       modelo_grupo: "sin modelo",
-      ...product
+      ...foundProduct
     };
     
     // 2. Buscar si esta en alguna caja activa o llena
@@ -509,7 +550,7 @@ app.get("/api/verificar/:ean", async (req, res) => {
           estado
         )
       `)
-      .eq("id_producto", product.id_producto);
+      .eq("id_producto", foundProduct.id_producto);
     
     if (uError) throw uError;
     
