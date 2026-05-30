@@ -291,6 +291,11 @@ export default function ScannerView() {
   const onScanSuccess = (decodedText: string) => {
     if (isChecking) return;
     
+    if (!isTargetSelected()) {
+      toast.error("Selecciona un contenedor activo primero");
+      return;
+    }
+
     if (continuousScan) {
       const now = Date.now();
       if (decodedText === lastScannedCode && now - lastScannedTime < 2000) {
@@ -298,10 +303,14 @@ export default function ScannerView() {
       }
       setLastScannedCode(decodedText);
       setLastScannedTime(now);
+    }
+
+    stopScanner(); // Stop camera immediately once a scan is validated to be processed
+
+    if (continuousScan) {
       toast.info(`EAN continuo: ${decodedText}`);
       verifyProductContinuous(decodedText);
     } else {
-      stopScanner();
       setScannedResult(decodedText);
       verifyProduct(decodedText);
       toast.info(`EAN detectado: ${decodedText}`);
@@ -382,13 +391,16 @@ export default function ScannerView() {
         if (res.ok) {
           toast.success(`[Lote] 1 unidad de ${data.product.sku} agregada a ${targetCaja.numero_caja}`);
           fetchCajas();
+          startScanner();
         } else {
           const errData = await res.json();
           toast.error(errData.error || "Error al asignar");
+          startScanner();
         }
       }
     } catch (error) {
       toast.error("Error en escaneo continuo");
+      startScanner();
     }
   };
 
@@ -586,12 +598,16 @@ export default function ScannerView() {
         setScannedResult(null);
         setShowConflictDialog(false);
         fetchCajas(); // Refresca cajas
+        preventReactivateRef.current = false;
+        startScanner();
       } else {
         const errorData = await resp.json();
         toast.error(errorData.error || "Error al asignar");
+        preventReactivateRef.current = false;
       }
     } catch (error) {
       toast.error("Error de conexión");
+      preventReactivateRef.current = false;
     }
   };
 
@@ -1355,6 +1371,7 @@ export default function ScannerView() {
               </Button>
               <Button 
                 onClick={() => {
+                  preventReactivateRef.current = true;
                   setShowQtyModal(false);
                   const finalVal = qtyModalValue === "" ? 1 : qtyModalValue;
                   if (verificationResult?.ubicacion && verificationResult.ubicacion.numero_caja !== resolvedTargetCaja?.numero_caja) {
@@ -1424,6 +1441,7 @@ export default function ScannerView() {
                 </Button>
                 <Button 
                   onClick={() => {
+                    preventReactivateRef.current = true;
                     setShowPostRegisterModal(false);
                     if (registeredProduct) {
                       const finalVal = qtyModalValue === "" ? 1 : qtyModalValue;
