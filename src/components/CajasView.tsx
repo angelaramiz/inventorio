@@ -639,9 +639,9 @@ export default function CajasView() {
 
       {activeSubTab === "standard" ? (
         <div className="space-y-6">
-          <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-neutral-100 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-white p-4 rounded-2xl border border-neutral-100 shadow-sm">
             <span className="font-extrabold text-sm text-neutral-700">Gestión de Contenedores del Inventario</span>
-            <Button onClick={() => setShowAddCajaModal(true)} className="rounded-xl h-10 bg-neutral-900 hover:bg-neutral-850 text-white font-bold text-xs shadow-md">
+            <Button onClick={() => setShowAddCajaModal(true)} className="w-full sm:w-auto rounded-xl h-10 bg-neutral-900 hover:bg-neutral-850 text-white font-bold text-xs shadow-md">
               <Plus className="mr-1.5" size={16} /> Nueva Caja Estándar
             </Button>
           </div>
@@ -776,19 +776,19 @@ export default function CajasView() {
       ) : activeSubTab === "cjx" ? (
         // CJ-X Containers Tab
         <div className="space-y-6">
-          <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-neutral-100 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-white p-4 rounded-2xl border border-neutral-100 shadow-sm">
             <span className="font-extrabold text-sm text-neutral-700">Contenedores CJ-X:</span>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
               <Button 
                 onClick={() => setShowTransferModal(true)} 
                 variant="outline" 
-                className="rounded-xl h-10 border-neutral-200 text-neutral-700 font-bold bg-white"
+                className="w-full sm:w-auto rounded-xl h-10 border-neutral-200 text-neutral-700 font-bold bg-white text-xs"
               >
                 <ArrowRightLeft className="mr-2" size={16} /> Transferir Caja Dañada
               </Button>
               <Button 
                 onClick={() => setShowAddCjxModal(true)} 
-                className="rounded-xl h-10 bg-neutral-900 text-white font-bold"
+                className="w-full sm:w-auto rounded-xl h-10 bg-neutral-900 text-white font-bold text-xs"
               >
                 <Plus className="mr-2" size={16} /> Nueva Caja CJ-X
               </Button>

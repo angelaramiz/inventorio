@@ -128,6 +128,7 @@ export default function ConsultaDashboard() {
   
   // IndexedDB History State
   const [history, setHistory] = useState<CajaHistorial[]>([]);
+  const [showFiltersMobile, setShowFiltersMobile] = useState(false);
 
   useEffect(() => {
     loadHistory();
@@ -453,131 +454,147 @@ export default function ConsultaDashboard() {
               </div>
             </CardContent>
           </Card>
+          {/* Mobile Filter Toggle Button */}
+          <Button
+            onClick={() => setShowFiltersMobile(!showFiltersMobile)}
+            className="lg:hidden w-full rounded-2xl h-11 border border-neutral-200 bg-white text-neutral-800 hover:text-neutral-900 font-bold text-xs flex items-center justify-center gap-2 hover:bg-neutral-50 shadow-sm transition-all"
+          >
+            <SlidersHorizontal size={15} />
+            {showFiltersMobile ? "Ocultar Filtros Avanzados" : "Mostrar Filtros Avanzados"}
+            {activeFilterCount > 0 && (
+              <span className="ml-1 w-5 h-5 bg-neutral-900 text-white text-[10px] font-black rounded-full flex items-center justify-center">
+                {activeFilterCount}
+              </span>
+            )}
+          </Button>
 
-          {/* Card 2: Advanced product filters */}
-          <Card className="border border-neutral-100 shadow-md rounded-[2rem] overflow-hidden bg-white">
-            <CardHeader className="pb-2 bg-neutral-50/50">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-black uppercase text-neutral-400 tracking-wider flex items-center gap-1.5">
-                  <Tag size={14} className="text-neutral-500" /> Filtros de Producto
-                </CardTitle>
-                {activeFilterCount > 0 && (
-                  <span className="w-5 h-5 bg-amber-450 text-neutral-950 text-[10px] font-black rounded-full flex items-center justify-center">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="p-5 space-y-4">
-              <div className="grid grid-cols-1 gap-2">
-                <div className="flex flex-col gap-0.5">
-                  <label className="text-[10px] font-bold text-neutral-500">MARCA</label>
-                  <select
-                    value={filterMarca}
-                    onChange={e => setFilterMarca(e.target.value)}
-                    className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                  >
-                    <option value="">Todas las marcas</option>
-                    {marcasOpts.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <label className="text-[10px] font-bold text-neutral-500">TALLA</label>
-                  <select
-                    value={filterTalla}
-                    onChange={e => setFilterTalla(e.target.value)}
-                    className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                  >
-                    <option value="">Todas las tallas</option>
-                    {[...TALLAS_LETRA, ...TALLAS_NUMERO.filter(t => t !== "SinTalla")].filter((v, i, arr) => arr.indexOf(v) === i).map(t => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <label className="text-[10px] font-bold text-neutral-500">TEMPORADA</label>
-                  <select
-                    value={filterTemporada}
-                    onChange={e => setFilterTemporada(e.target.value)}
-                    className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                  >
-                    <option value="">Todas las temporadas</option>
-                    {temporadasOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
-                  </select>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <label className="text-[10px] font-bold text-neutral-500">TIPO</label>
-                  <select
-                    value={filterTipo}
-                    onChange={e => setFilterTipo(e.target.value)}
-                    className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 uppercase"
-                  >
-                    <option value="">Todos los tipos</option>
-                    {tiposOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-2 pt-1">
-                <Button
-                  size="sm"
-                  onClick={() => handleProdFilterSearch(unifiedQuery)}
-                  disabled={prodLoading}
-                  className="flex-1 rounded-xl h-9 bg-neutral-900 hover:bg-neutral-800 text-xs font-bold text-white gap-1.5"
-                >
-                  {prodLoading ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
-                  Filtrar Productos
-                </Button>
-                {activeFilterCount > 0 && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={clearProdFilters}
-                    className="rounded-xl h-9 text-xs font-bold text-neutral-500 hover:text-red-500 hover:bg-red-50 gap-1"
-                  >
-                    <X size={12} /> Limpiar
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Card 3: Box season filter */}
-          <Card className="border border-neutral-100 shadow-md rounded-[2rem] overflow-hidden bg-white">
-            <CardHeader className="pb-2 bg-neutral-50/50">
-              <CardTitle className="text-sm font-black uppercase text-neutral-400 tracking-wider flex items-center gap-1.5">
-                <Package size={14} className="text-neutral-500" /> Filtros de Caja
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-5 space-y-4">
-              <div className="space-y-2">
-                <p className="text-[10px] font-black uppercase tracking-wider text-neutral-450">Filtrar por Temporada de Caja</p>
-                <div className="flex gap-2 items-center">
-                  <select
-                    value={boxFilterTemporada}
-                    onChange={e => {
-                      setBoxFilterTemporada(e.target.value);
-                      handleBoxByTemporada(e.target.value);
-                    }}
-                    className="flex-1 rounded-xl h-10 px-3 bg-neutral-50 border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
-                  >
-                    <option value="">Todas las temporadas</option>
-                    {temporadasOpts.map(t => (
-                      <option key={t} value={t}>{t.toUpperCase()}</option>
-                    ))}
-                  </select>
-                  {boxFilterLoading && <Loader2 className="animate-spin text-neutral-400" size={16} />}
-                  {boxFilterTemporada && !boxFilterLoading && (
-                    <button
-                      onClick={() => { setBoxFilterTemporada(""); setBoxFilterResults([]); }}
-                      className="text-neutral-400 hover:text-red-500 p-1"
-                    >
-                      <X size={14} />
-                    </button>
+          {/* Wrapper for mobile toggled filters */}
+          <div className={`${showFiltersMobile ? "flex" : "hidden lg:flex"} flex-col gap-6`}>
+            {/* Card 2: Advanced product filters */}
+            <Card className="border border-neutral-100 shadow-md rounded-[2rem] overflow-hidden bg-white">
+              <CardHeader className="pb-2 bg-neutral-50/50">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-black uppercase text-neutral-400 tracking-wider flex items-center gap-1.5">
+                    <Tag size={14} className="text-neutral-500" /> Filtros de Producto
+                  </CardTitle>
+                  {activeFilterCount > 0 && (
+                    <span className="w-5 h-5 bg-amber-450 text-neutral-950 text-[10px] font-black rounded-full flex items-center justify-center">
+                      {activeFilterCount}
+                    </span>
                   )}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardHeader>
+              <CardContent className="p-5 space-y-4">
+                <div className="grid grid-cols-1 gap-2">
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] font-bold text-neutral-500">MARCA</label>
+                    <select
+                      value={filterMarca}
+                      onChange={e => setFilterMarca(e.target.value)}
+                      className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                    >
+                      <option value="">Todas las marcas</option>
+                      {marcasOpts.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] font-bold text-neutral-500">TALLA</label>
+                    <select
+                      value={filterTalla}
+                      onChange={e => setFilterTalla(e.target.value)}
+                      className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                    >
+                      <option value="">Todas las tallas</option>
+                      {[...TALLAS_LETRA, ...TALLAS_NUMERO.filter(t => t !== "SinTalla")].filter((v, i, arr) => arr.indexOf(v) === i).map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] font-bold text-neutral-500">TEMPORADA</label>
+                    <select
+                      value={filterTemporada}
+                      onChange={e => setFilterTemporada(e.target.value)}
+                      className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                    >
+                      <option value="">Todas las temporadas</option>
+                      {temporadasOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] font-bold text-neutral-500">TIPO</label>
+                    <select
+                      value={filterTipo}
+                      onChange={e => setFilterTipo(e.target.value)}
+                      className="bg-white border border-neutral-200 rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 uppercase"
+                    >
+                      <option value="">Todos los tipos</option>
+                      {tiposOpts.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    onClick={() => handleProdFilterSearch(unifiedQuery)}
+                    disabled={prodLoading}
+                    className="flex-1 rounded-xl h-9 bg-neutral-900 hover:bg-neutral-800 text-xs font-bold text-white gap-1.5"
+                  >
+                    {prodLoading ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
+                    Filtrar Productos
+                  </Button>
+                  {activeFilterCount > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={clearProdFilters}
+                      className="rounded-xl h-9 text-xs font-bold text-neutral-500 hover:text-red-500 hover:bg-red-50 gap-1"
+                    >
+                      <X size={12} /> Limpiar
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Card 3: Box season filter */}
+            <Card className="border border-neutral-100 shadow-md rounded-[2rem] overflow-hidden bg-white">
+              <CardHeader className="pb-2 bg-neutral-50/50">
+                <CardTitle className="text-sm font-black uppercase text-neutral-400 tracking-wider flex items-center gap-1.5">
+                  <Package size={14} className="text-neutral-500" /> Filtros de Caja
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-5 space-y-4">
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-neutral-450">Filtrar por Temporada de Caja</p>
+                  <div className="flex gap-2 items-center">
+                    <select
+                      value={boxFilterTemporada}
+                      onChange={e => {
+                        setBoxFilterTemporada(e.target.value);
+                        handleBoxByTemporada(e.target.value);
+                      }}
+                      className="flex-1 rounded-xl h-10 px-3 bg-neutral-50 border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                    >
+                      <option value="">Todas las temporadas</option>
+                      {temporadasOpts.map(t => (
+                        <option key={t} value={t}>{t.toUpperCase()}</option>
+                      ))}
+                    </select>
+                    {boxFilterLoading && <Loader2 className="animate-spin text-neutral-400" size={16} />}
+                    {boxFilterTemporada && !boxFilterLoading && (
+                      <button
+                        onClick={() => { setBoxFilterTemporada(""); setBoxFilterResults([]); }}
+                        className="text-neutral-400 hover:text-red-500 p-1"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
           {/* Card 4: Consultation History */}
           <Card className="border border-neutral-100 shadow-lg rounded-[2rem] overflow-hidden bg-white flex-1 flex flex-col min-h-[250px]">

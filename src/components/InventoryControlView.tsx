@@ -828,7 +828,7 @@ export default function InventoryControlView({ userRole }: Props) {
                                 <TableHeader className="bg-neutral-50">
                                   <TableRow>
                                     <TableHead>Prenda (SKU)</TableHead>
-                                    <TableHead className="w-[120px] text-right">Cant. Física</TableHead>
+                                    <TableHead className="w-[160px] text-right">Cant. Física</TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -850,20 +850,52 @@ export default function InventoryControlView({ userRole }: Props) {
                                               </span>
                                             </div>
                                           </TableCell>
-                                          <TableCell className="text-right pr-4 py-2.5">
-                                            <Input 
-                                              type="number"
-                                              min={0}
-                                              value={countedQuantities[item.id_producto] ?? 0}
-                                              onChange={(e) => {
-                                                const val = e.target.value;
-                                                setCountedQuantities({
-                                                  ...countedQuantities,
-                                                  [item.id_producto]: val === "" ? "" : (parseInt(val) || 0)
-                                                });
-                                              }}
-                                              className="w-20 text-center font-black h-9 border-neutral-200 focus-visible:ring-neutral-400 rounded-lg ml-auto text-xs"
-                                            />
+                                          <TableCell className="text-right pr-4 py-2.5 w-[160px] shrink-0">
+                                            <div className="flex items-center gap-1.5 justify-end">
+                                              <Button
+                                                variant="outline"
+                                                size="icon"
+                                                onClick={() => {
+                                                  const currentVal = countedQuantities[item.id_producto] ?? 0;
+                                                  const newVal = Math.max(0, (currentVal === "" ? 0 : currentVal) - 1);
+                                                  setCountedQuantities({
+                                                    ...countedQuantities,
+                                                    [item.id_producto]: newVal
+                                                  });
+                                                }}
+                                                className="w-7 h-7 rounded-md border-neutral-200 hover:bg-neutral-50 shrink-0 font-bold text-xs"
+                                              >
+                                                -
+                                              </Button>
+                                              <Input 
+                                                type="number"
+                                                min={0}
+                                                value={countedQuantities[item.id_producto] ?? 0}
+                                                onChange={(e) => {
+                                                  const val = e.target.value;
+                                                  setCountedQuantities({
+                                                    ...countedQuantities,
+                                                    [item.id_producto]: val === "" ? "" : (parseInt(val) || 0)
+                                                  });
+                                                }}
+                                                className="w-12 text-center font-black h-7 p-0 border-neutral-200 focus-visible:ring-neutral-400 rounded-md text-xs"
+                                              />
+                                              <Button
+                                                variant="outline"
+                                                size="icon"
+                                                onClick={() => {
+                                                  const currentVal = countedQuantities[item.id_producto] ?? 0;
+                                                  const newVal = (currentVal === "" ? 0 : currentVal) + 1;
+                                                  setCountedQuantities({
+                                                    ...countedQuantities,
+                                                    [item.id_producto]: newVal
+                                                  });
+                                                }}
+                                                className="w-7 h-7 rounded-md border-neutral-200 hover:bg-neutral-50 shrink-0 font-bold text-xs"
+                                              >
+                                                +
+                                              </Button>
+                                            </div>
                                           </TableCell>
                                         </TableRow>
                                       ))}
@@ -1103,18 +1135,18 @@ export default function InventoryControlView({ userRole }: Props) {
                           </div>
 
                           {req.estado === "pendiente" && (
-                            <div className="flex gap-2">
+                            <div className="flex flex-col sm:flex-row gap-2">
                               <Button
                                 disabled={approvingRequestId === req.id}
                                 onClick={() => handleApproval(req.id, "rechazado")}
-                                className="flex-1 rounded-xl h-9 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs"
+                                className="w-full sm:flex-1 rounded-xl h-9 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs"
                               >
                                 <XCircle size={14} className="mr-1" /> Rechazar
                               </Button>
                               <Button
                                 disabled={approvingRequestId === req.id}
                                 onClick={() => handleApproval(req.id, "aprobado")}
-                                className="flex-1 rounded-xl h-9 bg-neutral-900 hover:bg-neutral-850 text-white font-bold text-xs"
+                                className="w-full sm:flex-1 rounded-xl h-9 bg-neutral-900 hover:bg-neutral-850 text-white font-bold text-xs"
                               >
                                 <CheckCircle2 size={14} className="mr-1" /> Aprobar y Sincronizar
                               </Button>

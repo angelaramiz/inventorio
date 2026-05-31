@@ -241,7 +241,7 @@ export default function App() {
       </main>
 
       {/* Mobile Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t flex gap-1 p-2 z-50 overflow-x-auto">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-neutral-100 flex gap-1 px-2 pt-2.5 pb-[calc(10px+env(safe-area-inset-bottom))] z-50 overflow-x-auto shadow-[0_-4px_16px_rgba(0,0,0,0.04)] justify-around">
         <MobileNavButton 
           active={activeTab === "dashboard"} 
           onClick={() => setActiveTab("dashboard")}

@@ -593,22 +593,22 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl sm:max-w-3xl gap-0 h-[80vh] flex flex-col p-0 border-none rounded-2xl overflow-hidden shadow-2xl">
-        <DialogHeader className="bg-neutral-900 text-white p-6 shrink-0">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <div className="bg-white/10 p-3 rounded-xl">
-                <Box size={32} />
+      <DialogContent className="max-w-3xl w-[95vw] sm:max-w-3xl gap-0 h-[90vh] md:h-[80vh] flex flex-col p-0 border-none rounded-2xl overflow-hidden shadow-2xl">
+        <DialogHeader className="bg-neutral-900 text-white p-5 shrink-0">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-white/10 p-2.5 rounded-xl shrink-0">
+                <Box size={28} />
               </div>
-              <div>
-                <DialogTitle className="text-2xl font-black tracking-tight">
+              <div className="min-w-0">
+                <DialogTitle className="text-xl sm:text-2xl font-black tracking-tight truncate">
                   {caja.numero_caja.toUpperCase().startsWith("NIVEL:") ? "" : "CAJA "}{caja.numero_caja}
                 </DialogTitle>
-                <div className="flex items-center gap-2 mt-1">
-                  <Badge className="bg-emerald-500 hover:bg-emerald-600 border-none uppercase text-[10px]">{caja.estado}</Badge>
-                  <span className="text-neutral-400 text-xs">{totalUnidades} unidades totales</span>
+                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                  <Badge className="bg-emerald-500 hover:bg-emerald-600 border-none uppercase text-[9px] px-1.5 py-0">{caja.estado}</Badge>
+                  <span className="text-neutral-400 text-[11px] font-bold">{totalUnidades} uds</span>
                   {caja.temporada_default && (
-                    <span className="text-[10px] font-black uppercase bg-amber-400/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                    <span className="text-[9px] font-black uppercase bg-amber-400/20 text-amber-300 border border-amber-500/30 px-1.5 py-0 rounded-full">
                       🗓 {caja.temporada_default}
                     </span>
                   )}
@@ -616,13 +616,13 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
               </div>
             </div>
             
-            <div className="flex items-center gap-2 mr-8">
+            <div className="flex items-center gap-2 flex-wrap sm:mr-8">
               {totalUnidades > 0 && (
                 <Button
                   onClick={startTransferAll}
-                  className="h-9 text-xs rounded-xl font-bold bg-amber-500 hover:bg-amber-600 text-neutral-900 flex items-center gap-1.5"
+                  className="h-8 text-[10px] sm:text-xs rounded-xl font-bold bg-amber-500 hover:bg-amber-600 text-neutral-900 flex items-center gap-1.5 px-3 py-1"
                 >
-                  <ArrowLeftRight size={14} />
+                  <ArrowLeftRight size={12} />
                   Transferir Todo
                 </Button>
               )}
@@ -630,10 +630,10 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                 <Button
                   onClick={handleDeleteCaja}
                   variant="destructive"
-                  className="h-9 text-xs rounded-xl font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5"
+                  className="h-8 text-[10px] sm:text-xs rounded-xl font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 px-3 py-1"
                 >
-                  <Trash2 size={14} />
-                  Eliminar Caja
+                  <Trash2 size={12} />
+                  Eliminar
                 </Button>
               )}
             </div>
