@@ -37,6 +37,7 @@ interface DashboardStats {
   }>;
   brandCounts: Record<string, number>;
   typeCounts: Record<string, number>;
+  unitsByAlmacen: Array<{ nombre: string; total: number }>;
 }
 
 export default function AlphaDashboardView() {
@@ -206,6 +207,65 @@ export default function AlphaDashboardView() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Stock por Almacén */}
+      {stats?.unitsByAlmacen && stats.unitsByAlmacen.length > 0 && (
+        <Card className="border-none shadow-md rounded-3xl overflow-hidden bg-white">
+          <CardHeader className="bg-neutral-50 border-b pb-4">
+            <CardTitle className="text-md flex items-center gap-2 font-black text-neutral-900 uppercase">
+              <Building2 size={16} className="text-amber-500" />
+              Stock por Almacén
+            </CardTitle>
+            <CardDescription className="text-xs text-neutral-500">
+              Distribución de unidades físicas entre los almacenes registrados
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {stats.unitsByAlmacen.map((alm, idx) => {
+                const pct = stats.totalUnits > 0 ? Math.round((alm.total / stats.totalUnits) * 100) : 0;
+                const colors = [
+                  "from-amber-400 to-amber-500",
+                  "from-emerald-400 to-emerald-500",
+                  "from-blue-400 to-blue-500",
+                  "from-purple-400 to-purple-500",
+                  "from-rose-400 to-rose-500",
+                  "from-indigo-400 to-indigo-500",
+                ];
+                const gradient = colors[idx % colors.length];
+                return (
+                  <div key={alm.nombre} className="bg-neutral-50 rounded-2xl border border-neutral-100 p-4 flex flex-col gap-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-neutral-400 truncate">ALMACÉN</p>
+                        <p className="text-sm font-black text-neutral-900 leading-tight truncate" title={alm.nombre}>{alm.nombre}</p>
+                      </div>
+                      <div className={`bg-gradient-to-br ${gradient} p-2 rounded-xl text-white flex-shrink-0`}>
+                        <Building2 size={16} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-end justify-between">
+                        <span className="text-2xl font-black font-mono text-neutral-900">{alm.total.toLocaleString()}</span>
+                        <span className="text-[10px] font-black text-neutral-400 uppercase mb-0.5">uds</span>
+                      </div>
+                      {/* Progress bar */}
+                      <div className="w-full bg-neutral-200 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full bg-gradient-to-r ${gradient} transition-all duration-700`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] font-bold text-neutral-400">{pct}% del stock total</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Contenedores de Historial y Distribuciones */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

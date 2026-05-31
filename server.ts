@@ -2556,6 +2556,42 @@ app.get("/api/dashboard/stats", async (req, res) => {
       });
     }
 
+    // 7. Units by warehouse (almacén)
+    let unitsByAlmacen: Array<{ nombre: string; total: number }> = [];
+    try {
+      const { data: cajaProds } = await supabase
+        .from("caja_productos")
+        .select(`
+          cantidad,
+          cajas (
+            id_zona_almacen,
+            id_zona_seccion,
+            zonas_almacen (nombre),
+            zonas_seccion (
+              id_zona_almacen,
+              zonas_almacen (nombre)
+            )
+          )
+        `);
+
+      const almacenMap: Record<string, number> = {};
+      for (const item of (cajaProds || [])) {
+        const caja = item.cajas as any;
+        if (!caja) continue;
+        // Resolve almacen name: prefer via seccion, then direct
+        const nombre =
+          caja.zonas_seccion?.zonas_almacen?.nombre ||
+          caja.zonas_almacen?.nombre ||
+          "Sin Almacén";
+        almacenMap[nombre] = (almacenMap[nombre] || 0) + (item.cantidad || 0);
+      }
+      unitsByAlmacen = Object.entries(almacenMap)
+        .map(([nombre, total]) => ({ nombre, total }))
+        .sort((a, b) => b.total - a.total);
+    } catch (e) {
+      console.error("Failed to compute units by almacen:", e);
+    }
+
     res.json({
       totalSKUs: totalSKUs || 0,
       totalUnits,
@@ -2563,7 +2599,8 @@ app.get("/api/dashboard/stats", async (req, res) => {
       layoutStats,
       recentExits,
       brandCounts,
-      typeCounts
+      typeCounts,
+      unitsByAlmacen
     });
 
   } catch (error: any) {
