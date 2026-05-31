@@ -7,6 +7,7 @@ import { Save, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Producto, Temporada, TipoProducto } from "../types";
 import AsyncImageUploader from "./AsyncImageUploader";
+import { fetchCatalogWithCache } from "../utils/pwaDb";
 
 interface Props {
   product: Producto;
@@ -49,14 +50,11 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const [respTemp, respTipos, respMarcas] = await Promise.all([
-          fetch("/api/conceptos/temporadas"),
-          fetch("/api/conceptos/tipos"),
-          fetch("/api/conceptos/marcas")
+        const [tempVals, tiposVals, marcaVals] = await Promise.all([
+          fetchCatalogWithCache("/api/conceptos/temporadas", "temporadas"),
+          fetchCatalogWithCache("/api/conceptos/tipos", "tipos"),
+          fetchCatalogWithCache("/api/conceptos/marcas", "marcas")
         ]);
-        const tempVals = await respTemp.json();
-        const tiposVals = await respTipos.json();
-        const marcaVals = await respMarcas.json();
         
         setTemporadas(tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
         setTipos(tiposVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
@@ -69,6 +67,7 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
         console.error("Error loading concepts", err);
       }
     };
+
     loadOptions();
   }, []);
 

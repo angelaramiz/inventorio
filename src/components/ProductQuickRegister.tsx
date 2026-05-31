@@ -7,6 +7,7 @@ import { Camera, Save, X, Loader2, Plus, Trash2, Scan, Box, Home, MapPin, Layers
 import { toast } from "sonner";
 import { Producto, Temporada, TipoProducto } from "../types";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { fetchCatalogWithCache } from "../utils/pwaDb";
 
 interface Props {
   ean: string;
@@ -110,19 +111,16 @@ export default function ProductQuickRegister({
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const [respTemp, respTipos, respMarcas, respZones, respPasillos, respSections, respNiveles, respBoxes] = await Promise.all([
-          fetch("/api/conceptos/temporadas"),
-          fetch("/api/conceptos/tipos"),
-          fetch("/api/conceptos/marcas"),
+        const [tempVals, tipoVals, marcaVals, respZones, respPasillos, respSections, respNiveles, respBoxes] = await Promise.all([
+          fetchCatalogWithCache("/api/conceptos/temporadas", "temporadas"),
+          fetchCatalogWithCache("/api/conceptos/tipos", "tipos"),
+          fetchCatalogWithCache("/api/conceptos/marcas", "marcas"),
           fetch("/api/almacen/zonas"),
           fetch("/api/almacen/pasillos"),
           fetch("/api/almacen/secciones"),
           fetch("/api/almacen/niveles"),
           fetch("/api/cajas")
         ]);
-        const tempVals = await respTemp.json();
-        const tipoVals = await respTipos.json();
-        const marcaVals = await respMarcas.json();
 
         setZones(await respZones.json());
         setPasillos(await respPasillos.json());
@@ -139,6 +137,7 @@ export default function ProductQuickRegister({
         if (marcaNames.length > 0) {
           setMarcas(marcaNames);
         }
+
         
         setFormData(prev => ({
           ...prev,

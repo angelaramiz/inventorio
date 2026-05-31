@@ -8,6 +8,7 @@ import { Save, Loader2, Image as ImageIcon, Trash2, Layers, Search, CheckCircle,
 import { toast } from "sonner";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Producto, Temporada, TipoProducto } from "../types";
+import { fetchCatalogWithCache } from "../utils/pwaDb";
 
 interface Props {
   uniqueModels: string[];
@@ -56,14 +57,11 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const [respTemp, respTipos, respMarcas] = await Promise.all([
-          fetch("/api/conceptos/temporadas"),
-          fetch("/api/conceptos/tipos"),
-          fetch("/api/conceptos/marcas")
+        const [tempVals, tiposVals, marcaVals] = await Promise.all([
+          fetchCatalogWithCache("/api/conceptos/temporadas", "temporadas"),
+          fetchCatalogWithCache("/api/conceptos/tipos", "tipos"),
+          fetchCatalogWithCache("/api/conceptos/marcas", "marcas")
         ]);
-        const tempVals = await respTemp.json();
-        const tiposVals = await respTipos.json();
-        const marcaVals = await respMarcas.json();
         
         setTemporadas(tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
         setTipos(tiposVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
@@ -78,6 +76,7 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
     };
     loadOptions();
   }, []);
+
 
   useEffect(() => {
     return () => {

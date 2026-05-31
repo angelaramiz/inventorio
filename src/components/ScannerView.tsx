@@ -133,6 +133,11 @@ export default function ScannerView() {
   }, ["producto:deleted", "caja:updated"]);
 
   useEffect(() => {
+    const handleSyncSuccess = () => {
+      fetchCajas();
+    };
+    window.addEventListener("pwa-sync-success", handleSyncSuccess);
+
     // Cargar la caja seleccionada del localStorage si existe
     const savedCaja = localStorage.getItem("activeCaja");
     if (savedCaja) {
@@ -158,6 +163,7 @@ export default function ScannerView() {
     fetchCajas();
 
     return () => {
+      window.removeEventListener("pwa-sync-success", handleSyncSuccess);
       if (scannerRef.current) {
         const cleanupScanner = async () => {
           try {

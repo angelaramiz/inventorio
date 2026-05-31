@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import multer from "multer";
 import { EventEmitter } from "events";
+import fs from "fs";
 
 // In-memory event emitter for real-time stock updates
 const stockEvents = new EventEmitter();
@@ -142,6 +143,17 @@ app.get('/api/health', (req, res) => {
     environment: NODE_ENV,
     uptime: process.uptime()
   });
+});
+
+// --- VERSION CHECK ---
+app.get('/api/app-version', (req, res) => {
+  try {
+    const pkgPath = path.join(process.cwd(), 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    res.json({ version: pkg.version || '0.0.0' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'No se pudo leer la versión de la aplicación' });
+  }
 });
 
 // --- API ROUTES ---

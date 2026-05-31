@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import { saveBoxToHistory, getHistory, clearHistory, CajaHistorial } from "../utils/db";
+import { fetchCatalogWithCache } from "../utils/pwaDb";
 
 const TALLAS_LETRA = ["SinTalla", "XS", "S", "M", "L", "XL", "XXL"];
 const TALLAS_NUMERO = ["SinTalla", "38", "40", "42", "44", "46", "48"];
@@ -138,14 +139,11 @@ export default function ConsultaDashboard() {
 
   const loadFilterOptions = async () => {
     try {
-      const [respTemp, respMarcas, respTipos] = await Promise.all([
-        fetch("/api/conceptos/temporadas"),
-        fetch("/api/conceptos/marcas"),
-        fetch("/api/conceptos/tipos"),
+      const [tempVals, marcaVals, tipoVals] = await Promise.all([
+        fetchCatalogWithCache("/api/conceptos/temporadas", "temporadas"),
+        fetchCatalogWithCache("/api/conceptos/marcas", "marcas"),
+        fetchCatalogWithCache("/api/conceptos/tipos", "tipos"),
       ]);
-      const tempVals = await respTemp.json();
-      const marcaVals = await respMarcas.json();
-      const tipoVals = await respTipos.json();
       setTemporadasOpts(tempVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
       setMarcasOpts(marcaVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
       setTiposOpts(tipoVals.map((v: any) => typeof v === 'object' ? v.nombre : v));
@@ -153,6 +151,7 @@ export default function ConsultaDashboard() {
       console.error("Error loading filter options", err);
     }
   };
+
 
   const loadHistory = async () => {
     try {

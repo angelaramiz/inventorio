@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useRealtimeSync } from "../hooks/useRealtimeSync";
+import { fetchCatalogWithCache } from "../utils/pwaDb";
 
 interface Props {
   caja: Caja;
@@ -391,6 +392,15 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
     fetchLocations();
     fetchTemporadas();
     fetchTipos();
+
+    const handleSyncSuccess = () => {
+      fetchProductos(false);
+    };
+    window.addEventListener("pwa-sync-success", handleSyncSuccess);
+
+    return () => {
+      window.removeEventListener("pwa-sync-success", handleSyncSuccess);
+    };
   }, [caja.id_caja]);
 
   const fetchLocations = async () => {
@@ -414,11 +424,8 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
 
   const fetchTemporadas = async () => {
     try {
-      const resp = await fetch("/api/conceptos/temporadas");
-      if (resp.ok) {
-        const data = await resp.json();
-        setTemporadasOpts(data.map((v: any) => typeof v === 'object' ? v.nombre : v));
-      }
+      const data = await fetchCatalogWithCache("/api/conceptos/temporadas", "temporadas");
+      setTemporadasOpts(data.map((v: any) => typeof v === 'object' ? v.nombre : v));
     } catch (err) {
       console.error("Error fetching temporadas:", err);
     }
@@ -426,11 +433,8 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
 
   const fetchTipos = async () => {
     try {
-      const resp = await fetch("/api/conceptos/tipos");
-      if (resp.ok) {
-        const data = await resp.json();
-        setTiposOpts(data.map((v: any) => typeof v === 'object' ? v.nombre : v));
-      }
+      const data = await fetchCatalogWithCache("/api/conceptos/tipos", "tipos");
+      setTiposOpts(data.map((v: any) => typeof v === 'object' ? v.nombre : v));
     } catch (err) {
       console.error("Error fetching product types:", err);
     }

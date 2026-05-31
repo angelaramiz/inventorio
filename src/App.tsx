@@ -14,6 +14,7 @@ import POSView from "./components/POSView";
 import InventoryControlView from "./components/InventoryControlView";
 import AlphaDashboardView from "./components/AlphaDashboardView";
 import SyncStatusBadge from "./components/SyncStatusBadge";
+import UpdateNotification from "./components/UpdateNotification";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
@@ -28,6 +29,37 @@ export default function App() {
     return () => window.removeEventListener("popstate", handleLocationChange);
   }, []);
 
+  useEffect(() => {
+    const checkVersion = async () => {
+      try {
+        const res = await fetch("/api/app-version");
+        if (res.ok) {
+          const data = await res.json();
+          const localVer = localStorage.getItem("app_version");
+          if (localVer && localVer !== data.version) {
+            console.log(`Versión desactualizada (${localVer} -> ${data.version}). Buscando actualizaciones...`);
+            if ("serviceWorker" in navigator) {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              for (const r of regs) {
+                await r.update();
+              }
+            }
+            localStorage.setItem("app_version", data.version);
+          } else if (!localVer) {
+            localStorage.setItem("app_version", data.version);
+          }
+        }
+      } catch (e) {
+        console.error("Error al verificar la versión de la app:", e);
+      }
+    };
+
+    checkVersion();
+    window.addEventListener("focus", checkVersion);
+    return () => window.removeEventListener("focus", checkVersion);
+  }, []);
+
+
   // Helper to standardise route checks
   const pathMatches = (routes: string[]) => {
     const cleanPath = currentPath.replace(/\/$/, ""); // Strip trailing slash
@@ -41,6 +73,7 @@ export default function App() {
         <ConsultaDashboard />
         <ImageLightbox />
         <Toaster position="top-center" expand={true} richColors />
+        <UpdateNotification />
       </>
     );
   }
@@ -55,6 +88,7 @@ export default function App() {
         </main>
         <ImageLightbox />
         <Toaster position="top-center" expand={true} richColors />
+        <UpdateNotification />
       </div>
     );
   }
@@ -69,6 +103,7 @@ export default function App() {
         </main>
         <ImageLightbox />
         <Toaster position="top-center" expand={true} richColors />
+        <UpdateNotification />
       </div>
     );
   }
@@ -83,6 +118,7 @@ export default function App() {
         </main>
         <ImageLightbox />
         <Toaster position="top-center" expand={true} richColors />
+        <UpdateNotification />
       </div>
     );
   }
@@ -246,6 +282,7 @@ export default function App() {
 
       <ImageLightbox />
       <Toaster position="top-center" expand={true} richColors />
+      <UpdateNotification />
     </div>
   );
 }
