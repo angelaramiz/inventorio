@@ -1,4 +1,5 @@
-import React, { useState, useEffect, FormEvent } from "react";
+import React, { useState, useEffect, useRef, FormEvent } from "react";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -6,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { 
   Plus, Box, ExternalLink, Archive, CheckCircle2, History, Loader2, 
-  Trash2, ArrowRightLeft, AlertTriangle, Check, RefreshCw, Network 
+  Trash2, ArrowRightLeft, AlertTriangle, Check, RefreshCw, Network,
+  Scan, Search, X
 } from "lucide-react";
 import { toast } from "sonner";
 import { Caja } from "../types";
@@ -53,6 +55,12 @@ export default function CajasView() {
   const [cajaGenero, setCajaGenero] = useState("todos");
   const [cajaMarca, setCajaMarca] = useState("todos");
 
+  // Quick-find / scanner states
+  const [quickFindQuery, setQuickFindQuery] = useState("");
+  const [quickFindLoading, setQuickFindLoading] = useState(false);
+  const [isScannerActive, setIsScannerActive] = useState(false);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+
   // Transfer form state
   const [transferOriginId, setTransferOriginId] = useState("");
   const [transferDestId, setTransferDestId] = useState("");
@@ -68,7 +76,117 @@ export default function CajasView() {
     if (saved) {
       setActiveCajaId(JSON.parse(saved).id_caja);
     }
+    return () => { stopScanner(); };
   }, []);
+
+  const stopScanner = async () => {
+    if (scannerRef.current) {
+      try {
+        if (scannerRef.current.isScanning) await scannerRef.current.stop();
+      } catch (_) {}
+      scannerRef.current = null;
+    }
+    setIsScannerActive(false);
+  };
+
+  const startScanner = async () => {
+    await stopScanner();
+    setIsScannerActive(true);
+    await new Promise(r => setTimeout(r, 60));
+    const el = document.getElementById("cajas-quick-reader");
+    if (!el) { setIsScannerActive(false); return; }
+    try {
+      const qr = new Html5Qrcode("cajas-quick-reader");
+      scannerRef.current = qr;
+      await qr.start(
+        { facingMode: "environment" },
+        {
+          fps: 10,
+          qrbox: { width: 280, height: 130 },
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.UPC_A,
+          ]
+        } as any,
+        (decoded) => {
+          stopScanner();
+          setQuickFindQuery(decoded);
+          handleQuickFind(decoded);
+        },
+        () => {}
+      );
+      toast.success("Cámara activada — apunta a la etiqueta del contenedor");
+    } catch {
+      toast.error("No se pudo activar la cámara");
+      setIsScannerActive(false);
+    }
+  };
+
+  // Search in the active tab's list and open the matching container modal
+  const handleQuickFind = async (rawQuery: string) => {
+    const q = rawQuery.trim().toUpperCase();
+    if (!q) return;
+    setQuickFindLoading(true);
+    try {
+      if (activeSubTab === "niveles") {
+        const match = niveles.find(
+          (n: any) =>
+            n.nombre?.toUpperCase() === q ||
+            n.sku?.toUpperCase() === q ||
+            n.nombre?.toUpperCase().includes(q)
+        );
+        if (match) {
+          toast.success(`Nivel encontrado: ${match.nombre}`);
+          await handleOpenNivelDetails(match);
+        } else {
+          toast.error(`No se encontró ningún nivel con "${rawQuery.trim()}" en esta pestaña`);
+        }
+      } else {
+        // Standard or CJ-X cajas
+        const listToSearch = activeSubTab === "standard"
+          ? cajas.filter((c: any) => !c.numero_caja?.toUpperCase().startsWith("NIVEL:"))
+          : cajas.filter((c: any) => c.sku?.startsWith("CJ-"));
+
+        const match = listToSearch.find(
+          (c) =>
+            c.sku?.toUpperCase() === q ||
+            c.numero_caja?.toUpperCase() === q ||
+            c.sku?.toUpperCase().includes(q) ||
+            c.numero_caja?.toUpperCase().includes(q)
+        );
+
+        if (match) {
+          toast.success(`Contenedor encontrado: ${match.numero_caja}`);
+          setSelectedCaja(match);
+        } else {
+          // Try fetching fresh in case the local list is stale
+          const resp = await fetch("/api/cajas");
+          if (resp.ok) {
+            const freshList: Caja[] = await resp.json();
+            const freshMatch = freshList.find(
+              (c) =>
+                c.sku?.toUpperCase() === q ||
+                c.numero_caja?.toUpperCase() === q ||
+                c.sku?.toUpperCase().includes(q) ||
+                c.numero_caja?.toUpperCase().includes(q)
+            );
+            if (freshMatch) {
+              setCajas(freshList);
+              toast.success(`Contenedor encontrado: ${freshMatch.numero_caja}`);
+              setSelectedCaja(freshMatch);
+            } else {
+              toast.error(`No se encontró "${rawQuery.trim()}" en la pestaña activa`);
+            }
+          }
+        }
+      }
+    } catch {
+      toast.error("Error al buscar el contenedor");
+    } finally {
+      setQuickFindLoading(false);
+    }
+  };
 
   const fetchCjxContainers = async () => {
     setLoadingCjx(true);
@@ -451,6 +569,71 @@ export default function CajasView() {
           >
             Niveles
           </button>
+        </div>
+      </div>
+
+      {/* ── Quick-Find Bar ──────────────────────────────────────── */}
+      <div className="bg-white border border-neutral-100 rounded-2xl shadow-sm p-3">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {/* Inline scanner viewport */}
+          {isScannerActive && (
+            <div className="relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-700 flex-shrink-0 w-40 h-16">
+              <div id="cajas-quick-reader" className="w-full h-full" />
+            </div>
+          )}
+          {/* Invisible anchor so html5-qrcode can find the element even when hidden */}
+          {!isScannerActive && <div id="cajas-quick-reader" className="hidden" />}
+
+          {/* Search input */}
+          <div className="relative flex-1 min-w-0">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+            <Input
+              placeholder={`Buscar ${activeSubTab === "niveles" ? "nivel" : "contenedor"} por nombre, número o SKU...`}
+              value={quickFindQuery}
+              onChange={e => setQuickFindQuery(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleQuickFind(quickFindQuery)}
+              className="pl-8 h-9 rounded-xl bg-neutral-50 border-neutral-200 text-sm"
+            />
+          </div>
+
+          {/* Search button */}
+          <Button
+            onClick={() => handleQuickFind(quickFindQuery)}
+            disabled={quickFindLoading || !quickFindQuery.trim()}
+            className="h-9 px-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white font-bold shrink-0"
+          >
+            {quickFindLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+          </Button>
+
+          {/* Camera toggle */}
+          {isScannerActive ? (
+            <Button
+              onClick={stopScanner}
+              variant="destructive"
+              className="h-9 px-3 rounded-xl font-bold shrink-0 text-xs gap-1.5"
+            >
+              <X size={13} /> Apagar
+            </Button>
+          ) : (
+            <Button
+              onClick={startScanner}
+              variant="outline"
+              className="h-9 px-3 rounded-xl border-neutral-200 font-bold shrink-0 gap-1.5 text-xs"
+              title="Escanear etiqueta del contenedor"
+            >
+              <Scan size={14} /> Escanear
+            </Button>
+          )}
+
+          {/* Clear query */}
+          {quickFindQuery && !isScannerActive && (
+            <button
+              onClick={() => setQuickFindQuery("")}
+              className="text-neutral-400 hover:text-neutral-700 p-1 shrink-0"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       </div>
 
