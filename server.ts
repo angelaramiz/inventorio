@@ -2556,35 +2556,33 @@ app.get("/api/dashboard/stats", async (req, res) => {
       });
     }
 
-    // 7. Units by warehouse (almacén)
+    // 7. Units by warehouse (almacén) — using vista_total_cajas which resolves
+    //    almacen_nombre across ALL hierarchy levels (via nivel, seccion, or direct zone)
     let unitsByAlmacen: Array<{ nombre: string; total: number }> = [];
     try {
-      const { data: cajaProds } = await supabase
-        .from("caja_productos")
-        .select(`
-          cantidad,
-          cajas (
-            id_zona_almacen,
-            id_zona_seccion,
-            zonas_almacen (nombre),
-            zonas_seccion (
-              id_zona_almacen,
-              zonas_almacen (nombre)
-            )
-          )
-        `);
+      // Fetch all boxes with their resolved almacen_nombre from the view
+      const { data: cajasView } = await supabase
+        .from("vista_total_cajas")
+        .select("id_caja, almacen_nombre");
 
+      // Build a fast lookup map: id_caja → almacen_nombre
+      const cajaAlmacenMap: Record<number, string> = {};
+      for (const c of (cajasView || [])) {
+        cajaAlmacenMap[c.id_caja] = c.almacen_nombre || "Sin Almacén";
+      }
+
+      // Fetch all box-product assignments
+      const { data: boxProds } = await supabase
+        .from("caja_productos")
+        .select("id_caja, cantidad");
+
+      // Aggregate by warehouse name
       const almacenMap: Record<string, number> = {};
-      for (const item of (cajaProds || [])) {
-        const caja = item.cajas as any;
-        if (!caja) continue;
-        // Resolve almacen name: prefer via seccion, then direct
-        const nombre =
-          caja.zonas_seccion?.zonas_almacen?.nombre ||
-          caja.zonas_almacen?.nombre ||
-          "Sin Almacén";
+      for (const item of (boxProds || [])) {
+        const nombre = cajaAlmacenMap[item.id_caja] || "Sin Almacén";
         almacenMap[nombre] = (almacenMap[nombre] || 0) + (item.cantidad || 0);
       }
+
       unitsByAlmacen = Object.entries(almacenMap)
         .map(([nombre, total]) => ({ nombre, total }))
         .sort((a, b) => b.total - a.total);
