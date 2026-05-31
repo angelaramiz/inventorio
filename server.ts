@@ -1676,8 +1676,84 @@ app.get("/api/consultar-dinamico/:query", async (req, res) => {
       });
     }
 
-    // 4. Return 404 if nothing matches
-    res.status(404).json({ error: "No se encontró caja, producto o sección que coincida con el código ingresado" });
+    // 4. Check by modelo_grupo (group model search)
+    if (hasModeloGrupoColumn) {
+      const { data: modeloProducts } = await supabase
+        .from("productos")
+        .select(prodFieldsWithActive)
+        .ilike("modelo_grupo", cleanQuery);
+
+      if (modeloProducts && modeloProducts.length > 0) {
+        const productIds = modeloProducts.map((p: any) => p.id_producto);
+
+        // Fetch box assignments for all variants
+        const { data: boxAssignments } = await supabase
+          .from("caja_productos")
+          .select(`
+            id_producto,
+            cantidad,
+            cajas (
+              id_caja,
+              numero_caja,
+              sku,
+              estado,
+              id_zona_seccion,
+              id_zona_almacen,
+              zonas_seccion (
+                nombre,
+                zonas_almacen (nombre)
+              ),
+              zonas_almacen (nombre)
+            )
+          `)
+          .in("id_producto", productIds);
+
+        // Build per-product totals and box locations
+        const boxMap: { [prodId: number]: any[] } = {};
+        const totalMap: { [prodId: number]: number } = {};
+        for (const item of (boxAssignments || [])) {
+          const pid = item.id_producto;
+          if (!boxMap[pid]) boxMap[pid] = [];
+          if (!totalMap[pid]) totalMap[pid] = 0;
+          const c = item.cajas as any;
+          if (c) {
+            const seccion = c.zonas_seccion;
+            const almacen = seccion ? seccion.zonas_almacen : c.zonas_almacen;
+            boxMap[pid].push({
+              cantidad: item.cantidad,
+              cajas: {
+                id_caja: c.id_caja,
+                numero_caja: c.numero_caja,
+                sku: c.sku,
+                estado: c.estado,
+                seccion_nombre: seccion ? seccion.nombre : null,
+                almacen_nombre: almacen ? almacen.nombre : null,
+              }
+            });
+            totalMap[pid] = (totalMap[pid] || 0) + (item.cantidad || 0);
+          }
+        }
+
+        const variantes = modeloProducts.map((p: any) => ({
+          modelo_grupo: cleanQuery,
+          ...p,
+          boxes: boxMap[p.id_producto] || [],
+          total_cantidad: totalMap[p.id_producto] || 0,
+        }));
+
+        return res.json({
+          type: "modelo",
+          data: {
+            modelo_grupo: cleanQuery,
+            variantes,
+            total_unidades: variantes.reduce((sum: number, v: any) => sum + v.total_cantidad, 0),
+          }
+        });
+      }
+    }
+
+    // 5. Return 404 if nothing matches
+    res.status(404).json({ error: "No se encontró caja, producto, sección o modelo que coincida con el código ingresado" });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

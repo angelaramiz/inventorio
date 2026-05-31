@@ -42,6 +42,36 @@ interface ProductoQueryResult {
   variantes?: any[];
 }
 
+interface ModeloVariante {
+  id_producto: number;
+  sku: string;
+  ean_13: string;
+  talla: string;
+  temporada: string;
+  tipo: string;
+  marca_sub: string;
+  has_foto: boolean;
+  modelo_grupo: string;
+  total_cantidad: number;
+  boxes: {
+    cantidad: number;
+    cajas: {
+      id_caja: number;
+      numero_caja: string;
+      sku: string | null;
+      estado: string;
+      seccion_nombre?: string | null;
+      almacen_nombre?: string | null;
+    };
+  }[];
+}
+
+interface ModeloQueryResult {
+  modelo_grupo: string;
+  variantes: ModeloVariante[];
+  total_unidades: number;
+}
+
 const waitForElement = (id: string, maxAttempts = 10, interval = 100): Promise<HTMLElement> => {
   return new Promise((resolve, reject) => {
     let attempts = 0;
@@ -70,6 +100,7 @@ export default function ConsultaDashboard() {
   const [currentBox, setCurrentBox] = useState<CajaHistorial | null>(null);
   const [currentSection, setCurrentSection] = useState<any | null>(null);
   const [currentProduct, setCurrentProduct] = useState<ProductoQueryResult | null>(null);
+  const [currentModelo, setCurrentModelo] = useState<ModeloQueryResult | null>(null);
   const [boxFilterResults, setBoxFilterResults] = useState<any[]>([]);
   const [prodResults, setProdResults] = useState<ProductoQueryResult[]>([]);
 
@@ -201,6 +232,7 @@ export default function ConsultaDashboard() {
     setCurrentBox(null);
     setCurrentSection(null);
     setCurrentProduct(null);
+    setCurrentModelo(null);
     setBoxFilterResults([]);
     setProdResults([]);
     stopAnyScanner();
@@ -221,6 +253,9 @@ export default function ConsultaDashboard() {
         } else if (result.type === "producto") {
           setCurrentProduct(result.data);
           toast.success(`Producto ${result.data.product.sku} encontrado`);
+        } else if (result.type === "modelo") {
+          setCurrentModelo(result.data);
+          toast.success(`Modelo "${result.data.modelo_grupo}" — ${result.data.variantes.length} variante(s) encontradas`);
         }
       } else {
         const err = await resp.json();
@@ -337,6 +372,7 @@ export default function ConsultaDashboard() {
     setFilterTipo("");
     setProdResults([]);
     setCurrentProduct(null);
+    setCurrentModelo(null);
   };
 
   const activeFilterCount = [filterMarca, filterTalla, filterTemporada, filterTipo].filter(Boolean).length;
@@ -402,7 +438,7 @@ export default function ConsultaDashboard() {
 
               <div className="flex gap-2">
                 <Input 
-                  placeholder="Escribe SKU, EAN, Caja o Sección" 
+                  placeholder="SKU, EAN, Caja, Sección o Modelo" 
                   value={unifiedQuery}
                   onChange={e => setUnifiedQuery(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && handleUnifiedSearch(unifiedQuery)}
@@ -978,8 +1014,123 @@ export default function ConsultaDashboard() {
               </motion.div>
             )}
 
-            {/* 4. PRODUCT RESULT DISPLAY */}
-            {!currentBox && boxFilterResults.length === 0 && !currentSection && currentProduct && (
+            {/* 4. MODELO GROUP RESULT DISPLAY */}
+            {!currentBox && boxFilterResults.length === 0 && !currentSection && !currentProduct && currentModelo && (
+              <motion.div
+                key={`modelo-${currentModelo.modelo_grupo}`}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="space-y-6"
+              >
+                <Card className="border border-neutral-100 shadow-xl rounded-[2rem] overflow-hidden bg-white">
+                  <div className="bg-neutral-900 text-white p-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-amber-400 p-2.5 rounded-2xl text-black">
+                          <Layers size={28} />
+                        </div>
+                        <div>
+                          <h2 className="text-2xl font-black tracking-tight leading-none">Modelo: {currentModelo.modelo_grupo.toUpperCase()}</h2>
+                          <p className="text-xs text-neutral-400 mt-1">{currentModelo.variantes.length} variante(s) en el sistema</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <div className="text-[10px] text-neutral-200 bg-neutral-800 px-3 py-1.5 rounded-xl border border-neutral-700 font-extrabold uppercase">
+                          Total en Stock: {currentModelo.total_unidades} uds
+                        </div>
+                        <div className="text-[10px] text-emerald-400 bg-neutral-800 px-3 py-1.5 rounded-xl border border-neutral-700 font-extrabold uppercase">
+                          {currentModelo.variantes.filter(v => v.total_cantidad > 0).length} con existencia
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <CardContent className="p-6 space-y-4">
+                    <h3 className="text-xs font-black uppercase text-neutral-400 tracking-wider">Variantes por Talla</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {currentModelo.variantes.map((v) => (
+                        <div
+                          key={v.id_producto}
+                          className={`rounded-2xl border p-4 flex flex-col gap-3 transition-all ${
+                            v.total_cantidad > 0
+                              ? "bg-white border-neutral-100 shadow-sm hover:shadow-md"
+                              : "bg-neutral-50/50 border-neutral-100 opacity-70"
+                          }`}
+                        >
+                          {/* Variant header */}
+                          <div className="flex items-center gap-3">
+                            {v.has_foto ? (
+                              <img
+                                src={`/api/productos/${v.id_producto}/image`}
+                                alt={v.sku}
+                                className="w-14 h-14 object-cover rounded-xl border shadow-sm flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="w-14 h-14 bg-neutral-100 flex items-center justify-center rounded-xl border text-neutral-400 flex-shrink-0">
+                                <ImageIcon size={20} />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <button
+                                onClick={() => { setUnifiedQuery(v.sku); handleUnifiedSearch(v.sku); }}
+                                className="font-black text-sm text-neutral-900 truncate hover:underline text-left w-full"
+                              >
+                                {v.sku}
+                              </button>
+                              <p className="text-[10px] font-mono text-neutral-400">{v.ean_13 || "Sin EAN"}</p>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                <span className="text-[9px] font-black uppercase bg-neutral-100 px-1.5 py-0.5 rounded-md">Talla {v.talla || "SinTalla"}</span>
+                                <span className="text-[9px] font-black uppercase bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-md">{v.temporada}</span>
+                                {v.marca_sub && <span className="text-[9px] font-black uppercase bg-neutral-100 px-1.5 py-0.5 rounded-md">{v.marca_sub}</span>}
+                                <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md border ${
+                                  v.total_cantidad > 0
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                    : "bg-rose-50 text-rose-600 border-rose-200"
+                                }`}>
+                                  Stock: {v.total_cantidad}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Variant box locations */}
+                          {v.boxes.length > 0 && (
+                            <div className="border-t border-neutral-100 pt-2 space-y-1.5">
+                              <p className="text-[9px] font-black uppercase text-neutral-400 tracking-wider mb-1">Ubicación en Cajas</p>
+                              {v.boxes.map((b, bi) => (
+                                <div key={bi} className="flex items-center justify-between text-[10px]">
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => handleBoxSearch(b.cajas.numero_caja)}
+                                      className="font-bold text-neutral-800 hover:underline"
+                                    >
+                                      Caja {b.cajas.numero_caja}
+                                    </button>
+                                    {b.cajas.almacen_nombre && (
+                                      <span className="text-neutral-400 font-mono">
+                                        · {b.cajas.almacen_nombre}{b.cajas.seccion_nombre ? ` | ${b.cajas.seccion_nombre}` : ""}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="font-black text-neutral-700 bg-neutral-100 px-2 py-0.5 rounded-lg">{b.cantidad} uds</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {v.boxes.length === 0 && (
+                            <p className="text-[9px] text-neutral-400 italic border-t border-neutral-100 pt-2">Sin asignar a ninguna caja</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
+
+            {/* 5. PRODUCT RESULT DISPLAY */}
+            {!currentBox && boxFilterResults.length === 0 && !currentSection && !currentModelo && currentProduct && (
               <motion.div
                 key={`prod-${currentProduct.product.id_producto}`}
                 initial={{ opacity: 0, y: 15 }}
@@ -1139,8 +1290,8 @@ export default function ConsultaDashboard() {
               </motion.div>
             )}
 
-            {/* 5. PRODUCT FILTER RESULTS GRID DISPLAY */}
-            {!currentBox && boxFilterResults.length === 0 && !currentSection && !currentProduct && prodResults.length > 0 && (
+            {/* 6. PRODUCT FILTER RESULTS GRID DISPLAY */}
+            {!currentBox && boxFilterResults.length === 0 && !currentSection && !currentProduct && !currentModelo && prodResults.length > 0 && (
               <motion.div
                 key="prod-filter-results"
                 initial={{ opacity: 0, y: 15 }}
@@ -1191,8 +1342,8 @@ export default function ConsultaDashboard() {
               </motion.div>
             )}
 
-            {/* 6. UNIFIED EMPTY PLACEHOLDER DISPLAY */}
-            {!currentBox && boxFilterResults.length === 0 && !currentSection && !currentProduct && prodResults.length === 0 && (
+            {/* 7. UNIFIED EMPTY PLACEHOLDER DISPLAY */}
+            {!currentBox && boxFilterResults.length === 0 && !currentSection && !currentProduct && !currentModelo && prodResults.length === 0 && (
               <motion.div
                 key="empty-unified"
                 initial={{ opacity: 0 }}
@@ -1205,7 +1356,7 @@ export default function ConsultaDashboard() {
                 </div>
                 <h3 className="text-xl font-bold text-neutral-800">Esperando Consulta</h3>
                 <p className="text-sm text-neutral-450 max-w-sm mt-2">
-                  Usa la cámara para escanear, escribe en el buscador dinámico (ej. Caja <span className="font-mono text-neutral-700 bg-neutral-150 px-1 rounded">CJ-X</span>, Sección <span className="font-mono text-neutral-700 bg-neutral-150 px-1 rounded">SEC-X</span>, o EAN/SKU de prenda), o aplica los filtros de producto o caja.
+                  Usa la cámara para escanear, escribe en el buscador dinámico (ej. Caja <span className="font-mono text-neutral-700 bg-neutral-150 px-1 rounded">CJ-X</span>, Sección <span className="font-mono text-neutral-700 bg-neutral-150 px-1 rounded">SEC-X</span>, EAN/SKU de prenda, o el <span className="font-mono text-neutral-700 bg-neutral-150 px-1 rounded">modelo</span> para ver todas las tallas de un estilo).
                 </p>
               </motion.div>
             )}
