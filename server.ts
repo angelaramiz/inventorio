@@ -11,6 +11,16 @@ import { EventEmitter } from "events";
 const stockEvents = new EventEmitter();
 stockEvents.setMaxListeners(100);
 
+// Domain-level event bus — broadcasts inventory changes to all SSE clients
+const domainEvents = new EventEmitter();
+domainEvents.setMaxListeners(200);
+
+// Active SSE client count tracker
+let activeSseClients = 0;
+
+// In-memory transfer lock: prevents double-transfer of the same box
+const transferLocks = new Set<number>();
+
 // In-memory logs for manager notifications
 const managerNotifications: any[] = [];
 
@@ -505,6 +515,12 @@ app.delete("/api/cajas/:id", async (req, res) => {
     if (!data || data.length === 0) {
       return res.status(404).json({ error: "La caja no existe" });
     }
+
+    emitDomainEvent("caja:updated", {
+      action: "eliminar",
+      id_caja: id
+    });
+
     res.json({ success: true, message: "Caja eliminada correctamente", deleted: data[0] });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -662,6 +678,13 @@ app.post("/api/cajas/:id/asignar", async (req, res) => {
           if (!remaining || remaining.length === 0) {
             await supabase.from("cajas").update({ estado: 'vacia' }).eq("id_caja", conflicto.id_caja);
           }
+
+          // Emit old box updated (mover original box has been cleared of this product)
+          emitDomainEvent("caja:updated", {
+            action: "desasignar",
+            id_caja: conflicto.id_caja,
+            id_producto: parseInt(id_producto)
+          });
         }
       }
     }
@@ -690,6 +713,14 @@ app.post("/api/cajas/:id/asignar", async (req, res) => {
       await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", id_caja);
     }
     
+    // Emit target box updated
+    emitDomainEvent("caja:updated", {
+      action: "asignar",
+      id_caja: parseInt(id_caja),
+      id_producto: parseInt(id_producto),
+      cantidad: finalCantidad
+    });
+
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -753,6 +784,12 @@ app.put("/api/cajas/:id/productos/:id_producto", async (req, res) => {
       if (!remaining || remaining.length === 0) {
         await supabase.from("cajas").update({ estado: 'vacia' }).eq("id_caja", id_caja);
       }
+
+      emitDomainEvent("caja:updated", {
+        action: "desasignar",
+        id_caja: id_caja,
+        id_producto: id_producto
+      });
     } else {
       // Update the quantity
       const { error: updErr } = await supabase
@@ -767,6 +804,13 @@ app.put("/api/cajas/:id/productos/:id_producto", async (req, res) => {
       if (caja?.estado === 'vacia') {
         await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", id_caja);
       }
+
+      emitDomainEvent("caja:updated", {
+        action: "actualizar-cantidad",
+        id_caja: id_caja,
+        id_producto: id_producto,
+        cantidad: parsedCantidad
+      });
     }
     
     res.json({ success: true });
@@ -976,13 +1020,28 @@ app.delete("/api/productos/:id", async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: "ID de producto inválido" });
     }
-    
+
+    // Fetch SKU before delete so we can broadcast it
+    const { data: prodData } = await supabase
+      .from("productos")
+      .select("sku, ean_13")
+      .eq("id_producto", id)
+      .maybeSingle();
+
     const { error } = await supabase
       .from("productos")
       .delete()
       .eq("id_producto", id);
       
     if (error) throw error;
+
+    // Broadcast deletion so scanners on other devices can react
+    emitDomainEvent("producto:deleted", {
+      id_producto: id,
+      sku: prodData?.sku || null,
+      ean_13: prodData?.ean_13 || null,
+    });
+
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -1764,11 +1823,10 @@ app.post("/api/transferir-producto", async (req, res) => {
   try {
     const supabase = getSupabase();
     const { id_caja_origen, id_caja_destino, id_producto, cantidad } = req.body;
-    
-    if (!id_caja_origen || !id_caja_destino || !id_producto || !cantidad || cantidad <= 0) {
-      return res.status(400).json({ error: "Faltan parámetros requeridos o la cantidad es inválida" });
+
+    if (!id_caja_origen || !id_caja_destino || !id_producto || !cantidad) {
+      return res.status(400).json({ error: "Parámetros incompletos para la transferencia" });
     }
-    
     if (parseInt(id_caja_origen) === parseInt(id_caja_destino)) {
       return res.status(400).json({ error: "La caja de origen y destino no pueden ser la misma" });
     }
@@ -1853,7 +1911,16 @@ app.post("/api/transferir-producto", async (req, res) => {
     if (destBox && destBox.estado === 'vacia') {
       await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", id_caja_destino);
     }
-    
+
+    // Broadcast the transfer event to all connected clients
+    emitDomainEvent("caja:updated", {
+      action: "transferir-producto",
+      id_caja_origen: parseInt(id_caja_origen),
+      id_caja_destino: parseInt(id_caja_destino),
+      id_producto: parseInt(id_producto),
+      cantidad,
+    });
+
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -1874,81 +1941,88 @@ app.post("/api/cajas/transferir-todo", async (req, res) => {
       return res.status(400).json({ error: "La caja de origen y destino no pueden ser la misma" });
     }
 
-    // 1. Fetch all products from origin box
-    const { data: origItems, error: origErr } = await supabase
-      .from("caja_productos")
-      .select("*")
-      .eq("id_caja", id_caja_origen);
+    // ―― Concurrency lock: prevent two simultaneous transfers of the same box ――
+    const origenId = parseInt(id_caja_origen);
+    if (transferLocks.has(origenId)) {
+      return res.status(409).json({
+        error: "Esta caja ya está siendo transferida por otro operario. Intenta de nuevo en unos segundos."
+      });
+    }
+    transferLocks.add(origenId);
 
-    if (origErr) throw origErr;
+    try {
+      // 1. Fetch all products from origin box
+      const { data: origItems, error: origErr } = await supabase
+        .from("caja_productos")
+        .select("*")
+        .eq("id_caja", id_caja_origen);
 
-    if (!origItems || origItems.length === 0) {
-      // If there are no products to transfer, just update states and return success
+      if (origErr) throw origErr;
+
+      if (!origItems || origItems.length === 0) {
+        await supabase.from("cajas").update({ estado: 'vacia' }).eq("id_caja", id_caja_origen);
+        const { data: destBox } = await supabase
+          .from("cajas").select("estado").eq("id_caja", id_caja_destino).single();
+        if (destBox && destBox.estado === 'vacia') {
+          await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", id_caja_destino);
+        }
+        return res.json({ success: true, message: "No había productos que transferir" });
+      }
+
+      // 2. Perform transfer for each product
+      for (const item of origItems) {
+        const id_producto = item.id_producto;
+        const cantidad = item.cantidad;
+
+        const { data: destItem, error: destErr } = await supabase
+          .from("caja_productos")
+          .select("*")
+          .eq("id_caja", id_caja_destino)
+          .eq("id_producto", id_producto)
+          .maybeSingle();
+
+        if (destErr) throw destErr;
+
+        if (destItem) {
+          const { error: destUpdErr } = await supabase
+            .from("caja_productos")
+            .update({ cantidad: destItem.cantidad + cantidad })
+            .eq("id_caja", id_caja_destino)
+            .eq("id_producto", id_producto);
+          if (destUpdErr) throw destUpdErr;
+        } else {
+          const { error: insErr } = await supabase
+            .from("caja_productos")
+            .insert([{ id_caja: id_caja_destino, id_producto, cantidad }]);
+          if (insErr) throw insErr;
+        }
+      }
+
+      // 3. Delete all relations from origin box
+      const { error: delErr } = await supabase
+        .from("caja_productos").delete().eq("id_caja", id_caja_origen);
+      if (delErr) throw delErr;
+
+      // 4. Update states
       await supabase.from("cajas").update({ estado: 'vacia' }).eq("id_caja", id_caja_origen);
-      
       const { data: destBox } = await supabase
-        .from("cajas")
-        .select("estado")
-        .eq("id_caja", id_caja_destino)
-        .single();
+        .from("cajas").select("estado").eq("id_caja", id_caja_destino).single();
       if (destBox && destBox.estado === 'vacia') {
         await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", id_caja_destino);
       }
-      return res.json({ success: true, message: "No había productos que transferir" });
+
+      // 5. Broadcast to all clients
+      emitDomainEvent("caja:updated", {
+        action: "transferir-todo",
+        id_caja_origen: origenId,
+        id_caja_destino: parseInt(id_caja_destino),
+        total_productos: origItems.length,
+      });
+
+      res.json({ success: true });
+    } finally {
+      transferLocks.delete(origenId); // Always release lock
     }
-
-    // 2. Perform transfer for each product
-    for (const item of origItems) {
-      const id_producto = item.id_producto;
-      const cantidad = item.cantidad;
-
-      // Check if product already exists in destination box
-      const { data: destItem, error: destErr } = await supabase
-        .from("caja_productos")
-        .select("*")
-        .eq("id_caja", id_caja_destino)
-        .eq("id_producto", id_producto)
-        .maybeSingle();
-
-      if (destErr) throw destErr;
-
-      if (destItem) {
-        // Update destination quantity
-        const { error: destUpdErr } = await supabase
-          .from("caja_productos")
-          .update({ cantidad: destItem.cantidad + cantidad })
-          .eq("id_caja", id_caja_destino)
-          .eq("id_producto", id_producto);
-        if (destUpdErr) throw destUpdErr;
-      } else {
-        // Insert new relation at destination
-        const { error: insErr } = await supabase
-          .from("caja_productos")
-          .insert([{ id_caja: id_caja_destino, id_producto, cantidad }]);
-        if (insErr) throw insErr;
-      }
-    }
-
-    // 3. Delete all relations from origin box
-    const { error: delErr } = await supabase
-      .from("caja_productos")
-      .delete()
-      .eq("id_caja", id_caja_origen);
-    if (delErr) throw delErr;
-
-    // 4. Update states of both boxes
-    await supabase.from("cajas").update({ estado: 'vacia' }).eq("id_caja", id_caja_origen);
-
-    const { data: destBox } = await supabase
-      .from("cajas")
-      .select("estado")
-      .eq("id_caja", id_caja_destino)
-      .single();
-    if (destBox && destBox.estado === 'vacia') {
-      await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", id_caja_destino);
-    }
-
-    res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -2150,6 +2224,40 @@ app.get("/api/hierarchy/:id/stock-live", async (req, res) => {
     clearInterval(intervalId);
   });
 });
+
+// ── GET /api/events/stream ─ Global SSE bus for domain events ─────────────────
+// Clients connect once and receive all relevant inventory events in real time.
+app.get("/api/events/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+  res.flushHeaders();
+
+  activeSseClients++;
+  // Send initial handshake
+  res.write(`data: ${JSON.stringify({ type: "connected", clients: activeSseClients })}\n\n`);
+
+  // Forward any domain event to this client
+  const onEvent = (event: object) => {
+    try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch (_) {}
+  };
+  domainEvents.on("event", onEvent);
+
+  // Keepalive ping every 20s
+  const ping = setInterval(() => { try { res.write(": ping\n\n"); } catch (_) {} }, 20000);
+
+  req.on("close", () => {
+    activeSseClients = Math.max(0, activeSseClients - 1);
+    domainEvents.off("event", onEvent);
+    clearInterval(ping);
+  });
+});
+
+// Helper — emit a typed domain event to all SSE clients
+const emitDomainEvent = (type: string, payload: object = {}) => {
+  domainEvents.emit("event", { type, ts: Date.now(), ...payload });
+};
 
 
 // --- FASE 2: GESTIÓN DE CAJAS CJ-X Y POS ---

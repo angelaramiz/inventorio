@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import ProductQuickRegister from "./ProductQuickRegister";
 import { Caja, Producto } from "../types";
 import { Input } from "@/components/ui/input";
+import { useRealtimeSync } from "../hooks/useRealtimeSync";
 
 export default function ScannerView() {
   const [activeMode, setActiveMode] = useState<"caja" | "nivel" | "seccion" | "almacen">("caja");
@@ -93,6 +94,43 @@ export default function ScannerView() {
       console.error(e);
     }
   };
+
+  useRealtimeSync((event) => {
+    if (event.type === "producto:deleted") {
+      const deletedId = event.id_producto;
+      if (verificationResult?.exists && verificationResult.product?.id_producto === deletedId) {
+        toast.error(`El producto ${event.sku || ""} ha sido eliminado por otro usuario.`);
+        setVerificationResult(null);
+        setScannedResult(null);
+        setShowConflictDialog(false);
+        setShowQtyModal(false);
+        startScanner();
+      }
+    } else if (event.type === "caja:updated") {
+      fetchCajas();
+
+      const boxId = event.id_caja || event.id_caja_origen || event.id_caja_destino;
+      if (boxId && activeCaja && activeCaja.id_caja === boxId) {
+        if (event.action === "eliminar") {
+          toast.warning("La caja activa ha sido eliminada por otro usuario.");
+          setActiveCaja(null);
+          setResolvedTargetCaja(null);
+          localStorage.removeItem("activeCaja");
+        } else {
+          fetch(`/api/cajas`)
+            .then(res => res.json())
+            .then((data: Caja[]) => {
+              const current = data.find(c => c.id_caja === activeCaja.id_caja);
+              if (current) {
+                setActiveCaja(current);
+                setResolvedTargetCaja(current);
+                localStorage.setItem("activeCaja", JSON.stringify(current));
+              }
+            }).catch(console.error);
+        }
+      }
+    }
+  }, ["producto:deleted", "caja:updated"]);
 
   useEffect(() => {
     // Cargar la caja seleccionada del localStorage si existe

@@ -7,6 +7,7 @@ import { Caja, CajaProducto } from "../types";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useRealtimeSync } from "../hooks/useRealtimeSync";
 
 interface Props {
   caja: Caja;
@@ -370,6 +371,20 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
       setIsSavingTags(false);
     }
   };
+
+  useRealtimeSync((event) => {
+    if (event.type === "caja:updated") {
+      const boxId = event.id_caja || event.id_caja_origen || event.id_caja_destino;
+      if (boxId && boxId === caja.id_caja) {
+        if (event.action === "eliminar") {
+          toast.warning("Esta caja ha sido eliminada por otro usuario.");
+          onClose();
+        } else {
+          fetchProductos(false);
+        }
+      }
+    }
+  }, ["caja:updated"]);
 
   useEffect(() => {
     fetchProductos();

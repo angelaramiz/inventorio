@@ -13,6 +13,7 @@ import ImageLightbox from "./components/ImageLightbox";
 import POSView from "./components/POSView";
 import InventoryControlView from "./components/InventoryControlView";
 import AlphaDashboardView from "./components/AlphaDashboardView";
+import SyncStatusBadge from "./components/SyncStatusBadge";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
@@ -98,44 +99,47 @@ export default function App() {
             <span className="font-extrabold tracking-tight">INVENTARIO <span className="text-neutral-400 font-medium text-sm ml-1">| ALPHA</span></span>
           </div>
           
-          <nav className="hidden xl:flex items-center gap-1 bg-neutral-100 p-1 rounded-xl">
-            <TabButton 
-              active={activeTab === "dashboard"} 
-              onClick={() => setActiveTab("dashboard")}
-              icon={<TrendingUp size={15} />}
-              label="Dashboard"
-            />
-            <TabButton 
-              active={activeTab === "scanner"} 
-              onClick={() => setActiveTab("scanner")}
-              icon={<Scan size={15} />}
-              label="Escanear"
-            />
-            <TabButton 
-              active={activeTab === "inventory"} 
-              onClick={() => setActiveTab("inventory")}
-              icon={<Package size={15} />}
-              label="Productos"
-            />
-            <TabButton 
-              active={activeTab === "boxes"} 
-              onClick={() => setActiveTab("boxes")}
-              icon={<LayoutDashboard size={15} />}
-              label="Contenedores"
-            />
-            <TabButton 
-              active={activeTab === "concepts"} 
-              onClick={() => setActiveTab("concepts")}
-              icon={<Tag size={15} />}
-              label="Conceptos"
-            />
-            <TabButton 
-              active={activeTab === "almacen"} 
-              onClick={() => setActiveTab("almacen")}
-              icon={<Warehouse size={15} />}
-              label="Almacén"
-            />
-          </nav>
+          <div className="flex items-center gap-4">
+            <SyncStatusBadge />
+            <nav className="hidden xl:flex items-center gap-1 bg-neutral-100 p-1 rounded-xl">
+              <TabButton 
+                active={activeTab === "dashboard"} 
+                onClick={() => setActiveTab("dashboard")}
+                icon={<TrendingUp size={15} />}
+                label="Dashboard"
+              />
+              <TabButton 
+                active={activeTab === "scanner"} 
+                onClick={() => setActiveTab("scanner")}
+                icon={<Scan size={15} />}
+                label="Escanear"
+              />
+              <TabButton 
+                active={activeTab === "inventory"} 
+                onClick={() => setActiveTab("inventory")}
+                icon={<Package size={15} />}
+                label="Productos"
+              />
+              <TabButton 
+                active={activeTab === "boxes"} 
+                onClick={() => setActiveTab("boxes")}
+                icon={<LayoutDashboard size={15} />}
+                label="Contenedores"
+              />
+              <TabButton 
+                active={activeTab === "concepts"} 
+                onClick={() => setActiveTab("concepts")}
+                icon={<Tag size={15} />}
+                label="Conceptos"
+              />
+              <TabButton 
+                active={activeTab === "almacen"} 
+                onClick={() => setActiveTab("almacen")}
+                icon={<Warehouse size={15} />}
+                label="Almacén"
+              />
+            </nav>
+          </div>
         </div>
       </header>
 
@@ -289,16 +293,17 @@ function AppHeader({ subtitle, actionLabel, actionUrl }: { subtitle: string, act
           </span>
         </div>
         
-        {actionLabel && actionUrl && (
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4">
+          <SyncStatusBadge />
+          {actionLabel && actionUrl && (
             <button 
               onClick={() => window.location.href = actionUrl}
               className="text-xs font-bold text-neutral-600 hover:text-neutral-900 px-3 py-1.5 rounded-lg hover:bg-neutral-100 transition-all border border-neutral-200"
             >
               {actionLabel}
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </header>
   );
