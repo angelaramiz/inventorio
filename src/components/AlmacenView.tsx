@@ -424,6 +424,21 @@ export default function AlmacenView() {
   // Build a printable window with high-res barcode images rendered on canvas.
   const generatePrintableWindow = async (items: Array<{codigo:string,nombre?:string,almacen?:string}>) => {
     try {
+      toast.info("Generando archivo PDF para descarga...");
+      
+      // Load html2pdf if not already loaded
+      const html2pdf = await new Promise<any>((resolve, reject) => {
+        if ((window as any).html2pdf) {
+          resolve((window as any).html2pdf);
+          return;
+        }
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+        script.onload = () => resolve((window as any).html2pdf);
+        script.onerror = () => reject(new Error("No se pudo cargar el motor de PDF"));
+        document.head.appendChild(script);
+      });
+
       // Create canvases and render barcodes at 300 DPI target for crisp PDF output
       const dpi = 300;
       // Label size: 3.6cm x 1.8cm -> convert to inches
@@ -487,76 +502,49 @@ export default function AlmacenView() {
         images.push(dataUrl);
       }
 
-      // Always use a hidden iframe to prevent popup-blocking and blank tab issues on mobile/PWA
-      const oldIframe = document.getElementById('print-fallback-iframe');
-      if (oldIframe) {
-        try { oldIframe.remove(); } catch (e) { /* ignore */ }
-      }
+      // Create a temporary container off-screen to render labels for snapshotting
+      const tempDiv = document.createElement("div");
+      tempDiv.id = "temp-pdf-barcode-container";
+      tempDiv.style.position = "fixed";
+      tempDiv.style.left = "-9999px";
+      tempDiv.style.top = "-9999px";
+      tempDiv.style.width = "200mm"; // width of a letter page (~215.9mm) minus small safe margins
+      tempDiv.style.background = "#ffffff";
+      tempDiv.style.padding = "4mm";
+      tempDiv.style.boxSizing = "border-box";
 
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0px';
-      iframe.style.height = '0px';
-      iframe.style.border = '0';
-      iframe.id = 'print-fallback-iframe';
-      document.body.appendChild(iframe);
-
-      const printWindow = iframe.contentWindow;
-      if (!printWindow) {
-        toast.error('No se pudo inicializar el canal de impresión');
-        return;
-      }
-
-      const doc = printWindow.document;
-      const style = `
-        <style>
-          @page { size: letter; margin: 4mm; }
-          body{ font-family: Arial, Helvetica, sans-serif; margin:0; padding:3mm; }
-          /* Force 4 labels per row: each label 3.6cm width + minimal gap */
-          .sheet{ width:100%; display:flex; flex-wrap:wrap; justify-content:flex-start; align-items:flex-start; }
-          .label{ width: 3.6cm; height: 1.8cm; display:inline-block; margin: 0.05cm; box-sizing:border-box; border: 1.5px solid #000000; border-radius: 4px; padding: 2px; }
-          .label img{ width: 100%; height: 100%; object-fit:contain; display:block; }
-        </style>
+      // Render labels exactly as styled before
+      tempDiv.innerHTML = `
+        <div class="sheet" style="width: 100%; display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: flex-start; gap: 0.1cm; background: #ffffff;">
+          ${images.map(img => `
+            <div class="label" style="width: 3.6cm; height: 1.8cm; display: inline-block; box-sizing: border-box; border: 1.5px solid #000000; border-radius: 4px; padding: 2px; background: #ffffff; margin: 0.05cm;">
+              <img src="${img}" style="width: 100%; height: 100%; object-fit: contain; display: block;" />
+            </div>
+          `).join('')}
+        </div>
       `;
+      document.body.appendChild(tempDiv);
 
-      const bodyHtml = `
-        <!doctype html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          ${style}
-        </head>
-        <body>
-          <div class="sheet">
-            ${images.map(img => `<div class="label"><img src="${img}" /></div>`).join('')}
-          </div>
-        </body>
-        </html>
-      `;
+      const opt = {
+        margin:       4,
+        filename:     `etiquetas-seccion-${new Date().toISOString().slice(0,10)}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+        jsPDF:        { unit: 'mm', format: 'letter', orientation: 'portrait' },
+        pagebreak:    { mode: ['css', 'legacy'] }
+      };
 
-      doc.open();
-      doc.write(bodyHtml);
-      doc.close();
+      await html2pdf().set(opt).from(tempDiv).save();
 
-      // Give window a moment to render
+      // Clean up DOM element
       setTimeout(() => {
-        try {
-          printWindow.focus();
-          printWindow.print();
-          // clean up iframe after printing
-          setTimeout(() => {
-            try { iframe.remove(); } catch (e) { /* ignore */ }
-          }, 3000);
-        } catch (err) {
-          console.error('Error printing window:', err);
-        }
-      }, 500);
+        try { tempDiv.remove(); } catch (e) { /* ignore */ }
+      }, 1000);
+
+      toast.success("PDF de etiquetas descargado");
 
     } catch (err) {
-      console.error('Error generating printable window:', err);
+      console.error('Error generating printable PDF:', err);
       toast.error('Error al generar el PDF de etiquetas');
     }
   };
