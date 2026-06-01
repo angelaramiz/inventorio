@@ -593,7 +593,7 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl w-[95vw] sm:max-w-3xl gap-0 h-[90vh] md:h-[80vh] flex flex-col p-0 border-none rounded-2xl overflow-hidden shadow-2xl">
+      <DialogContent showCloseButton={false} className="max-w-3xl w-[95vw] sm:max-w-3xl gap-0 h-[90vh] md:h-[80vh] flex flex-col p-0 border-none rounded-2xl overflow-hidden shadow-2xl">
         <DialogHeader className="bg-neutral-900 text-white p-5 shrink-0 relative">
           <button 
             type="button" 

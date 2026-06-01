@@ -114,7 +114,7 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-md sm:max-w-md gap-0 w-[95vw] rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl flex flex-col max-h-[90vh]">
+      <DialogContent showCloseButton={false} className="max-w-md sm:max-w-md gap-0 w-[95vw] rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl flex flex-col max-h-[90vh]">
         <DialogHeader className="bg-neutral-950 text-white p-6 shrink-0 relative">
           <button 
             type="button" 
