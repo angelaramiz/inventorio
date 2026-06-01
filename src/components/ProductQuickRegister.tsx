@@ -426,7 +426,15 @@ export default function ProductQuickRegister({
   return (
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl sm:max-w-2xl gap-0 w-[95vw] rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl flex flex-col max-h-[90vh]">
-        <DialogHeader className="bg-neutral-950 text-white p-6 shrink-0 flex flex-row items-center justify-between">
+        <DialogHeader className="bg-neutral-955 text-white p-6 shrink-0 flex flex-row items-center justify-between relative">
+          <button 
+            type="button" 
+            onClick={onClose} 
+            className="absolute top-4 right-4 text-white/70 hover:text-white hover:bg-white/10 p-2 rounded-xl transition-colors z-50"
+            title="Cerrar"
+          >
+            <X size={18} />
+          </button>
           <div>
             <DialogTitle className="text-xl font-black flex items-center gap-3 uppercase tracking-tight">
               <div className="bg-amber-400 p-1.5 rounded-lg text-black">

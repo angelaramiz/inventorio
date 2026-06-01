@@ -516,8 +516,8 @@ export default function AlmacenView() {
           body{ font-family: Arial, Helvetica, sans-serif; margin:0; padding:3mm; }
           /* Force 4 labels per row: each label 3.6cm width + minimal gap */
           .sheet{ width:100%; display:flex; flex-wrap:wrap; justify-content:flex-start; align-items:flex-start; }
-          .label{ width: 3.6cm; height: 1.8cm; display:inline-block; margin: 0.05cm; box-sizing:border-box; }
-          .label img{ width: 3.6cm; height: 1.8cm; object-fit:contain; display:block; }
+          .label{ width: 3.6cm; height: 1.8cm; display:inline-block; margin: 0.05cm; box-sizing:border-box; border: 1.5px solid #000000; border-radius: 4px; padding: 2px; }
+          .label img{ width: 100%; height: 100%; object-fit:contain; display:block; }
         </style>
       `;
 

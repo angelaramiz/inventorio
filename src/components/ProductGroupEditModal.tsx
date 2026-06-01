@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Save, Loader2, Image as ImageIcon, Trash2, Layers, Search, CheckCircle, AlertCircle, Edit, Scan } from "lucide-react";
+import { Save, Loader2, Image as ImageIcon, Trash2, Layers, Search, CheckCircle, AlertCircle, Edit, Scan, X } from "lucide-react";
 import { toast } from "sonner";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Producto, Temporada, TipoProducto } from "../types";
@@ -332,7 +332,15 @@ export default function ProductGroupEditModal({ uniqueModels, onClose, onSuccess
   return (
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl sm:max-w-2xl gap-0 w-[95vw] rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl flex flex-col h-[85vh] max-h-[85vh]">
-        <DialogHeader className="bg-neutral-950 text-white p-6 shrink-0">
+        <DialogHeader className="bg-neutral-955 text-white p-6 shrink-0 relative">
+          <button 
+            type="button" 
+            onClick={onClose} 
+            className="absolute top-4 right-4 text-white/70 hover:text-white hover:bg-white/10 p-2 rounded-xl transition-colors z-50"
+            title="Cerrar"
+          >
+            <X size={18} />
+          </button>
           <DialogTitle className="text-xl font-black flex items-center gap-3 uppercase tracking-tight">
             <div className="bg-amber-400 p-1.5 rounded-lg text-black">
               <Layers size={18} />

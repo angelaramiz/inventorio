@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Save, Loader2 } from "lucide-react";
+import { Save, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Producto, Temporada, TipoProducto } from "../types";
 import AsyncImageUploader from "./AsyncImageUploader";
@@ -115,7 +115,15 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
   return (
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="max-w-md sm:max-w-md gap-0 w-[95vw] rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl flex flex-col max-h-[90vh]">
-        <DialogHeader className="bg-neutral-950 text-white p-6 shrink-0">
+        <DialogHeader className="bg-neutral-950 text-white p-6 shrink-0 relative">
+          <button 
+            type="button" 
+            onClick={onClose} 
+            className="absolute top-4 right-4 text-white/70 hover:text-white hover:bg-white/10 p-2 rounded-xl transition-colors z-50"
+            title="Cerrar"
+          >
+            <X size={18} />
+          </button>
           <DialogTitle className="text-xl font-black flex items-center gap-3 uppercase tracking-tight">
             <div className="bg-amber-400 p-1.5 rounded-lg text-black">
               <Save size={18} />

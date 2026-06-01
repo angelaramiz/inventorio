@@ -594,7 +594,15 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
   return (
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl w-[95vw] sm:max-w-3xl gap-0 h-[90vh] md:h-[80vh] flex flex-col p-0 border-none rounded-2xl overflow-hidden shadow-2xl">
-        <DialogHeader className="bg-neutral-900 text-white p-5 shrink-0">
+        <DialogHeader className="bg-neutral-900 text-white p-5 shrink-0 relative">
+          <button 
+            type="button" 
+            onClick={onClose} 
+            className="absolute top-4 right-4 text-white/70 hover:text-white hover:bg-white/10 p-2 rounded-xl transition-colors z-50"
+            title="Cerrar"
+          >
+            <X size={18} />
+          </button>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="bg-white/10 p-2.5 rounded-xl shrink-0">
