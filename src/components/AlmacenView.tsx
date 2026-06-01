@@ -423,105 +423,19 @@ export default function AlmacenView() {
 
   // Build a printable window with high-res barcode images rendered on canvas.
   const generatePrintableWindow = async (items: Array<{codigo:string,nombre?:string,almacen?:string}>) => {
-    const isDark = document.documentElement.classList.contains("dark");
-    const originalStyles = document.documentElement.getAttribute("style");
-
-    // Backup original window / defaultView getComputedStyle methods
-    const originalGetComputedStyle = window.getComputedStyle;
-    const originalDefaultViewGetComputedStyle = document.defaultView?.getComputedStyle;
-
     try {
       toast.info("Generando archivo PDF para descarga...");
 
-      // 1. Remove dark class if active
-      if (isDark) {
-        document.documentElement.classList.remove("dark");
-      }
-
-      // 2. Set HEX color variables on documentElement to override oklch
-      const hexVariables: Record<string, string> = {
-        "--background": "#ffffff",
-        "--foreground": "#252525",
-        "--card": "#ffffff",
-        "--card-foreground": "#252525",
-        "--popover": "#ffffff",
-        "--popover-foreground": "#252525",
-        "--primary": "#333333",
-        "--primary-foreground": "#fafafa",
-        "--secondary": "#f5f5f5",
-        "--secondary-foreground": "#333333",
-        "--muted": "#f5f5f5",
-        "--muted-foreground": "#8e8e8e",
-        "--accent": "#f5f5f5",
-        "--accent-foreground": "#333333",
-        "--destructive": "#dc2626",
-        "--border": "#ebebeb",
-        "--input": "#ebebeb",
-        "--ring": "#b5b5b5",
-        "--chart-1": "#dfdfdf",
-        "--chart-2": "#8e8e8e",
-        "--chart-3": "#707070",
-        "--chart-4": "#5e5e5e",
-        "--chart-5": "#444444",
-        "--sidebar": "#fafafa",
-        "--sidebar-foreground": "#252525",
-        "--sidebar-primary": "#333333",
-        "--sidebar-primary-foreground": "#fafafa",
-        "--sidebar-accent": "#f5f5f5",
-        "--sidebar-accent-foreground": "#333333",
-        "--sidebar-border": "#ebebeb",
-        "--sidebar-ring": "#b5b5b5",
-      };
-
-      Object.entries(hexVariables).forEach(([key, val]) => {
-        document.documentElement.style.setProperty(key, val, "important");
-      });
-
-      // 3. Override window / defaultView getComputedStyle methods using a Proxy
-      const customGetComputedStyle = function(el: Element, pseudoElt?: string) {
-        const style = originalGetComputedStyle(el, pseudoElt);
-        return new Proxy(style, {
-          get(target, prop) {
-            const hasOklchOrOklabOrMix = (v: any) => 
-              typeof v === 'string' && (v.includes('oklch') || v.includes('oklab') || v.includes('color-mix') || v.includes('color(') || v.includes('light-dark('));
-
-            if (prop === "getPropertyValue") {
-              return function(propertyName: string) {
-                const value = target.getPropertyValue(propertyName);
-                if (hasOklchOrOklabOrMix(value)) {
-                  return colorToRgb(value);
-                }
-                return value;
-              };
-            }
-            
-            const value = Reflect.get(target, prop);
-            if (hasOklchOrOklabOrMix(value)) {
-              return colorToRgb(value);
-            }
-            if (typeof value === 'function') {
-              return value.bind(target);
-            }
-            return value;
-          }
-        }) as any;
-      };
-
-      window.getComputedStyle = customGetComputedStyle;
-      if (document.defaultView) {
-        document.defaultView.getComputedStyle = customGetComputedStyle;
-      }
-
-      // Load html2pdf if not already loaded
-      const html2pdf = await new Promise<any>((resolve, reject) => {
-        if ((window as any).html2pdf) {
-          resolve((window as any).html2pdf);
+      // Load jsPDF from CDN
+      const jsPDFClass = await new Promise<any>((resolve, reject) => {
+        if ((window as any).jspdf) {
+          resolve((window as any).jspdf.jsPDF);
           return;
         }
         const script = document.createElement("script");
-        script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-        script.onload = () => resolve((window as any).html2pdf);
-        script.onerror = () => reject(new Error("No se pudo cargar el motor de PDF"));
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+        script.onload = () => resolve((window as any).jspdf.jsPDF);
+        script.onerror = () => reject(new Error("No se pudo cargar el motor jsPDF"));
         document.head.appendChild(script);
       });
 
@@ -588,68 +502,49 @@ export default function AlmacenView() {
         images.push(dataUrl);
       }
 
-      // Create a temporary container off-screen to render labels for snapshotting
-      const tempDiv = document.createElement("div");
-      tempDiv.id = "temp-pdf-barcode-container";
-      tempDiv.style.position = "absolute";
-      tempDiv.style.left = "0px";
-      tempDiv.style.top = "0px";
-      tempDiv.style.zIndex = "-9999";
-      tempDiv.style.width = "200mm"; // width of a letter page (~215.9mm) minus small safe margins
-      tempDiv.style.background = "#ffffff";
-      tempDiv.style.padding = "4mm";
-      tempDiv.style.boxSizing = "border-box";
+      // Initialize jsPDF document (Letter size, units in mm)
+      const pdf = new jsPDFClass({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'letter'
+      });
 
-      // Render labels exactly as styled before
-      tempDiv.innerHTML = `
-        <div class="sheet" style="width: 100%; display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: flex-start; gap: 0.1cm; background: #ffffff;">
-          ${images.map(img => `
-            <div class="label" style="width: 3.6cm; height: 1.8cm; display: inline-block; box-sizing: border-box; border: 1.5px solid #000000; border-radius: 4px; padding: 2px; background: #ffffff; margin: 0.05cm;">
-              <img src="${img}" style="width: 100%; height: 100%; object-fit: contain; display: block;" />
-            </div>
-          `).join('')}
-        </div>
-      `;
-      document.body.appendChild(tempDiv);
+      const labelW = 36;
+      const labelH = 18;
+      const cols = 4;
+      const gapX = 6;
+      const gapY = 4;
+      const startX = (215.9 - (cols * labelW + (cols - 1) * gapX)) / 2; // ~26.95mm
+      const startY = 15;
+      const labelsPerPage = 44; // 11 rows of 4 labels
 
-      const opt = {
-        margin:       4,
-        filename:     `etiquetas-seccion-${new Date().toISOString().slice(0,10)}.pdf`,
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
-        jsPDF:        { unit: 'mm', format: 'letter', orientation: 'portrait' },
-        pagebreak:    { mode: ['css', 'legacy'] }
-      };
+      images.forEach((imgData, index) => {
+        if (index > 0 && index % labelsPerPage === 0) {
+          pdf.addPage();
+        }
 
-      await html2pdf().set(opt).from(tempDiv).save();
+        const pageIndex = index % labelsPerPage;
+        const col = pageIndex % cols;
+        const row = Math.floor(pageIndex / cols);
 
-      // Clean up DOM element
-      setTimeout(() => {
-        try { tempDiv.remove(); } catch (e) { /* ignore */ }
-      }, 1000);
+        const x = startX + col * (labelW + gapX);
+        const y = startY + row * (labelH + gapY);
 
+        // Draw label border (as requested)
+        pdf.setDrawColor(0, 0, 0);
+        pdf.setLineWidth(0.3);
+        pdf.roundedRect(x, y, labelW, labelH, 1, 1, 'S');
+
+        // Render high-res barcode image centered in the label border (0.5mm padding)
+        pdf.addImage(imgData, 'PNG', x + 0.5, y + 0.5, labelW - 1, labelH - 1);
+      });
+
+      pdf.save(`etiquetas-seccion-${new Date().toISOString().slice(0,10)}.pdf`);
       toast.success("PDF de etiquetas descargado");
 
     } catch (err) {
       console.error('Error generating printable PDF:', err);
       toast.error('Error al generar el PDF de etiquetas');
-    } finally {
-      // Restore original getComputedStyle methods
-      window.getComputedStyle = originalGetComputedStyle;
-      if (document.defaultView && originalDefaultViewGetComputedStyle) {
-        document.defaultView.getComputedStyle = originalDefaultViewGetComputedStyle;
-      }
-
-      // Restore dark mode if it was active
-      if (isDark) {
-        document.documentElement.classList.add("dark");
-      }
-      // Restore inline styles
-      if (originalStyles) {
-        document.documentElement.setAttribute("style", originalStyles);
-      } else {
-        document.documentElement.removeAttribute("style");
-      }
     }
   };
 
