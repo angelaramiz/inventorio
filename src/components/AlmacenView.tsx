@@ -591,9 +591,10 @@ export default function AlmacenView() {
       // Create a temporary container off-screen to render labels for snapshotting
       const tempDiv = document.createElement("div");
       tempDiv.id = "temp-pdf-barcode-container";
-      tempDiv.style.position = "fixed";
-      tempDiv.style.left = "-9999px";
-      tempDiv.style.top = "-9999px";
+      tempDiv.style.position = "absolute";
+      tempDiv.style.left = "0px";
+      tempDiv.style.top = "0px";
+      tempDiv.style.zIndex = "-9999";
       tempDiv.style.width = "200mm"; // width of a letter page (~215.9mm) minus small safe margins
       tempDiv.style.background = "#ffffff";
       tempDiv.style.padding = "4mm";
