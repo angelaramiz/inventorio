@@ -487,25 +487,25 @@ export default function AlmacenView() {
         images.push(dataUrl);
       }
 
-      // Open a new window and write printable HTML with images sized in inches
-      let printWindow = window.open('', '_blank', 'noopener,noreferrer');
-      const useIframeFallback = !printWindow;
-      if (useIframeFallback) {
-        // Create a hidden iframe fallback when popups are blocked
-        const iframe = document.createElement('iframe');
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0px';
-        iframe.style.height = '0px';
-        iframe.style.border = '0';
-        iframe.id = 'print-fallback-iframe';
-        document.body.appendChild(iframe);
-        printWindow = iframe.contentWindow as Window | null;
+      // Always use a hidden iframe to prevent popup-blocking and blank tab issues on mobile/PWA
+      const oldIframe = document.getElementById('print-fallback-iframe');
+      if (oldIframe) {
+        try { oldIframe.remove(); } catch (e) { /* ignore */ }
       }
 
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0px';
+      iframe.style.height = '0px';
+      iframe.style.border = '0';
+      iframe.id = 'print-fallback-iframe';
+      document.body.appendChild(iframe);
+
+      const printWindow = iframe.contentWindow;
       if (!printWindow) {
-        toast.error('No se pudo abrir la ventana de impresión (bloqueador?)');
+        toast.error('No se pudo inicializar el canal de impresión');
         return;
       }
 
@@ -544,20 +544,12 @@ export default function AlmacenView() {
       // Give window a moment to render
       setTimeout(() => {
         try {
-          printWindow && printWindow.focus && printWindow.focus();
-          // If we used the iframe fallback, call print on the iframe's window
-          if (useIframeFallback) {
-            const iframeEl = document.getElementById('print-fallback-iframe') as HTMLIFrameElement | null;
-            if (iframeEl && iframeEl.contentWindow) {
-              iframeEl.contentWindow.print();
-              // clean up iframe after printing
-              setTimeout(() => {
-                try { iframeEl.remove(); } catch (e) { /* ignore */ }
-              }, 1000);
-            }
-          } else {
-            printWindow.print();
-          }
+          printWindow.focus();
+          printWindow.print();
+          // clean up iframe after printing
+          setTimeout(() => {
+            try { iframe.remove(); } catch (e) { /* ignore */ }
+          }, 3000);
         } catch (err) {
           console.error('Error printing window:', err);
         }
@@ -4336,7 +4328,7 @@ export default function AlmacenView() {
                 </Button>
                 <Button onClick={handlePrintSingleLabel} className="flex-1 rounded-xl h-10 bg-neutral-950 hover:bg-neutral-850 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md">
                   <Printer size={14} />
-                  Imprimir Etiqueta
+                  Descargar / Imprimir
                 </Button>
               </div>
             </div>
@@ -4350,10 +4342,10 @@ export default function AlmacenView() {
           <DialogHeader>
             <DialogTitle className="text-base md:text-lg font-black uppercase text-neutral-950 flex items-center gap-2">
               <Printer size={20} className="text-neutral-700" />
-              Imprimir Lote de Secciones
+              Descargar / Imprimir Lote de Secciones
             </DialogTitle>
             <DialogDescription className="text-[10px] md:text-xs text-neutral-500">
-              Filtra y selecciona las secciones a imprimir. Edita el código alfanumérico Code_128 de cada etiqueta.
+              Filtra y selecciona las secciones a descargar/imprimir. Edita el código alfanumérico Code_128 de cada etiqueta.
             </DialogDescription>
           </DialogHeader>
 
@@ -4510,7 +4502,7 @@ export default function AlmacenView() {
                 className="flex-1 rounded-xl h-10 bg-neutral-950 hover:bg-neutral-850 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
               >
                 <Printer size={14} />
-                Imprimir ({batchPrintSelectedIds.size})
+                Descargar / Imprimir ({batchPrintSelectedIds.size})
               </Button>
             </div>
           </div>
