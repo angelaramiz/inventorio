@@ -423,9 +423,95 @@ export default function AlmacenView() {
 
   // Build a printable window with high-res barcode images rendered on canvas.
   const generatePrintableWindow = async (items: Array<{codigo:string,nombre?:string,almacen?:string}>) => {
+    const isDark = document.documentElement.classList.contains("dark");
+    const originalStyles = document.documentElement.getAttribute("style");
+
+    // Backup original window / defaultView getComputedStyle methods
+    const originalGetComputedStyle = window.getComputedStyle;
+    const originalDefaultViewGetComputedStyle = document.defaultView?.getComputedStyle;
+
     try {
       toast.info("Generando archivo PDF para descarga...");
-      
+
+      // 1. Remove dark class if active
+      if (isDark) {
+        document.documentElement.classList.remove("dark");
+      }
+
+      // 2. Set HEX color variables on documentElement to override oklch
+      const hexVariables: Record<string, string> = {
+        "--background": "#ffffff",
+        "--foreground": "#252525",
+        "--card": "#ffffff",
+        "--card-foreground": "#252525",
+        "--popover": "#ffffff",
+        "--popover-foreground": "#252525",
+        "--primary": "#333333",
+        "--primary-foreground": "#fafafa",
+        "--secondary": "#f5f5f5",
+        "--secondary-foreground": "#333333",
+        "--muted": "#f5f5f5",
+        "--muted-foreground": "#8e8e8e",
+        "--accent": "#f5f5f5",
+        "--accent-foreground": "#333333",
+        "--destructive": "#dc2626",
+        "--border": "#ebebeb",
+        "--input": "#ebebeb",
+        "--ring": "#b5b5b5",
+        "--chart-1": "#dfdfdf",
+        "--chart-2": "#8e8e8e",
+        "--chart-3": "#707070",
+        "--chart-4": "#5e5e5e",
+        "--chart-5": "#444444",
+        "--sidebar": "#fafafa",
+        "--sidebar-foreground": "#252525",
+        "--sidebar-primary": "#333333",
+        "--sidebar-primary-foreground": "#fafafa",
+        "--sidebar-accent": "#f5f5f5",
+        "--sidebar-accent-foreground": "#333333",
+        "--sidebar-border": "#ebebeb",
+        "--sidebar-ring": "#b5b5b5",
+      };
+
+      Object.entries(hexVariables).forEach(([key, val]) => {
+        document.documentElement.style.setProperty(key, val, "important");
+      });
+
+      // 3. Override window / defaultView getComputedStyle methods using a Proxy
+      const customGetComputedStyle = function(el: Element, pseudoElt?: string) {
+        const style = originalGetComputedStyle(el, pseudoElt);
+        return new Proxy(style, {
+          get(target, prop) {
+            const hasOklchOrOklabOrMix = (v: any) => 
+              typeof v === 'string' && (v.includes('oklch') || v.includes('oklab') || v.includes('color-mix') || v.includes('color(') || v.includes('light-dark('));
+
+            if (prop === "getPropertyValue") {
+              return function(propertyName: string) {
+                const value = target.getPropertyValue(propertyName);
+                if (hasOklchOrOklabOrMix(value)) {
+                  return colorToRgb(value);
+                }
+                return value;
+              };
+            }
+            
+            const value = Reflect.get(target, prop);
+            if (hasOklchOrOklabOrMix(value)) {
+              return colorToRgb(value);
+            }
+            if (typeof value === 'function') {
+              return value.bind(target);
+            }
+            return value;
+          }
+        }) as any;
+      };
+
+      window.getComputedStyle = customGetComputedStyle;
+      if (document.defaultView) {
+        document.defaultView.getComputedStyle = customGetComputedStyle;
+      }
+
       // Load html2pdf if not already loaded
       const html2pdf = await new Promise<any>((resolve, reject) => {
         if ((window as any).html2pdf) {
@@ -546,6 +632,23 @@ export default function AlmacenView() {
     } catch (err) {
       console.error('Error generating printable PDF:', err);
       toast.error('Error al generar el PDF de etiquetas');
+    } finally {
+      // Restore original getComputedStyle methods
+      window.getComputedStyle = originalGetComputedStyle;
+      if (document.defaultView && originalDefaultViewGetComputedStyle) {
+        document.defaultView.getComputedStyle = originalDefaultViewGetComputedStyle;
+      }
+
+      // Restore dark mode if it was active
+      if (isDark) {
+        document.documentElement.classList.add("dark");
+      }
+      // Restore inline styles
+      if (originalStyles) {
+        document.documentElement.setAttribute("style", originalStyles);
+      } else {
+        document.documentElement.removeAttribute("style");
+      }
     }
   };
 
