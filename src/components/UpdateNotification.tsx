@@ -23,7 +23,7 @@ export default function UpdateNotification() {
   if (!needRefresh) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 max-w-sm w-full bg-white/80 backdrop-blur-md border border-neutral-200/80 rounded-3xl p-5 shadow-2xl animate-in fade-in slide-in-from-bottom-5 duration-350 flex flex-col gap-3">
+    <div className="fixed bottom-24 right-4 md:bottom-6 md:right-6 z-[100] max-w-sm w-[calc(100%-2rem)] md:w-full bg-white/90 backdrop-blur-md border border-neutral-200/80 rounded-3xl p-5 shadow-2xl animate-in fade-in slide-in-from-bottom-5 duration-350 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex gap-3">
           <div className="bg-neutral-900 text-white p-2.5 rounded-2xl flex items-center justify-center shrink-0">
