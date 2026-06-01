@@ -6,9 +6,13 @@ import { offlineFetch } from './utils/pwaDb';
 
 // Intercept all API write requests globally for offline support
 const originalFetch = window.fetch;
-window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+window.fetch = async function (input: RequestInfo | URL, init?: RequestInit & { bypassPwa?: boolean }): Promise<Response> {
   const url = typeof input === "string" ? input : (input instanceof URL ? input.href : (input as Request).url);
   const method = init?.method || "GET";
+
+  if (init?.bypassPwa) {
+    return originalFetch(input, init);
+  }
 
   if (url.includes("/api/") && ["POST", "PUT", "DELETE"].includes(method.toUpperCase())) {
     return offlineFetch(url, init || {});

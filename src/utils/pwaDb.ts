@@ -127,8 +127,9 @@ export async function syncOfflineQueue() {
       const resp = await fetch(req.url, {
         method: req.method,
         headers: { "Content-Type": "application/json" },
-        body: req.body ? JSON.stringify(req.body) : undefined
-      });
+        body: req.body ? JSON.stringify(req.body) : undefined,
+        bypassPwa: true
+      } as any);
       if (resp.ok) {
         if (req.id !== undefined) {
           await clearQueueItem(req.id);
@@ -187,7 +188,7 @@ export async function offlineFetch(url: string, options: RequestInit): Promise<R
   }
 
   try {
-    const resp = await fetch(url, options);
+    const resp = await fetch(url, { ...options, bypassPwa: true } as any);
     return resp;
   } catch (err) {
     let bodyObj = null;
