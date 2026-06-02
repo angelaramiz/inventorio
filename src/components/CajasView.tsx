@@ -39,6 +39,7 @@ export default function CajasView() {
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [selectedCaja, setSelectedCaja] = useState<Caja | null>(null);
+  const [openedViaQuickFind, setOpenedViaQuickFind] = useState(false);
   const [activeCajaId, setActiveCajaId] = useState<number | null>(null);
 
   // CJ-X containers state
@@ -65,6 +66,10 @@ export default function CajasView() {
   const [transferOriginId, setTransferOriginId] = useState("");
   const [transferDestId, setTransferDestId] = useState("");
   const [transferLoading, setTransferLoading] = useState(false);
+  const openCajaModal = (caja: Caja, viaQuickFind = false) => {
+    setOpenedViaQuickFind(viaQuickFind);
+    setSelectedCaja(caja);
+  };
 
   useEffect(() => {
     fetchCajas();
@@ -158,7 +163,7 @@ export default function CajasView() {
 
         if (match) {
           toast.success(`Contenedor encontrado: ${match.numero_caja}`);
-          setSelectedCaja(match);
+          openCajaModal(match, true);
         } else {
           // Try fetching fresh in case the local list is stale
           const resp = await fetch("/api/cajas");
@@ -174,7 +179,7 @@ export default function CajasView() {
             if (freshMatch) {
               setCajas(freshList);
               toast.success(`Contenedor encontrado: ${freshMatch.numero_caja}`);
-              setSelectedCaja(freshMatch);
+              openCajaModal(freshMatch, true);
             } else {
               toast.error(`No se encontró "${rawQuery.trim()}" en la pestaña activa`);
             }
@@ -257,7 +262,7 @@ export default function CajasView() {
     // Find matching virtual box
     const matchingCaja = cajas.find((c: any) => c.id_zona_nivel === nivel.id_zona_nivel);
     if (matchingCaja) {
-      setSelectedCaja(matchingCaja);
+      openCajaModal(matchingCaja, false);
       return;
     }
 
@@ -275,7 +280,7 @@ export default function CajasView() {
       if (resp.ok) {
         const newBox = await resp.json();
         setCajas((prev) => [...prev, newBox]);
-        setSelectedCaja(newBox);
+        openCajaModal(newBox, false);
       } else {
         const err = await resp.json();
         toast.error(`No se pudo abrir el detalle del nivel: ${err.error || 'Error desconocido'}`);
@@ -661,7 +666,7 @@ export default function CajasView() {
                     variant="ghost" 
                     size="icon" 
                     className="rounded-full bg-white/85 backdrop-blur-sm h-8 w-8 hover:bg-neutral-900 hover:text-white border"
-                    onClick={() => setSelectedCaja(caja)}
+                    onClick={() => openCajaModal(caja, false)}
                     title="Detalles de Caja"
                   >
                     <ExternalLink size={14} />
@@ -899,8 +904,10 @@ export default function CajasView() {
       {selectedCaja && (
         <CajaDetailsModal 
           caja={selectedCaja} 
+          openedViaQuickFind={openedViaQuickFind}
           onClose={() => {
             setSelectedCaja(null);
+            setOpenedViaQuickFind(false);
             fetchCajas();
             fetchCjxContainers();
           }} 
@@ -1198,7 +1205,7 @@ export default function CajasView() {
                   estado: node.estado as any,
                   fecha_creacion: node.created_at
                 };
-                setSelectedCaja(cajaObj);
+                openCajaModal(cajaObj, false);
               }}
             >
               <ExternalLink size={14} />

@@ -13,9 +13,10 @@ import { fetchCatalogWithCache } from "../utils/pwaDb";
 interface Props {
   caja: Caja;
   onClose: () => void;
+  openedViaQuickFind?: boolean;
 }
 
-export default function CajaDetailsModal({ caja, onClose }: Props) {
+export default function CajaDetailsModal({ caja, onClose, openedViaQuickFind }: Props) {
   const [productos, setProductos] = useState<CajaProducto[]>([]);
   const [loading, setLoading] = useState(true);
   const [skuInput, setSkuInput] = useState("");
@@ -621,6 +622,20 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
             </div>
             
             <div className="flex items-center gap-2 flex-wrap sm:mr-8">
+              {openedViaQuickFind && (
+                <Button
+                  onClick={() => {
+                    localStorage.setItem("activeCaja", JSON.stringify(caja));
+                    toast.success(`Caja ${caja.numero_caja} seleccionada para escaneo`);
+                    window.dispatchEvent(new CustomEvent("switch-tab", { detail: "scanner" }));
+                    onClose();
+                  }}
+                  className="h-8 text-[10px] sm:text-xs rounded-xl font-bold bg-neutral-800 hover:bg-neutral-700 text-white flex items-center gap-1.5 px-3 py-1 border border-neutral-750"
+                >
+                  <Barcode size={12} className="text-amber-400" />
+                  Seleccionar Escáner
+                </Button>
+              )}
               {totalUnidades > 0 && (
                 <Button
                   onClick={startTransferAll}

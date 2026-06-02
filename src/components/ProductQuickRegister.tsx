@@ -88,6 +88,21 @@ export default function ProductQuickRegister({
           ...prev,
           [sku.trim().toLowerCase()]: exists
         }));
+
+        if (exists && data[0]) {
+          const product = data[0];
+          setFormData(prev => ({
+            ...prev,
+            modelo_grupo: product.modelo_grupo || product.sku.split("-")[0] || prev.modelo_grupo || "",
+            marca_sub: product.marca_sub || prev.marca_sub,
+            tipo: product.tipo || prev.tipo,
+            temporada: product.temporada || prev.temporada,
+          }));
+          if (product.has_foto && !photo) {
+            setPhoto(`/api/productos/${product.id_producto}/image`);
+          }
+          toast.info(`Información del producto heredada de la base de datos (${product.sku})`);
+        }
       }
     } catch (e) {
       console.error("Error validating SKU:", e);
