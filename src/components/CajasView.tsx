@@ -92,7 +92,7 @@ export default function CajasView() {
   const startScanner = async () => {
     await stopScanner();
     setIsScannerActive(true);
-    await new Promise(r => setTimeout(r, 60));
+    await new Promise(r => setTimeout(r, 300));
     const el = document.getElementById("cajas-quick-reader");
     if (!el) { setIsScannerActive(false); return; }
     try {
@@ -102,7 +102,7 @@ export default function CajasView() {
         { facingMode: "environment" },
         {
           fps: 10,
-          qrbox: { width: 280, height: 130 },
+          qrbox: { width: 250, height: 150 },
           formatsToSupport: [
             Html5QrcodeSupportedFormats.EAN_13,
             Html5QrcodeSupportedFormats.CODE_128,
@@ -575,14 +575,7 @@ export default function CajasView() {
       {/* ── Quick-Find Bar ──────────────────────────────────────── */}
       <div className="bg-white border border-neutral-100 rounded-2xl shadow-sm p-3">
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          {/* Inline scanner viewport */}
-          {isScannerActive && (
-            <div className="relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-700 flex-shrink-0 w-40 h-16">
-              <div id="cajas-quick-reader" className="w-full h-full" />
-            </div>
-          )}
-          {/* Invisible anchor so html5-qrcode can find the element even when hidden */}
-          {!isScannerActive && <div id="cajas-quick-reader" className="hidden" />}
+          {/* Scanner is now rendered inside a Dialog modal */}
 
           {/* Search input */}
           <div className="relative flex-1 min-w-0">
@@ -1150,6 +1143,35 @@ export default function CajasView() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Escáner de Búsqueda Rápida */}
+      <Dialog open={isScannerActive} onOpenChange={(open) => { if (!open) stopScanner(); }}>
+        <DialogContent className="max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black flex items-center gap-2">
+              <Scan className="text-neutral-900" size={20} />
+              Escanear Etiqueta de Contenedor
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-xs text-neutral-500 font-medium">
+              Apunta la cámara al código de barra o QR del contenedor para buscarlo y seleccionarlo.
+            </p>
+            <div className="relative rounded-2xl overflow-hidden bg-neutral-100 border min-h-[250px] flex items-center justify-center animate-in fade-in zoom-in-95 duration-200">
+              <div id="cajas-quick-reader" className="w-full h-full"></div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button 
+                variant="outline" 
+                onClick={stopScanner} 
+                className="w-full rounded-xl h-11 font-bold text-xs"
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -2639,7 +2639,7 @@ app.get("/api/dashboard/stats", async (req, res) => {
           )
         `)
         .order("created_at", { ascending: false })
-        .limit(15);
+        .limit(50);
         
       if (!exitsErr && exits) {
         recentExits = exits.map((ex: any) => {

@@ -44,6 +44,7 @@ export default function AlphaDashboardView() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [exitFilter, setExitFilter] = useState<"todos" | "ventas" | "transferencias">("todos");
 
   const fetchStats = async (showToast = false) => {
     if (showToast) setRefreshing(true);
@@ -280,63 +281,107 @@ export default function AlphaDashboardView() {
               Últimas salidas físicas registradas por venta o transferencia entre tiendas
             </CardDescription>
           </CardHeader>
-          <CardContent className="p-0">
-            {!stats?.recentExits || stats.recentExits.length === 0 ? (
-              <div className="p-12 text-center text-neutral-400 flex flex-col items-center justify-center gap-2">
-                <ShoppingCart size={36} className="opacity-30" />
-                <p className="font-semibold text-sm">No se han registrado salidas en el sistema</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-neutral-100 max-h-[500px] overflow-y-auto custom-scrollbar">
-                {stats.recentExits.map((exit) => (
-                  <div key={exit.id} className="p-4 md:p-5 hover:bg-neutral-50/50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-black text-neutral-800">
-                          Registro #{exit.id}
-                        </span>
-                        <Badge 
-                          variant="secondary"
-                          className={`text-[9px] uppercase font-black px-2 py-0.5 rounded-full ${
-                            exit.tipo_salida === "venta en pos"
-                              ? "bg-amber-100 text-amber-800 border border-amber-200"
-                              : exit.tipo_salida === "transferencia a pdv"
-                              ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                              : "bg-indigo-100 text-indigo-800 border border-indigo-200"
-                          }`}
-                        >
-                          {exit.tipo_salida}
+          <CardContent className="p-0 flex flex-col">
+            {/* Sub-pestañas de filtrado */}
+            <div className="flex bg-neutral-150/60 p-1 rounded-xl w-fit m-4 mb-2 border border-neutral-200 text-xs gap-1 self-start">
+              <button
+                type="button"
+                onClick={() => setExitFilter("todos")}
+                className={`px-3 py-1.5 font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                  exitFilter === "todos" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-900"
+                }`}
+              >
+                Todas ({stats?.recentExits.length || 0})
+              </button>
+              <button
+                type="button"
+                onClick={() => setExitFilter("ventas")}
+                className={`px-3 py-1.5 font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                  exitFilter === "ventas" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-900"
+                }`}
+              >
+                Ventas POS ({stats?.recentExits.filter(e => e.tipo_salida === "venta en pos").length || 0})
+              </button>
+              <button
+                type="button"
+                onClick={() => setExitFilter("transferencias")}
+                className={`px-3 py-1.5 font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                  exitFilter === "transferencias" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-900"
+                }`}
+              >
+                Transferencias ({stats?.recentExits.filter(e => e.tipo_salida.startsWith("transferencia")).length || 0})
+              </button>
+            </div>
+
+            {(() => {
+              const filteredExits = stats?.recentExits.filter(exit => {
+                if (exitFilter === "todos") return true;
+                if (exitFilter === "ventas") return exit.tipo_salida === "venta en pos";
+                if (exitFilter === "transferencias") return exit.tipo_salida.startsWith("transferencia");
+                return true;
+              }) || [];
+
+              if (filteredExits.length === 0) {
+                return (
+                  <div className="p-12 text-center text-neutral-400 flex flex-col items-center justify-center gap-2">
+                    <ShoppingCart size={36} className="opacity-30" />
+                    <p className="font-semibold text-sm">No se encontraron salidas en esta categoría</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="divide-y divide-neutral-100 max-h-[500px] overflow-y-auto custom-scrollbar">
+                  {filteredExits.map((exit) => (
+                    <div key={exit.id} className="p-4 md:p-5 hover:bg-neutral-50/50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-black text-neutral-800">
+                            Registro #{exit.id}
+                          </span>
+                          <Badge 
+                            variant="secondary"
+                            className={`text-[9px] uppercase font-black px-2 py-0.5 rounded-full ${
+                              exit.tipo_salida === "venta en pos"
+                                ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                : exit.tipo_salida === "transferencia a pdv"
+                                ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                : "bg-indigo-100 text-indigo-800 border border-indigo-200"
+                            }`}
+                          >
+                            {exit.tipo_salida}
+                          </Badge>
+                        </div>
+                        
+                        <p className="text-[11px] text-neutral-500 font-bold">
+                          Operador: {exit.vendedor_id} • Fecha: {formatDate(exit.created_at)}
+                        </p>
+
+                        <div className="flex gap-1.5 flex-wrap pt-1">
+                          {exit.detalles.slice(0, 3).map((det, dIdx) => (
+                            <span key={dIdx} className="inline-flex items-center text-[10px] font-bold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-md">
+                              {det.sku} ({det.cantidad}u)
+                            </span>
+                          ))}
+                          {exit.detalles.length > 3 && (
+                            <span className="inline-flex items-center text-[10px] font-bold text-neutral-400 bg-neutral-50 px-2 py-0.5 rounded-md border border-dashed">
+                              +{exit.detalles.length - 3} más
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center border-t sm:border-t-0 pt-2 sm:pt-0 shrink-0">
+                        <p className="text-[10px] text-neutral-400 font-bold sm:hidden">Total unidades:</p>
+                        <Badge className="bg-neutral-900 text-white font-mono font-black text-xs px-3 py-1 rounded-xl">
+                          {exit.total_unidades} {exit.total_unidades === 1 ? "PRENDA" : "PRENDAS"}
                         </Badge>
                       </div>
-                      
-                      <p className="text-[11px] text-neutral-500 font-bold">
-                        Operador: {exit.vendedor_id} • Fecha: {formatDate(exit.created_at)}
-                      </p>
-
-                      <div className="flex gap-1.5 flex-wrap pt-1">
-                        {exit.detalles.slice(0, 3).map((det, dIdx) => (
-                          <span key={dIdx} className="inline-flex items-center text-[10px] font-bold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-md">
-                            {det.sku} ({det.cantidad}u)
-                          </span>
-                        ))}
-                        {exit.detalles.length > 3 && (
-                          <span className="inline-flex items-center text-[10px] font-bold text-neutral-400 bg-neutral-50 px-2 py-0.5 rounded-md border border-dashed">
-                            +{exit.detalles.length - 3} más
-                          </span>
-                        )}
-                      </div>
                     </div>
-
-                    <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center border-t sm:border-t-0 pt-2 sm:pt-0 shrink-0">
-                      <p className="text-[10px] text-neutral-400 font-bold sm:hidden">Total unidades:</p>
-                      <Badge className="bg-neutral-900 text-white font-mono font-black text-xs px-3 py-1 rounded-xl">
-                        {exit.total_unidades} {exit.total_unidades === 1 ? "PRENDA" : "PRENDAS"}
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
 
