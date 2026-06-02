@@ -76,6 +76,7 @@ export default function ProductQuickRegister({
   const rowScannerRef = useRef<Html5Qrcode | null>(null);
 
   const [existingSkus, setExistingSkus] = useState<Record<string, boolean>>({});
+  const [existingModel, setExistingModel] = useState<boolean>(false);
 
   const checkSkuExists = async (sku: string) => {
     if (!sku || !sku.trim()) return;
@@ -106,6 +107,37 @@ export default function ProductQuickRegister({
       }
     } catch (e) {
       console.error("Error validating SKU:", e);
+    }
+  };
+
+  const checkModelExists = async (model: string) => {
+    if (!model || !model.trim()) {
+      setExistingModel(false);
+      return;
+    }
+    try {
+      const resp = await fetch(`/api/productos?modelo_grupo=${encodeURIComponent(model.trim())}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        const exists = Array.isArray(data) && data.length > 0;
+        setExistingModel(exists);
+
+        if (exists && data[0]) {
+          const product = data[0];
+          setFormData(prev => ({
+            ...prev,
+            marca_sub: product.marca_sub || prev.marca_sub,
+            tipo: product.tipo || prev.tipo,
+            temporada: product.temporada || prev.temporada,
+          }));
+          if (product.has_foto && !photo) {
+            setPhoto(`/api/productos/${product.id_producto}/image`);
+          }
+          toast.info(`Información heredada del modelo existente (${model.trim().toUpperCase()})`);
+        }
+      }
+    } catch (e) {
+      console.error("Error validating model:", e);
     }
   };
 
@@ -554,13 +586,21 @@ export default function ProductQuickRegister({
             {isGroup ? (
               <div className="space-y-1 md:col-span-2">
                 <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Modelo de Grupo (Requerido) *</label>
-                <Input 
-                  value={formData.modelo_grupo} 
-                  onChange={e => setFormData({...formData, modelo_grupo: e.target.value})}
-                  placeholder="Ej: M12345, ANA-PLAYERA"
-                  className="rounded-xl bg-white border-neutral-200 uppercase font-bold"
-                  required
-                />
+                <div className="relative">
+                  <Input 
+                    value={formData.modelo_grupo} 
+                    onChange={e => setFormData({...formData, modelo_grupo: e.target.value})}
+                    onBlur={() => checkModelExists(formData.modelo_grupo)}
+                    placeholder="Ej: M12345, ANA-PLAYERA"
+                    className={`rounded-xl bg-white border-neutral-200 uppercase font-bold ${existingModel ? "pr-8 border-amber-500 bg-amber-50/20 text-amber-900" : ""}`}
+                    required
+                  />
+                  {existingModel && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-600 flex items-center" title="Este modelo de grupo ya existe en la base de datos. Al guardar, las nuevas variaciones se agregarán a este grupo.">
+                      <AlertCircle size={15} />
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <>
@@ -576,12 +616,20 @@ export default function ProductQuickRegister({
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Modelo de Grupo (Opcional)</label>
-                  <Input 
-                    value={formData.modelo_grupo} 
-                    onChange={e => setFormData({...formData, modelo_grupo: e.target.value})}
-                    placeholder="sin modelo"
-                    className="rounded-xl bg-white border-neutral-200"
-                  />
+                  <div className="relative">
+                    <Input 
+                      value={formData.modelo_grupo} 
+                      onChange={e => setFormData({...formData, modelo_grupo: e.target.value})}
+                      onBlur={() => checkModelExists(formData.modelo_grupo)}
+                      placeholder="sin modelo"
+                      className={`rounded-xl bg-white border-neutral-200 uppercase ${existingModel ? "pr-8 border-amber-500 bg-amber-50/20 text-amber-900" : ""}`}
+                    />
+                    {existingModel && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-600 flex items-center" title="Este modelo de grupo ya existe en la base de datos.">
+                        <AlertCircle size={15} />
+                      </div>
+                    )}
+                  </div>
                 </div>
               </>
             )}
