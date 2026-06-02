@@ -707,82 +707,88 @@ export default function ProductQuickRegister({
 
               <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
                 {variaciones.map((vari, idx) => (
-                  <div key={idx} className="flex gap-2 items-center bg-white p-3 rounded-xl border shadow-sm">
-                    {/* Scan Trigger */}
-                    <Button 
-                      type="button" 
-                      onClick={() => startRowScanner(idx)} 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-9 w-9 bg-neutral-50 hover:bg-neutral-900 hover:text-white border shrink-0 rounded-lg"
-                      title="Escanear SKU para esta fila"
-                    >
-                      <Scan size={14} />
-                    </Button>
+                  <div key={idx} className="flex flex-col sm:flex-row gap-2 bg-white p-3 rounded-xl border shadow-sm sm:items-center">
+                    {/* Fila 1 (Mobile) / Izquierda (Desktop): Scan + SKU */}
+                    <div className="flex flex-1 items-center gap-2 w-full">
+                      {/* Scan Trigger */}
+                      <Button 
+                        type="button" 
+                        onClick={() => startRowScanner(idx)} 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-9 w-9 bg-neutral-50 hover:bg-neutral-900 hover:text-white border shrink-0 rounded-lg"
+                        title="Escanear SKU para esta fila"
+                      >
+                        <Scan size={14} />
+                      </Button>
 
-                    {/* SKU input */}
-                    <div className="flex-1 min-w-0 relative">
-                      <Input 
-                        placeholder="SKU o Código de Barras"
-                        value={vari.sku}
-                        onChange={e => updateVariationField(idx, "sku", e.target.value)}
-                        onBlur={() => checkSkuExists(vari.sku)}
-                        className={`h-9 rounded-lg text-xs font-semibold ${vari.sku && existingSkus[vari.sku.trim().toLowerCase()] ? "pr-8 border-amber-500 bg-amber-50/20 text-amber-900" : ""}`}
-                      />
-                      {vari.sku && existingSkus[vari.sku.trim().toLowerCase()] && (
-                        <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-600 flex items-center" title="Este producto ya está registrado en el catálogo. Al guardar, solo se asociará la cantidad asignada al contenedor.">
-                          <AlertCircle size={15} />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Talla select */}
-                    <div className="w-24 shrink-0">
-                      {tallaTipo === "letra" ? (
-                        <select
-                          value={vari.talla}
-                          onChange={e => updateVariationField(idx, "talla", e.target.value)}
-                          className="w-full h-9 rounded-lg border text-xs px-2 bg-neutral-50 font-semibold outline-none"
-                        >
-                          {TALLAS_LETRA.map(t => (
-                            <option key={t} value={t}>{t}</option>
-                          ))}
-                        </select>
-                      ) : (
+                      {/* SKU input */}
+                      <div className="flex-1 min-w-0 relative">
                         <Input 
-                          placeholder="Talla"
-                          value={vari.talla === "SinTalla" ? "" : vari.talla}
-                          onChange={e => updateVariationField(idx, "talla", e.target.value.toUpperCase())}
-                          className="w-full h-9 rounded-lg text-xs font-semibold"
+                          placeholder="SKU o Código de Barras"
+                          value={vari.sku}
+                          onChange={e => updateVariationField(idx, "sku", e.target.value)}
+                          onBlur={() => checkSkuExists(vari.sku)}
+                          className={`h-9 rounded-lg text-xs font-semibold ${vari.sku && existingSkus[vari.sku.trim().toLowerCase()] ? "pr-8 border-amber-500 bg-amber-50/20 text-amber-900" : ""}`}
                         />
-                      )}
+                        {vari.sku && existingSkus[vari.sku.trim().toLowerCase()] && (
+                          <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-600 flex items-center" title="Este producto ya está registrado en el catálogo. Al guardar, solo se asociará la cantidad asignada al contenedor.">
+                            <AlertCircle size={15} />
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Cantidad input */}
-                    <div className="w-16 shrink-0">
-                      <Input 
-                        type="number"
-                        min={1}
-                        value={vari.cantidad}
-                        onChange={e => {
-                          const val = e.target.value;
-                          updateVariationField(idx, "cantidad", val === "" ? "" : (parseInt(val) || 1));
-                        }}
-                        className="h-9 rounded-lg text-xs text-center font-bold"
-                      />
-                    </div>
+                    {/* Fila 2 (Mobile) / Derecha (Desktop): Talla + Cantidad + Eliminar */}
+                    <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                      {/* Talla select */}
+                      <div className="w-0 flex-1 sm:w-24 sm:flex-initial shrink-0">
+                        {tallaTipo === "letra" ? (
+                          <select
+                            value={vari.talla}
+                            onChange={e => updateVariationField(idx, "talla", e.target.value)}
+                            className="w-full h-9 rounded-lg border text-xs px-2 bg-neutral-50 font-semibold outline-none"
+                          >
+                            {TALLAS_LETRA.map(t => (
+                              <option key={t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input 
+                            placeholder="Talla"
+                            value={vari.talla === "SinTalla" ? "" : vari.talla}
+                            onChange={e => updateVariationField(idx, "talla", e.target.value.toUpperCase())}
+                            className="w-full h-9 rounded-lg text-xs font-semibold"
+                          />
+                        )}
+                      </div>
 
-                    {/* Delete button */}
-                    <Button 
-                      type="button"
-                      onClick={() => removeVariation(idx)}
-                      disabled={variaciones.length <= 1}
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-9 w-9 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg shrink-0 disabled:opacity-30"
-                    >
-                      <Trash2 size={14} />
-                    </Button>
+                      {/* Cantidad input */}
+                      <div className="w-16 shrink-0">
+                        <Input 
+                          type="number"
+                          min={1}
+                          value={vari.cantidad}
+                          onChange={e => {
+                            const val = e.target.value;
+                            updateVariationField(idx, "cantidad", val === "" ? "" : (parseInt(val) || 1));
+                          }}
+                          className="h-9 rounded-lg text-xs text-center font-bold"
+                        />
+                      </div>
+
+                      {/* Delete button */}
+                      <Button 
+                        type="button"
+                        onClick={() => removeVariation(idx)}
+                        disabled={variaciones.length <= 1}
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-9 w-9 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg shrink-0 disabled:opacity-30"
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
