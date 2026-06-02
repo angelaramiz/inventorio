@@ -332,10 +332,6 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
 
   const handleUpdateTagField = async (field: string, value: string) => {
     const updatedTags = { ...boxTags, [field]: value };
-    // If tipo_producto changes to something other than calzado, clear the brand tag to "todos"
-    if (field === "tipo_producto" && value !== "calzado") {
-      updatedTags.marca = "todos";
-    }
     // If tipo_producto changes to something other than ropa, clear the tipo_producto_exacto tag to "todos"
     if (field === "tipo_producto" && value !== "ropa") {
       updatedTags.tipo_producto_exacto = "todos";
@@ -822,24 +818,23 @@ export default function CajaDetailsModal({ caja, onClose }: Props) {
                     </select>
                   </div>
 
-                  {/* Marca de Calzado Tag (Conditional) */}
-                  {boxTags.tipo_producto === "calzado" && (
-                    <div className="space-y-1.5 pt-2 border-t border-neutral-100">
-                      <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
-                        👟 Marca de Calzado
-                      </h4>
-                      <select
-                        value={boxTags.marca || "todos"}
-                        disabled={isSavingTags}
-                        onChange={(e) => handleUpdateTagField("marca", e.target.value)}
-                        className="rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full disabled:opacity-55"
-                      >
-                        <option value="todos">TODAS / AMBAS</option>
-                        <option value="Marciano">MARCIANO (M)</option>
-                        <option value="Guess">GUESS (G)</option>
-                      </select>
-                    </div>
-                  )}
+                  {/* Marca Tag */}
+                  <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                    <h4 className="font-bold text-neutral-800 flex items-center gap-1.5 text-xs">
+                      🏷️ Marca Asignada
+                    </h4>
+                    <select
+                      value={boxTags.marca || "todos"}
+                      disabled={isSavingTags}
+                      onChange={(e) => handleUpdateTagField("marca", e.target.value)}
+                      className="rounded-xl h-9 px-2.5 bg-white border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 w-full disabled:opacity-55"
+                    >
+                      <option value="todos">TODAS / AMBAS</option>
+                      <option value="Marciano">MARCIANO (M)</option>
+                      <option value="Guess">GUESS (G)</option>
+                      <option value="GuessEco">GUESS ECO (GE)</option>
+                    </select>
+                  </div>
                 </div>
               )}
             </div>

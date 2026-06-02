@@ -39,7 +39,9 @@ export default function ScannerView() {
   const preventReactivateRef = useRef(false);
 
   // Modo continuo
-  const [continuousScan, setContinuousScan] = useState(false);
+  const [continuousScan, setContinuousScan] = useState(() => {
+    return localStorage.getItem("continuousScan") === "true";
+  });
   const [lastScannedCode, setLastScannedCode] = useState<string | null>(null);
   const [lastScannedTime, setLastScannedTime] = useState<number>(0);
   
@@ -48,6 +50,88 @@ export default function ScannerView() {
   const [showPostRegisterModal, setShowPostRegisterModal] = useState(false);
   const [qtyModalValue, setQtyModalValue] = useState<number | "">(1);
   const [registeredProduct, setRegisteredProduct] = useState<Producto | null>(null);
+
+  // Estados para escaneo rápido de caja
+  const [isBoxScannerOpen, setIsBoxScannerOpen] = useState(false);
+  const [detectedCaja, setDetectedCaja] = useState<Caja | null>(null);
+  const [showBoxSelectionDialog, setShowBoxSelectionDialog] = useState(false);
+  const boxScannerRef = useRef<Html5Qrcode | null>(null);
+
+  const startBoxScanner = async () => {
+    try {
+      setTimeout(async () => {
+        let html5QrCode = boxScannerRef.current;
+        if (!html5QrCode) {
+          html5QrCode = new Html5Qrcode("box-scanner-reader");
+          boxScannerRef.current = html5QrCode;
+        }
+
+        if (html5QrCode.isScanning) {
+          await html5QrCode.stop();
+        }
+
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 150 },
+            formatsToSupport: [
+              Html5QrcodeSupportedFormats.EAN_13,
+              Html5QrcodeSupportedFormats.UPC_A,
+              Html5QrcodeSupportedFormats.UPC_E,
+              Html5QrcodeSupportedFormats.CODE_128
+            ]
+          },
+          onBoxScanSuccess,
+          () => {}
+        );
+      }, 300);
+    } catch (err) {
+      console.error("Error starting box scanner", err);
+      toast.error("No se pudo abrir la cámara para escanear caja");
+    }
+  };
+
+  const stopBoxScanner = async () => {
+    if (boxScannerRef.current) {
+      try {
+        if (boxScannerRef.current.isScanning) {
+          await boxScannerRef.current.stop();
+        }
+        boxScannerRef.current.clear();
+        boxScannerRef.current = null;
+      } catch (err) {
+        console.error("Failed to stop box scanner", err);
+      }
+    }
+  };
+
+  const onBoxScanSuccess = async (decodedText: string) => {
+    await stopBoxScanner();
+    setIsBoxScannerOpen(false);
+
+    const code = decodedText.trim();
+    try {
+      const resp = await fetch("/api/cajas");
+      if (resp.ok) {
+        const allCajas: Caja[] = await resp.json();
+        const found = allCajas.find(
+          c => c.numero_caja.toUpperCase() === code.toUpperCase() || 
+               String(c.id_caja) === code
+        );
+        if (found) {
+          setDetectedCaja(found);
+          setShowBoxSelectionDialog(true);
+        } else {
+          toast.error(`No se encontró ninguna caja con el código "${code}"`);
+        }
+      } else {
+        toast.error("Error al obtener listado de cajas");
+      }
+    } catch (e) {
+      toast.error("Error de red al buscar caja");
+    }
+  };
 
   const handleManualSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -179,6 +263,17 @@ export default function ScannerView() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (isBoxScannerOpen) {
+      startBoxScanner();
+    } else {
+      stopBoxScanner();
+    }
+    return () => {
+      stopBoxScanner();
+    };
+  }, [isBoxScannerOpen]);
 
   useEffect(() => {
     if (selectedNivelId && niveles.length > 0 && sections.length > 0) {
@@ -617,7 +712,7 @@ export default function ScannerView() {
   const handleConflictClose = (open: boolean) => {
     if (!open) {
       setShowConflictDialog(false);
-      if (!preventReactivateRef.current) {
+      if (!preventReactivateRef.current && continuousScan) {
         startScanner();
       }
       preventReactivateRef.current = false;
@@ -643,7 +738,11 @@ export default function ScannerView() {
         setShowConflictDialog(false);
         fetchCajas(); // Refresca cajas
         preventReactivateRef.current = false;
-        startScanner();
+        if (continuousScan) {
+          startScanner();
+        } else {
+          setIsScannerActive(false);
+        }
       } else {
         const errorData = await resp.json();
         toast.error(errorData.error || "Error al asignar");
@@ -780,6 +879,19 @@ export default function ScannerView() {
         </div>
 
         {/* Dynamic Selectors depending on Active Mode */}
+        {activeMode === "caja" && (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsBoxScannerOpen(true)}
+              className="rounded-2xl h-11 px-4 border-neutral-200 hover:bg-neutral-50 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-neutral-700 focus:ring-1 focus:ring-neutral-900 transition-all shadow-sm"
+            >
+              <Scan size={16} className="text-neutral-500" />
+              Escanear Caja
+            </Button>
+          </div>
+        )}
         {activeMode === "nivel" && (
           <div className="w-full sm:w-80 animate-in fade-in duration-200">
             {!filterAlmacenId ? (
@@ -1099,7 +1211,11 @@ export default function ScannerView() {
                     <Button 
                       size="icon" 
                       variant={continuousScan ? "default" : "outline"}
-                      onClick={() => setContinuousScan(prev => !prev)}
+                      onClick={() => setContinuousScan(prev => {
+                        const next = !prev;
+                        localStorage.setItem("continuousScan", String(next));
+                        return next;
+                      })}
                       className={`rounded-full ${continuousScan ? "bg-amber-500 hover:bg-amber-600 text-neutral-900 border-none animate-pulse" : "bg-neutral-800 text-neutral-400 border-neutral-700 hover:bg-neutral-700 hover:text-white"}`}
                       title={continuousScan ? "Desactivar escaneo continuo (por lotes)" : "Activar escaneo continuo (por lotes)"}
                     >
@@ -1293,7 +1409,11 @@ export default function ScannerView() {
           defaultAlmacenId={activeMode === "almacen" ? parseInt(selectedAlmacenId) : undefined}
           onClose={() => {
             setShowQuickRegister(false);
-            startScanner();
+            if (continuousScan) {
+              startScanner();
+            } else {
+              setIsScannerActive(false);
+            }
           }}
           onSuccess={(product, qty) => {
             preventReactivateRef.current = true;
@@ -1306,7 +1426,11 @@ export default function ScannerView() {
             toast.success(`Grupo de ${products.length} productos registrado y asignado`);
             setShowQuickRegister(false);
             fetchCajas();
-            startScanner();
+            if (continuousScan) {
+              startScanner();
+            } else {
+              setIsScannerActive(false);
+            }
           }}
         />
       )}
@@ -1358,7 +1482,11 @@ export default function ScannerView() {
               variant="outline" 
               onClick={() => {
                 setShowConflictDialog(false);
-                startScanner();
+                if (continuousScan) {
+                  startScanner();
+                } else {
+                  setIsScannerActive(false);
+                }
               }} 
               className="rounded-xl w-full h-11 text-sm font-semibold border-neutral-200 text-neutral-500 hover:text-neutral-900 transition-all"
             >
@@ -1372,7 +1500,8 @@ export default function ScannerView() {
       <Dialog open={showQtyModal} onOpenChange={(open) => {
         if (!open) {
           setShowQtyModal(false);
-          if (!preventReactivateRef.current) startScanner();
+          if (!preventReactivateRef.current && continuousScan) startScanner();
+          if (!preventReactivateRef.current && !continuousScan) setIsScannerActive(false);
           preventReactivateRef.current = false;
         }
       }}>
@@ -1407,7 +1536,11 @@ export default function ScannerView() {
                 variant="outline" 
                 onClick={() => {
                   setShowQtyModal(false);
-                  startScanner();
+                  if (continuousScan) {
+                    startScanner();
+                  } else {
+                    setIsScannerActive(false);
+                  }
                 }} 
                 className="flex-1 rounded-xl h-11 font-bold text-xs"
               >
@@ -1438,7 +1571,8 @@ export default function ScannerView() {
       <Dialog open={showPostRegisterModal} onOpenChange={(open) => {
         if (!open) {
           setShowPostRegisterModal(false);
-          if (!preventReactivateRef.current) startScanner();
+          if (!preventReactivateRef.current && continuousScan) startScanner();
+          if (!preventReactivateRef.current && !continuousScan) setIsScannerActive(false);
           preventReactivateRef.current = false;
         }
       }}>
@@ -1477,7 +1611,11 @@ export default function ScannerView() {
                     toast.success("Producto registrado únicamente (libre de contenedor)");
                     setVerificationResult(null);
                     setScannedResult(null);
-                    startScanner();
+                    if (continuousScan) {
+                      startScanner();
+                    } else {
+                      setIsScannerActive(false);
+                    }
                   }} 
                   className="flex-1 rounded-xl h-11 font-bold text-xs"
                 >
@@ -1498,6 +1636,130 @@ export default function ScannerView() {
                 </Button>
               </div>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Escáner de Caja */}
+      <Dialog open={isBoxScannerOpen} onOpenChange={setIsBoxScannerOpen}>
+        <DialogContent className="max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black flex items-center gap-2">
+              <Scan className="text-neutral-900" size={20} />
+              Escanear Código de Caja
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-xs text-neutral-500 font-medium">
+              Apunta la cámara al código de barra o QR de la caja para seleccionarla.
+            </p>
+            <div className="relative rounded-2xl overflow-hidden bg-neutral-100 border min-h-[250px] flex items-center justify-center animate-in fade-in zoom-in-95 duration-200">
+              <div id="box-scanner-reader" className="w-full h-full"></div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button 
+                variant="outline" 
+                onClick={() => setIsBoxScannerOpen(false)} 
+                className="w-full rounded-xl h-11 font-bold text-xs"
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Selección de Caja Detectada */}
+      <Dialog open={showBoxSelectionDialog} onOpenChange={setShowBoxSelectionDialog}>
+        <DialogContent className="max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black flex items-center gap-2">
+              {detectedCaja?.estado === "llena" ? (
+                <>
+                  <AlertCircle className="text-amber-500 animate-pulse" size={20} />
+                  Caja Cerrada / Llena
+                </>
+              ) : (
+                <>
+                  <Box className="text-neutral-950" size={20} />
+                  Caja Detectada
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            {detectedCaja?.estado === "llena" ? (
+              <>
+                <p className="text-xs text-neutral-600 font-medium">
+                  La caja <strong>{detectedCaja.numero_caja}</strong> está actualmente en estado <strong>Cerrada/Llena</strong>. ¿Deseas reabrirla para poder registrar y escanear nuevos productos en ella?
+                </p>
+                <div className="flex gap-2 pt-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setShowBoxSelectionDialog(false)} 
+                    className="flex-1 rounded-xl h-11 font-bold text-xs"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button 
+                    onClick={async () => {
+                      try {
+                        const resp = await fetch(`/api/cajas/${detectedCaja.id_caja}`, {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ estado: "activa" })
+                        });
+                        if (resp.ok) {
+                          const updated = { ...detectedCaja, estado: "activa" as const };
+                          setActiveCaja(updated);
+                          setResolvedTargetCaja(updated);
+                          localStorage.setItem("activeCaja", JSON.stringify(updated));
+                          toast.success(`Caja ${detectedCaja.numero_caja} reabierta y seleccionada`);
+                          fetchCajas();
+                        } else {
+                          toast.error("No se pudo reabrir la caja");
+                        }
+                      } catch (e) {
+                        toast.error("Error al conectar con el servidor");
+                      }
+                      setShowBoxSelectionDialog(false);
+                    }}
+                    className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold text-xs"
+                  >
+                    Reabrir y Seleccionar
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-neutral-600 font-medium">
+                  Se ha detectado la caja número <strong>{detectedCaja?.numero_caja}</strong>. ¿Deseas seleccionarla para el escaneo de productos?
+                </p>
+                <div className="flex gap-2 pt-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setShowBoxSelectionDialog(false)} 
+                    className="flex-1 rounded-xl h-11 font-bold text-xs"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button 
+                    onClick={() => {
+                      if (detectedCaja) {
+                        setActiveCaja(detectedCaja);
+                        setResolvedTargetCaja(detectedCaja);
+                        localStorage.setItem("activeCaja", JSON.stringify(detectedCaja));
+                        toast.success(`Caja ${detectedCaja.numero_caja} seleccionada`);
+                      }
+                      setShowBoxSelectionDialog(false);
+                    }}
+                    className="flex-1 rounded-xl h-11 bg-neutral-900 text-white font-bold text-xs"
+                  >
+                    Confirmar Selección
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

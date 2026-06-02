@@ -19,7 +19,13 @@ import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
   const [currentPath, setCurrentPath] = useState(() => window.location.pathname.toLowerCase());
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem("activeTab") || "dashboard";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("activeTab", activeTab);
+  }, [activeTab]);
 
   useEffect(() => {
     const handleLocationChange = () => {
