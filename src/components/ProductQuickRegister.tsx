@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Camera, Save, X, Loader2, Plus, Trash2, Scan, Box, Home, MapPin, Layers } from "lucide-react";
+import { Camera, Save, X, Loader2, Plus, Trash2, Scan, Box, Home, MapPin, Layers, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Producto, Temporada, TipoProducto } from "../types";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
@@ -74,6 +74,31 @@ export default function ProductQuickRegister({
 
   const [activeScanRowIndex, setActiveScanRowIndex] = useState<number | null>(null);
   const rowScannerRef = useRef<Html5Qrcode | null>(null);
+
+  const [existingSkus, setExistingSkus] = useState<Record<string, boolean>>({});
+
+  const checkSkuExists = async (sku: string) => {
+    if (!sku || !sku.trim()) return;
+    try {
+      const resp = await fetch(`/api/productos?exactSku=${encodeURIComponent(sku.trim())}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        const exists = Array.isArray(data) && data.length > 0;
+        setExistingSkus(prev => ({
+          ...prev,
+          [sku.trim().toLowerCase()]: exists
+        }));
+      }
+    } catch (e) {
+      console.error("Error validating SKU:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (ean) {
+      checkSkuExists(ean);
+    }
+  }, [ean]);
 
   const [temporadas, setTemporadas] = useState<string[]>([]);
   const [tipos, setTipos] = useState<string[]>([]);
@@ -275,6 +300,7 @@ export default function ProductQuickRegister({
               }
               return updated;
             });
+            checkSkuExists(decodedText);
             stopRowScanner();
             toast.success(`SKU escaneado: ${decodedText}`);
           },
@@ -680,13 +706,19 @@ export default function ProductQuickRegister({
                     </Button>
 
                     {/* SKU input */}
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 relative">
                       <Input 
                         placeholder="SKU o Código de Barras"
                         value={vari.sku}
                         onChange={e => updateVariationField(idx, "sku", e.target.value)}
-                        className="h-9 rounded-lg text-xs font-semibold"
+                        onBlur={() => checkSkuExists(vari.sku)}
+                        className={`h-9 rounded-lg text-xs font-semibold ${vari.sku && existingSkus[vari.sku.trim().toLowerCase()] ? "pr-8 border-amber-500 bg-amber-50/20 text-amber-900" : ""}`}
                       />
+                      {vari.sku && existingSkus[vari.sku.trim().toLowerCase()] && (
+                        <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-600 flex items-center" title="Este producto ya está registrado en el catálogo. Al guardar, solo se asociará la cantidad asignada al contenedor.">
+                          <AlertCircle size={15} />
+                        </div>
+                      )}
                     </div>
 
                     {/* Talla select */}

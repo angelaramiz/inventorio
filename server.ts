@@ -163,7 +163,7 @@ app.get("/api/productos", async (req, res) => {
   try {
     await detectSchema();
     const supabase = getSupabase();
-    const { q, marca, talla, temporada, tipo, modelo_grupo } = req.query as Record<string, string>;
+    const { q, exactSku, marca, talla, temporada, tipo, modelo_grupo } = req.query as Record<string, string>;
     
     const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
     let query = supabase
@@ -171,6 +171,9 @@ app.get("/api/productos", async (req, res) => {
       .select(fields)
       .order("created_at", { ascending: false });
     
+    if (exactSku) {
+      query = query.eq("sku", exactSku);
+    }
     if (q) {
       // Search by SKU or EAN (partial match)
       query = query.or(`sku.ilike.%${q}%,ean_13.ilike.%${q}%,marca_sub.ilike.%${q}%`);
@@ -3625,38 +3628,66 @@ app.post("/api/productos/grupo", upload.single('foto'), async (req, res) => {
     tipo = (sanitizeIdentifier(tipo, 100) || "otro").toLowerCase();
     marca_sub = sanitizeIdentifier(marca_sub, 100) || "Guess";
     
-    // Prepare product records to insert
-    const inserts = parsedVariaciones.map((v: any) => {
+    // Fetch all existing products that match any of the input SKUs to separate inserts from existing ones
+    const skusToCheck = parsedVariaciones.map((v: any) => sanitizeIdentifier(v.sku, 100)).filter(Boolean);
+    const { data: existingProds, error: fetchErr } = await supabase
+      .from("productos")
+      .select(`id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`)
+      .in("sku", skusToCheck);
+    
+    if (fetchErr) throw fetchErr;
+
+    const existingSkuMap = new Map<string, any>();
+    if (existingProds) {
+      existingProds.forEach((p: any) => {
+        existingSkuMap.set(p.sku.toLowerCase(), p);
+      });
+    }
+
+    const newProductInserts: any[] = [];
+    const alreadyExistingProds: any[] = [];
+
+    parsedVariaciones.forEach((v: any) => {
       const cleanSku = sanitizeIdentifier(v.sku, 100);
       const cleanTalla = sanitizeIdentifier(v.talla, 50) || "SinTalla";
-      const insertData: any = {
-        sku: cleanSku,
-        ean_13: cleanSku,
-        talla: cleanTalla,
-        temporada,
-        tipo,
-        marca_sub
-      };
-      if (req.file) {
-        insertData.foto = '\\x' + req.file.buffer.toString('hex');
+      const existing = existingSkuMap.get(cleanSku.toLowerCase());
+
+      if (existing) {
+        alreadyExistingProds.push(existing);
+      } else {
+        const insertData: any = {
+          sku: cleanSku,
+          ean_13: cleanSku,
+          talla: cleanTalla,
+          temporada,
+          tipo,
+          marca_sub
+        };
+        if (req.file) {
+          insertData.foto = '\\x' + req.file.buffer.toString('hex');
+        }
+        if (hasModeloGrupoColumn) {
+          insertData.modelo_grupo = modelo_grupo;
+        }
+        newProductInserts.push(insertData);
       }
-      if (hasModeloGrupoColumn) {
-        insertData.modelo_grupo = modelo_grupo;
-      }
-      return insertData;
     });
-    
+
+    let createdProducts: any[] = [];
     const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
-    
-    const { data: createdProducts, error: pErr } = await supabase
-      .from("productos")
-      .insert(inserts)
-      .select(fields);
-      
-    if (pErr) throw pErr;
-    if (!createdProducts || createdProducts.length === 0) {
-      throw new Error("No se crearon productos");
+
+    if (newProductInserts.length > 0) {
+      const { data, error: pErr } = await supabase
+        .from("productos")
+        .insert(newProductInserts)
+        .select(fields);
+        
+      if (pErr) throw pErr;
+      if (data) createdProducts = data;
     }
+
+    // Combine all products (created + existing)
+    const allProducts = [...createdProducts, ...alreadyExistingProds];
     
     // Check if we need to associate them with a container
     let targetCajaId = id_caja ? parseInt(id_caja) : null;
@@ -3763,8 +3794,8 @@ app.post("/api/productos/grupo", upload.single('foto'), async (req, res) => {
     
     // Associate products to target caja if resolved
     if (targetCajaId) {
-      const associations = createdProducts.map((prod: any) => {
-        const matchingVar = parsedVariaciones.find((v: any) => sanitizeIdentifier(v.sku, 100) === prod.sku);
+      const associations = allProducts.map((prod: any) => {
+        const matchingVar = parsedVariaciones.find((v: any) => sanitizeIdentifier(v.sku, 100).toLowerCase() === prod.sku.toLowerCase());
         const qty = matchingVar ? parseInt(matchingVar.cantidad) || 1 : 1;
         return {
           id_caja: targetCajaId,
@@ -3775,7 +3806,7 @@ app.post("/api/productos/grupo", upload.single('foto'), async (req, res) => {
       
       const { error: assocErr } = await supabase
         .from("caja_productos")
-        .insert(associations);
+        .upsert(associations, { onConflict: "id_caja,id_producto" });
         
       if (assocErr) throw assocErr;
       
@@ -3785,7 +3816,7 @@ app.post("/api/productos/grupo", upload.single('foto'), async (req, res) => {
     
     res.json({
       success: true,
-      products: createdProducts
+      products: allProducts
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
