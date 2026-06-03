@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { RefreshCw, X } from "lucide-react";
 
@@ -14,11 +15,48 @@ export default function UpdateNotification() {
   } = useRegisterSW({
     onRegistered(r) {
       console.log("Service Worker registrado con éxito");
+      // Periodically check for updates (every 30 minutes)
+      if (r) {
+        setInterval(() => {
+          r.update().catch(err => console.debug("Error checking SW update:", err));
+        }, 30 * 60 * 1000);
+      }
     },
     onRegisterError(error) {
       console.error("Error al registrar el Service Worker:", error);
     },
   });
+
+  // Listen for the controllerchange event to reload the page when the new Service Worker takes control
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      let refreshing = false;
+      const handleControllerChange = () => {
+        if (!refreshing) {
+          refreshing = true;
+          window.location.reload();
+        }
+      };
+      navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
+      return () => {
+        navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
+      };
+    }
+  }, []);
+
+  const handleUpdate = async () => {
+    try {
+      // Trigger service worker activation
+      await updateServiceWorker(true);
+      // Fallback reload if controllerchange event doesn't fire after 1.5 seconds
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (err) {
+      console.error("Error updating Service Worker, forcing reload:", err);
+      window.location.reload();
+    }
+  };
 
   if (!needRefresh) return null;
 
@@ -52,7 +90,7 @@ export default function UpdateNotification() {
           Ignorar
         </button>
         <button
-          onClick={() => updateServiceWorker(true)}
+          onClick={handleUpdate}
           className="px-4 py-2 bg-neutral-900 text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-neutral-800 transition-all flex items-center gap-1.5 shadow-md shadow-neutral-900/10"
         >
           <RefreshCw size={12} />

@@ -354,66 +354,74 @@ export default function AlmacenView() {
     }
   }, [activeBarcodeSection]);
 
+  const normalizeSearchKey = (str: string) => {
+    if (!str) return "";
+    return str
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .replace(/0+(\d+)/g, "$1");
+  };
+
   const filteredZones = React.useMemo(() => {
-    const term = almacenSearchTerm.toLowerCase().trim();
+    const term = normalizeSearchKey(almacenSearchTerm);
     if (!term) return zones;
-    return zones.filter(zone => zone.nombre.toLowerCase().includes(term));
+    return zones.filter(zone => normalizeSearchKey(zone.nombre).includes(term));
   }, [zones, almacenSearchTerm]);
 
   const filteredPasillos = React.useMemo(() => {
-    const term = almacenSearchTerm.toLowerCase().trim();
+    const term = normalizeSearchKey(almacenSearchTerm);
     if (!term) return pasillos;
     return pasillos.filter(pasillo => 
-      pasillo.nombre.toLowerCase().includes(term) ||
-      (pasillo.almacen_nombre && pasillo.almacen_nombre.toLowerCase().includes(term))
+      normalizeSearchKey(pasillo.nombre).includes(term) ||
+      normalizeSearchKey(pasillo.almacen_nombre).includes(term)
     );
   }, [pasillos, almacenSearchTerm]);
 
   const filteredSections = React.useMemo(() => {
-    const term = almacenSearchTerm.toLowerCase().trim();
+    const term = normalizeSearchKey(almacenSearchTerm);
     if (!term) return sections;
     return sections.filter(section => 
-      section.nombre.toLowerCase().includes(term) ||
-      (section.almacen_nombre && section.almacen_nombre.toLowerCase().includes(term)) ||
-      (section.pasillo_nombre && section.pasillo_nombre.toLowerCase().includes(term)) ||
-      (section.tags?.tipo_producto && section.tags.tipo_producto.toLowerCase().includes(term)) ||
-      (section.tags?.genero && section.tags.genero.toLowerCase().includes(term)) ||
-      (section.tags?.marca && section.tags.marca.toLowerCase().includes(term))
+      normalizeSearchKey(section.nombre).includes(term) ||
+      normalizeSearchKey(section.almacen_nombre).includes(term) ||
+      normalizeSearchKey(section.pasillo_nombre).includes(term) ||
+      normalizeSearchKey(section.tags?.tipo_producto).includes(term) ||
+      normalizeSearchKey(section.tags?.genero).includes(term) ||
+      normalizeSearchKey(section.tags?.marca).includes(term)
     );
   }, [sections, almacenSearchTerm]);
 
   const filteredNiveles = React.useMemo(() => {
-    const term = almacenSearchTerm.toLowerCase().trim();
+    const term = normalizeSearchKey(almacenSearchTerm);
     if (!term) return niveles;
     return niveles.filter(lvl => 
-      lvl.nombre.toLowerCase().includes(term) ||
-      (lvl.almacen_nombre && lvl.almacen_nombre.toLowerCase().includes(term)) ||
-      (lvl.pasillo_nombre && lvl.pasillo_nombre.toLowerCase().includes(term)) ||
-      (lvl.seccion_nombre && lvl.seccion_nombre.toLowerCase().includes(term)) ||
-      (lvl.tags?.tipo_producto && lvl.tags.tipo_producto.toLowerCase().includes(term)) ||
-      (lvl.tags?.tipo_producto_exacto && lvl.tags.tipo_producto_exacto.toLowerCase().includes(term)) ||
-      (lvl.tags?.genero && lvl.tags.genero.toLowerCase().includes(term)) ||
-      (lvl.tags?.temporada && lvl.tags.temporada.toLowerCase().includes(term)) ||
-      (lvl.tags?.marca && lvl.tags.marca.toLowerCase().includes(term))
+      normalizeSearchKey(lvl.nombre).includes(term) ||
+      normalizeSearchKey(lvl.almacen_nombre).includes(term) ||
+      normalizeSearchKey(lvl.pasillo_nombre).includes(term) ||
+      normalizeSearchKey(lvl.seccion_nombre).includes(term) ||
+      normalizeSearchKey(lvl.tags?.tipo_producto).includes(term) ||
+      normalizeSearchKey(lvl.tags?.tipo_producto_exacto).includes(term) ||
+      normalizeSearchKey(lvl.tags?.genero).includes(term) ||
+      normalizeSearchKey(lvl.tags?.temporada).includes(term) ||
+      normalizeSearchKey(lvl.tags?.marca).includes(term)
     );
   }, [niveles, almacenSearchTerm]);
 
   const filteredBoxes = React.useMemo(() => {
-    const term = almacenSearchTerm.toLowerCase().trim();
+    const term = normalizeSearchKey(almacenSearchTerm);
     const cleanBoxes = boxes.filter((box: any) => !box.numero_caja?.toUpperCase().startsWith("NIVEL:"));
     if (!term) return cleanBoxes;
     return cleanBoxes.filter(box => 
-      (box.numero_caja && box.numero_caja.toLowerCase().includes(term)) ||
-      (box.sku && box.sku.toLowerCase().includes(term)) ||
-      (box.almacen_nombre && box.almacen_nombre.toLowerCase().includes(term)) ||
-      (box.pasillo_nombre && box.pasillo_nombre.toLowerCase().includes(term)) ||
-      (box.seccion_nombre && box.seccion_nombre.toLowerCase().includes(term)) ||
-      (box.nivel_nombre && box.nivel_nombre.toLowerCase().includes(term)) ||
-      (box.estado && box.estado.toLowerCase().includes(term)) ||
-      (box.tags?.tipo_producto && box.tags.tipo_producto.toLowerCase().includes(term)) ||
-      (box.tags?.tipo_producto_exacto && box.tags.tipo_producto_exacto.toLowerCase().includes(term)) ||
-      (box.tags?.genero && box.tags.genero.toLowerCase().includes(term)) ||
-      (box.tags?.marca && box.tags.marca.toLowerCase().includes(term))
+      normalizeSearchKey(box.numero_caja).includes(term) ||
+      normalizeSearchKey(box.sku).includes(term) ||
+      normalizeSearchKey(box.almacen_nombre).includes(term) ||
+      normalizeSearchKey(box.pasillo_nombre).includes(term) ||
+      normalizeSearchKey(box.seccion_nombre).includes(term) ||
+      normalizeSearchKey(box.nivel_nombre).includes(term) ||
+      normalizeSearchKey(box.estado).includes(term) ||
+      normalizeSearchKey(box.tags?.tipo_producto).includes(term) ||
+      normalizeSearchKey(box.tags?.tipo_producto_exacto).includes(term) ||
+      normalizeSearchKey(box.tags?.genero).includes(term) ||
+      normalizeSearchKey(box.tags?.marca).includes(term)
     );
   }, [boxes, almacenSearchTerm]);
 
@@ -3658,10 +3666,10 @@ export default function AlmacenView() {
                       <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{filteredZones.length}</Badge>
                       <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.zonas || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
                     </div>
-                    {expandedTables.zonas ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
+                    {(expandedTables.zonas || almacenSearchTerm.trim() !== "") ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
                   </button>
                   <AnimatePresence>
-                    {expandedTables.zonas && (
+                    {(expandedTables.zonas || almacenSearchTerm.trim() !== "") && (
                       <motion.div
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "auto", opacity: 1 }}
@@ -3775,10 +3783,10 @@ export default function AlmacenView() {
                       <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{filteredPasillos.length}</Badge>
                       <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.pasillos || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
                     </div>
-                    {expandedTables.pasillos ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
+                    {(expandedTables.pasillos || almacenSearchTerm.trim() !== "") ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
                   </button>
                   <AnimatePresence>
-                    {expandedTables.pasillos && (
+                    {(expandedTables.pasillos || almacenSearchTerm.trim() !== "") && (
                       <motion.div
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "auto", opacity: 1 }}
@@ -3910,10 +3918,10 @@ export default function AlmacenView() {
                       <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{filteredSections.length}</Badge>
                       <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.secciones || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
                     </div>
-                    {expandedTables.secciones ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
+                    {(expandedTables.secciones || almacenSearchTerm.trim() !== "") ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
                   </button>
                   <AnimatePresence>
-                    {expandedTables.secciones && (
+                    {(expandedTables.secciones || almacenSearchTerm.trim() !== "") && (
                       <motion.div
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "auto", opacity: 1 }}
@@ -4119,10 +4127,10 @@ export default function AlmacenView() {
                       <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{filteredNiveles.length}</Badge>
                       <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.niveles || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
                     </div>
-                    {expandedTables.niveles ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
+                    {(expandedTables.niveles || almacenSearchTerm.trim() !== "") ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
                   </button>
                   <AnimatePresence>
-                    {expandedTables.niveles && (
+                    {(expandedTables.niveles || almacenSearchTerm.trim() !== "") && (
                       <motion.div
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "auto", opacity: 1 }}
@@ -4341,10 +4349,10 @@ export default function AlmacenView() {
                         {filteredBoxes.length}
                       </Badge>
                     </div>
-                    {expandedTables.cajas ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
+                    {(expandedTables.cajas || almacenSearchTerm.trim() !== "") ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
                   </button>
                   <AnimatePresence>
-                    {expandedTables.cajas && (
+                    {(expandedTables.cajas || almacenSearchTerm.trim() !== "") && (
                       <motion.div
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "auto", opacity: 1 }}
