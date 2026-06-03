@@ -730,25 +730,42 @@ export default function AlmacenView() {
 
     // Convert Maps to sorted arrays for rendering
     const result: any[] = [];
-    Array.from(zonesMap.values()).forEach(z => {
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    
+    const sortedZones = Array.from(zonesMap.values()).sort((a, b) => collator.compare(a.nombre, b.nombre));
+    
+    sortedZones.forEach(z => {
+      const sortedPasillos = Array.from(z.pasillos.values()).sort((a: any, b: any) => collator.compare(a.nombre, b.nombre));
       const pasillosArr: any[] = [];
-      Array.from(z.pasillos.values()).forEach((p: any) => {
+      
+      sortedPasillos.forEach((p: any) => {
+        const sortedSecciones = Array.from(p.secciones.values()).sort((a: any, b: any) => collator.compare(a.nombre, b.nombre));
         const seccionesArr: any[] = [];
-        Array.from(p.secciones.values()).forEach((s: any) => {
+        
+        sortedSecciones.forEach((s: any) => {
+          const sortedNiveles = Array.from(s.niveles.values()).sort((a: any, b: any) => collator.compare(a.nombre, b.nombre));
           const nivelesArr: any[] = [];
-          Array.from(s.niveles.values()).forEach((n: any) => {
-            nivelesArr.push(n);
+          
+          sortedNiveles.forEach((n: any) => {
+            const sortedCajas = [...n.cajas].sort((a: any, b: any) => collator.compare(a.numero_caja || '', b.numero_caja || ''));
+            nivelesArr.push({
+              ...n,
+              cajas: sortedCajas
+            });
           });
+          
           seccionesArr.push({
             ...s,
             niveles: nivelesArr
           });
         });
+        
         pasillosArr.push({
           ...p,
           secciones: seccionesArr
         });
       });
+      
       result.push({
         ...z,
         pasillos: pasillosArr
