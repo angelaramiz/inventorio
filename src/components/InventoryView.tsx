@@ -14,6 +14,23 @@ import { fetchCatalogWithCache } from "../utils/pwaDb";
 const TALLAS_LETRA = ["SinTalla", "XS", "S", "M", "L", "XL", "XXL"];
 const TALLAS_NUMERO = ["SinTalla", "38", "40", "42", "44", "46", "48"];
 
+const getSizeWeight = (size: string): number => {
+  if (!size) return 0;
+  const clean = size.trim().toUpperCase();
+  if (clean === "SINTALLA" || clean === "SIN TALLA" || clean === "U" || clean === "UNICA" || clean === "ÚNICA" || clean === "ÚNICO" || clean === "UNICO") return 0;
+  
+  const letterIdx = TALLAS_LETRA.findIndex(t => t.toUpperCase() === clean);
+  if (letterIdx !== -1) return letterIdx;
+  
+  const parsed = parseFloat(clean);
+  if (!isNaN(parsed)) {
+    return 100 + parsed;
+  }
+  
+  return 999;
+};
+
+
 export default function InventoryView() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,21 +143,6 @@ export default function InventoryView() {
     return counts;
   }, [productos]);
 
-  const getSizeWeight = (size: string): number => {
-    if (!size) return 0;
-    const clean = size.trim().toUpperCase();
-    if (clean === "SINTALLA" || clean === "SIN TALLA" || clean === "U" || clean === "UNICA" || clean === "ÚNICA" || clean === "ÚNICO" || clean === "UNICO") return 0;
-    
-    const letterIdx = TALLAS_LETRA.findIndex(t => t.toUpperCase() === clean);
-    if (letterIdx !== -1) return letterIdx;
-    
-    const parsed = parseFloat(clean);
-    if (!isNaN(parsed)) {
-      return 100 + parsed;
-    }
-    
-    return 999;
-  };
 
   const sortedFiltered = React.useMemo(() => {
     return [...filtered].sort((a, b) => {
