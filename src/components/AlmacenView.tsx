@@ -2248,6 +2248,10 @@ export default function AlmacenView() {
                 }
                 .html2pdf-mode .print-only {
                   display: block !important;
+                  position: relative !important;
+                  left: 0 !important;
+                  top: 0 !important;
+                  opacity: 1 !important;
                 }
                 .html2pdf-mode .bg-white,
                 .html2pdf-mode .bg-neutral-50\/30,
@@ -2281,26 +2285,42 @@ export default function AlmacenView() {
               `}</style>
 
               <CardContent id="report-print-area" className="p-8 bg-neutral-50/30">
-                <div className="mb-8 border-b pb-6 print-only">
-                  <h1 className="text-3xl font-black tracking-tight text-neutral-900 uppercase">
-                    REPORTE DE INVENTARIO FÍSICO ({reportType === "summary" ? "RESUMIDO" : "DETALLADO"})
-                  </h1>
-                  <p className="text-xs text-neutral-500 mt-1">Generado el: {new Date().toLocaleString()}</p>
-                  {reportType === "summary" && (
-                    <p className="text-xs font-extrabold text-neutral-700 mt-0.5 uppercase">
-                      Agrupado por: {summaryGrouping === "secciones" ? "Secciones" : "Contenedores/Cajas"}
-                    </p>
-                  )}
-                  <div className="mt-4 flex flex-wrap gap-4 text-xs font-bold text-neutral-600">
-                    <span>Almacén: {selectedReportZoneId === "all" ? "TODOS" : zones.find(z => z.id_zona_almacen === parseInt(selectedReportZoneId))?.nombre.toUpperCase()}</span>
-                    {selectedReportPasilloId !== "all" && (
-                      <span>Pasillo: {pasillos.find(p => p.id_zona_pasillo === parseInt(selectedReportPasilloId))?.nombre.toUpperCase()}</span>
+                {/* Premium Corporate Header */}
+                <div className="mb-8 border-b-2 border-neutral-900 pb-6 print-only">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h1 className="text-3xl font-black tracking-tight text-neutral-950 uppercase leading-none">
+                        REPORTE DE INVENTARIO FÍSICO
+                      </h1>
+                      <p className="text-sm font-black text-amber-600 tracking-widest uppercase mt-2">
+                        MODO {reportType === "summary" ? "RESUMIDO (CANTIDADES)" : "DETALLADO (CATÁLOGO DE PRODUCTOS)"}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="px-3.5 py-1.5 bg-neutral-900 text-white rounded-xl text-[10px] font-black tracking-widest uppercase">
+                        {reportType === "summary" ? "RESUMEN GERENCIAL" : "REPORTE DE CONTROL"}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-4 border-t border-dashed border-neutral-200 text-xs">
+                    <div>
+                      <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Fecha de Emisión</p>
+                      <p className="font-extrabold text-neutral-800">{new Date().toLocaleString()}</p>
+                    </div>
+                    {reportType === "summary" && (
+                      <div>
+                        <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Agrupación del Resumen</p>
+                        <p className="font-extrabold text-neutral-800 uppercase">{summaryGrouping === "secciones" ? "Por Secciones" : "Por Cajas/Contenedores"}</p>
+                      </div>
                     )}
-                    <span>Sección: {selectedReportSectionId === "all" ? "TODAS" : sections.find(s => s.id_zona_seccion === parseInt(selectedReportSectionId))?.nombre.toUpperCase()}</span>
-                    {selectedReportNivelId !== "all" && (
-                      <span>Nivel: {niveles.find(n => n.id_zona_nivel === parseInt(selectedReportNivelId))?.nombre.toUpperCase()}</span>
-                    )}
-                    <span>Caja: {selectedReportBoxId === "all" ? "TODAS" : `CAJA ${boxes.find(b => b.id_caja === parseInt(selectedReportBoxId))?.numero_caja}`}</span>
+                    <div className="col-span-2">
+                      <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Filtros de Ubicación Aplicados</p>
+                      <p className="font-bold text-neutral-600 uppercase truncate">
+                        ALM: {selectedReportZoneId === "all" ? "TODOS" : zones.find(z => z.id_zona_almacen === parseInt(selectedReportZoneId))?.nombre} | 
+                        SEC: {selectedReportSectionId === "all" ? "TODAS" : sections.find(s => s.id_zona_seccion === parseInt(selectedReportSectionId))?.nombre}
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -2355,20 +2375,20 @@ export default function AlmacenView() {
                                         });
                                       });
                                       return (
-                                        <div className="border border-neutral-200 rounded-2xl p-5 bg-white shadow-sm flex items-center justify-between mb-4 page-break">
+                                        <div className="border-l-4 border-amber-500 border-t border-r border-b border-neutral-200 rounded-2xl p-6 bg-white shadow-sm flex items-center justify-between mb-4 page-break">
                                           <div>
-                                            <span className="font-extrabold text-sm uppercase text-neutral-800">
+                                            <span className="font-black text-base uppercase text-neutral-900 tracking-tight">
                                               SECCIÓN: {sec.nombre.toUpperCase()}
                                             </span>
                                             {pas.id_zona_pasillo && (
-                                              <p className="text-[10px] text-neutral-400 font-bold uppercase mt-1">
-                                                En Pasillo: {pas.nombre.toUpperCase()}
+                                              <p className="text-xs text-neutral-500 font-bold uppercase mt-1">
+                                                Ubicación: Pasillo {pas.nombre.toUpperCase()}
                                               </p>
                                             )}
                                           </div>
-                                          <div className="bg-amber-100 border border-amber-200 text-amber-950 font-black px-4 py-2 rounded-xl text-center min-w-[110px] shadow-sm">
-                                            <p className="text-[8px] uppercase tracking-wider text-amber-800 font-bold leading-none mb-0.5">Cantidad</p>
-                                            <p className="text-xl leading-none font-black">{sectionTotal} <span className="text-xs font-semibold">Uds</span></p>
+                                          <div className="bg-amber-500 border border-amber-600 text-neutral-950 font-black px-6 py-3 rounded-xl text-center min-w-[130px] shadow-md">
+                                            <p className="text-[9px] uppercase tracking-widest text-neutral-950 font-black leading-none mb-1">CANTIDAD TOTAL</p>
+                                            <p className="text-2xl leading-none font-black">{sectionTotal} <span className="text-xs font-bold">Uds</span></p>
                                           </div>
                                         </div>
                                       );
@@ -2411,9 +2431,9 @@ export default function AlmacenView() {
                                                 </div>
 
                                                 {reportType === "summary" ? (
-                                                  <div className="flex items-center justify-between py-2 bg-neutral-50/50 px-4 rounded-xl border border-dashed">
-                                                    <span className="text-xs font-bold text-neutral-600 uppercase">Cantidad Total en Contenedor:</span>
-                                                    <span className="bg-amber-100 border border-amber-200 text-amber-950 font-black px-4 py-1.5 rounded-lg text-sm shadow-sm">
+                                                  <div className="flex items-center justify-between py-3.5 bg-amber-50/30 px-5 rounded-2xl border-l-4 border-amber-500 border border-neutral-200 shadow-sm">
+                                                    <span className="text-xs font-extrabold text-neutral-800 uppercase">Cantidad Total en Caja:</span>
+                                                    <span className="bg-amber-500 text-neutral-950 font-black px-5 py-2 rounded-xl text-sm shadow-sm border border-amber-600">
                                                       {boxTotal} UNIDADES
                                                     </span>
                                                   </div>
