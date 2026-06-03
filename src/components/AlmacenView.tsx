@@ -1093,7 +1093,7 @@ export default function AlmacenView() {
         margin:       10,
         filename:     `reporte-inventario-${new Date().toISOString().slice(0,10)}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true, logging: false },
+        html2canvas:  { scale: 2, useCORS: true, logging: false, scrollY: 0, scrollX: 0 },
         jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak:    { mode: ['css', 'legacy'], avoid: ['tr'] }
       };
@@ -1728,6 +1728,8 @@ export default function AlmacenView() {
     }
   };
 
+  const reportGrandTotal = reportData.reduce((sum: number, item: any) => sum + (item.cantidad || 0), 0);
+
   return (
     <>
       <div className="no-print space-y-6">
@@ -2026,7 +2028,12 @@ export default function AlmacenView() {
             <Card className="border border-neutral-100 shadow-xl rounded-[2rem] overflow-hidden bg-white">
               <CardHeader className="bg-neutral-50/50 pb-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <CardTitle className="text-lg font-bold">Vista Previa del Reporte</CardTitle>
+                  <CardTitle className="text-lg font-bold flex items-center gap-3">
+                    Vista Previa del Reporte
+                    <span className="bg-amber-100 border border-amber-300 text-amber-950 text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider">
+                      Total: {reportGrandTotal} Uds
+                    </span>
+                  </CardTitle>
                   <CardDescription>Confirma la estructura del reporte antes de exportar</CardDescription>
                 </div>
                 <div className="flex gap-2">
@@ -2325,17 +2332,25 @@ export default function AlmacenView() {
                       <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Fecha de Emisión</p>
                       <p className="font-extrabold text-neutral-800">{new Date().toLocaleString()}</p>
                     </div>
-                    {reportType === "summary" && (
+                    <div>
+                      <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Total del Almacén</p>
+                      <p className="font-black text-amber-600 text-sm leading-none mt-1">{reportGrandTotal} UNIDADES</p>
+                    </div>
+                    {reportType === "summary" ? (
                       <div>
-                        <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Agrupación del Resumen</p>
-                        <p className="font-extrabold text-neutral-800 uppercase">{summaryGrouping === "secciones" ? "Por Secciones" : "Por Cajas/Contenedores"}</p>
+                        <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Agrupado por</p>
+                        <p className="font-extrabold text-neutral-800 uppercase">{summaryGrouping === "secciones" ? "Secciones" : "Cajas/Contenedores"}</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Tipo Reporte</p>
+                        <p className="font-extrabold text-neutral-800 uppercase">Detallado</p>
                       </div>
                     )}
-                    <div className="col-span-2">
-                      <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Filtros de Ubicación Aplicados</p>
+                    <div>
+                      <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Ubicaciones</p>
                       <p className="font-bold text-neutral-600 uppercase truncate">
-                        ALM: {selectedReportZoneId === "all" ? "TODOS" : zones.find(z => z.id_zona_almacen === parseInt(selectedReportZoneId))?.nombre} | 
-                        SEC: {selectedReportSectionId === "all" ? "TODAS" : sections.find(s => s.id_zona_seccion === parseInt(selectedReportSectionId))?.nombre}
+                        ALM: {selectedReportZoneId === "all" ? "TODOS" : zones.find(z => z.id_zona_almacen === parseInt(selectedReportZoneId))?.nombre}
                       </p>
                     </div>
                   </div>
