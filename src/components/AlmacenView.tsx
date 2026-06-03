@@ -627,7 +627,7 @@ export default function AlmacenView() {
     }
   };
 
-  const generateGroupedReportData = () => {
+  function generateGroupedReportData() {
     if (!reportData || reportData.length === 0) return [];
 
     // Create a fast lookup map for products grouped by id_caja: O(P)
