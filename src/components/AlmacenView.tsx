@@ -2275,7 +2275,7 @@ export default function AlmacenView() {
                   page-break-inside: auto !important;
                   break-inside: auto !important;
                 }
-                .no-print {
+                .html2pdf-mode .no-print {
                   display: none !important;
                 }
               `}</style>
