@@ -162,6 +162,14 @@ export default function AlmacenView() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [downloadingPDF, setDownloadingPDF] = useState(false);
+  const [reportLoadingStage, setReportLoadingStage] = useState<"idle" | "fetching" | "grouping" | "rendering">("idle");
+  const [reportProgress, setReportProgress] = useState(0);
+  const [reportType, setReportType] = useState<"detailed" | "summary">("detailed");
+  const [summaryGrouping, setSummaryGrouping] = useState<"cajas" | "secciones">("cajas");
+
+  const groupedReportData = React.useMemo(() => {
+    return generateGroupedReportData();
+  }, [reportData, selectedReportZoneId, selectedReportPasilloId, selectedReportSectionId, selectedReportNivelId, selectedReportBoxId, boxes, niveles, sections, pasillos, zones, reportType, summaryGrouping]);
 
   // Loading states
   const [loadingZones, setLoadingZones] = useState(false);
@@ -553,7 +561,12 @@ export default function AlmacenView() {
       const resp = await fetch("/api/cajas");
       if (resp.ok) {
         const data = await resp.json();
-        setBoxes(data);
+        const sorted = data.sort((a: any, b: any) => {
+          const numA = a.numero_caja || "";
+          const numB = b.numero_caja || "";
+          return numA.localeCompare(numB, undefined, { numeric: true, sensitivity: 'base' });
+        });
+        setBoxes(sorted);
         fetchProductCounts();
       }
     } catch (e) {
@@ -578,24 +591,60 @@ export default function AlmacenView() {
 
   const handleGenerateReport = async () => {
     setIsGeneratingReport(true);
+    setReportLoadingStage("fetching");
+    setReportProgress(10);
     try {
       const resp = await fetch("/api/reporte-inventario");
       if (resp.ok) {
+        setReportProgress(40);
+        setReportLoadingStage("grouping");
         const data = await resp.json();
-        setReportData(data);
-        setShowPreview(true);
-        toast.success("Vista previa del reporte generada");
+        
+        // Yield thread so browser paints the grouping stage status
+        setTimeout(() => {
+          setReportProgress(70);
+          setReportLoadingStage("rendering");
+          setReportData(data);
+          
+          // Yield thread again so browser paints rendering stage status
+          setTimeout(() => {
+            setReportProgress(100);
+            setShowPreview(true);
+            setIsGeneratingReport(false);
+            setReportLoadingStage("idle");
+            toast.success("Vista previa del reporte generada");
+          }, 100);
+        }, 100);
       } else {
         toast.error("Error al obtener los datos del reporte");
+        setIsGeneratingReport(false);
+        setReportLoadingStage("idle");
       }
     } catch (e) {
       toast.error("Error de conexión al generar reporte");
-    } finally {
       setIsGeneratingReport(false);
+      setReportLoadingStage("idle");
     }
   };
 
   const generateGroupedReportData = () => {
+    if (!reportData || reportData.length === 0) return [];
+
+    // Create a fast lookup map for products grouped by id_caja: O(P)
+    const productsByBox = new Map<number, any[]>();
+    for (let i = 0; i < reportData.length; i++) {
+      const item = reportData[i];
+      const cid = item.id_caja;
+      if (cid !== null && cid !== undefined) {
+        let list = productsByBox.get(cid);
+        if (!list) {
+          list = [];
+          productsByBox.set(cid, list);
+        }
+        list.push(item);
+      }
+    }
+
     // 1. Get all boxes that match the selected filters
     const filteredBoxes = boxes.filter(box => {
       // Resolve path for this box
@@ -671,8 +720,8 @@ export default function AlmacenView() {
       }
       const nivelNode = seccionNode.niveles.get(lvlIdKey);
 
-      // Fetch products for this box from reportData
-      const boxItems = reportData.filter(item => item.id_caja === box.id_caja);
+      // Fetch products for this box using optimized Map lookup: O(1)
+      const boxItems = productsByBox.get(box.id_caja) || [];
       nivelNode.cajas.push({
         ...box,
         productos: boxItems
@@ -1075,7 +1124,8 @@ export default function AlmacenView() {
       const resp = await fetch("/api/almacen/zonas");
       if (resp.ok) {
         const data = await resp.json();
-        setZones(data);
+        const sorted = data.sort((a: any, b: any) => a.nombre.localeCompare(b.nombre, undefined, { numeric: true, sensitivity: 'base' }));
+        setZones(sorted);
         fetchProductCounts();
       } else {
         toast.error("Error al cargar zonas de almacén");
@@ -1093,7 +1143,8 @@ export default function AlmacenView() {
       const resp = await fetch("/api/almacen/secciones");
       if (resp.ok) {
         const data = await resp.json();
-        setSections(data);
+        const sorted = data.sort((a: any, b: any) => a.nombre.localeCompare(b.nombre, undefined, { numeric: true, sensitivity: 'base' }));
+        setSections(sorted);
         fetchProductCounts();
       } else {
         toast.error("Error al cargar secciones de almacén");
@@ -1111,7 +1162,8 @@ export default function AlmacenView() {
       const resp = await fetch("/api/almacen/pasillos");
       if (resp.ok) {
         const data = await resp.json();
-        setPasillos(data);
+        const sorted = data.sort((a: any, b: any) => a.nombre.localeCompare(b.nombre, undefined, { numeric: true, sensitivity: 'base' }));
+        setPasillos(sorted);
         fetchProductCounts();
       } else {
         toast.error("Error al cargar pasillos");
@@ -1472,7 +1524,8 @@ export default function AlmacenView() {
       const resp = await fetch("/api/almacen/niveles");
       if (resp.ok) {
         const data = await resp.json();
-        setNiveles(data);
+        const sorted = data.sort((a: any, b: any) => a.nombre.localeCompare(b.nombre, undefined, { numeric: true, sensitivity: 'base' }));
+        setNiveles(sorted);
         fetchProductCounts();
       }
     } catch (e) {
@@ -1897,6 +1950,41 @@ export default function AlmacenView() {
                 </div>
               </div>
 
+              {/* Report Mode & Custom Grouping options */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 border-t pt-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Modo de Reporte</label>
+                  <select
+                    value={reportType}
+                    onChange={(e) => {
+                      setReportType(e.target.value as "detailed" | "summary");
+                      setShowPreview(false);
+                    }}
+                    className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                  >
+                    <option value="detailed">📋 DETALLADO (PRODUCTOS Y DETALLES)</option>
+                    <option value="summary">📊 RESUMIDO (SOLO CANTIDADES TOTALES)</option>
+                  </select>
+                </div>
+
+                {reportType === "summary" && (
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Resumir por</label>
+                    <select
+                      value={summaryGrouping}
+                      onChange={(e) => {
+                        setSummaryGrouping(e.target.value as "cajas" | "secciones");
+                        setShowPreview(false);
+                      }}
+                      className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+                    >
+                      <option value="cajas">📦 CONTENEDORES (CAJAS)</option>
+                      <option value="secciones">📍 SECCIONES FÍSICAS</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
               <Button
                 onClick={handleGenerateReport}
                 disabled={isGeneratingReport}
@@ -2194,8 +2282,15 @@ export default function AlmacenView() {
 
               <CardContent id="report-print-area" className="p-8 bg-neutral-50/30">
                 <div className="mb-8 border-b pb-6 print-only">
-                  <h1 className="text-3xl font-black tracking-tight text-neutral-900 uppercase">REPORTE DE INVENTARIO FÍSICO</h1>
+                  <h1 className="text-3xl font-black tracking-tight text-neutral-900 uppercase">
+                    REPORTE DE INVENTARIO FÍSICO ({reportType === "summary" ? "RESUMIDO" : "DETALLADO"})
+                  </h1>
                   <p className="text-xs text-neutral-500 mt-1">Generado el: {new Date().toLocaleString()}</p>
+                  {reportType === "summary" && (
+                    <p className="text-xs font-extrabold text-neutral-700 mt-0.5 uppercase">
+                      Agrupado por: {summaryGrouping === "secciones" ? "Secciones" : "Contenedores/Cajas"}
+                    </p>
+                  )}
                   <div className="mt-4 flex flex-wrap gap-4 text-xs font-bold text-neutral-600">
                     <span>Almacén: {selectedReportZoneId === "all" ? "TODOS" : zones.find(z => z.id_zona_almacen === parseInt(selectedReportZoneId))?.nombre.toUpperCase()}</span>
                     {selectedReportPasilloId !== "all" && (
@@ -2209,12 +2304,12 @@ export default function AlmacenView() {
                   </div>
                 </div>
 
-                {generateGroupedReportData().length === 0 ? (
+                {groupedReportData.length === 0 ? (
                   <div className="text-center py-16 text-neutral-400">
                     <p className="text-sm font-bold">No se encontraron datos para los filtros seleccionados</p>
                   </div>
                 ) : (
-                  generateGroupedReportData().map((zone) => (
+                  groupedReportData.map((zone) => (
                     <div key={zone.id_zona_almacen} className="mb-8 last:mb-0 border-b pb-8 last:border-b-0">
                       {/* Zone Header */}
                       <div className="bg-neutral-900 text-white px-5 py-3.5 rounded-2xl flex items-center gap-2 mb-4">
@@ -2248,98 +2343,142 @@ export default function AlmacenView() {
                                 )}
 
                                 <div className={sec.id_zona_seccion ? "ml-0 md:ml-4" : ""}>
-                                  {sec.niveles.map((lvl: any) => (
-                                    <div key={lvl.id_zona_nivel || 'sin-lvl'} className="mb-6 last:mb-0">
-                                      {lvl.id_zona_nivel && (
-                                        <div className="flex items-center gap-2 mb-3 border-l-4 border-neutral-500 pl-3 py-0.5">
-                                          <Layers size={14} className="text-neutral-500" />
-                                          <h5 className="font-bold text-xs uppercase tracking-wide text-neutral-700">
-                                            NIVEL: {lvl.nombre.toUpperCase()}
-                                          </h5>
-                                        </div>
-                                      )}
-
-                                      <div className={`grid grid-cols-1 gap-6 ${lvl.id_zona_nivel ? "ml-0 md:ml-4" : ""}`}>
-                                        {lvl.cajas.map((box: any) => (
-                                          <div key={box.id_caja} className="border rounded-2xl p-5 bg-white shadow-sm page-break">
-                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-2 border-b">
-                                              <div className="flex items-center gap-2">
-                                                <span className="font-black text-xs bg-neutral-100 text-neutral-900 px-3 py-1 rounded-lg">
-                                                  CAJA {box.numero_caja}
-                                                </span>
-                                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                                                  box.estado === 'vacia' 
-                                                    ? 'bg-neutral-100 text-neutral-600'
-                                                    : box.estado === 'activa'
-                                                    ? 'bg-blue-50 text-blue-700 border border-blue-100'
-                                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                                                }`}>
-                                                  {box.estado}
-                                                </span>
-                                              </div>
-                                              <span className="font-mono text-xs text-neutral-500 font-bold">
-                                                SKU Caja: {box.sku || "Sin SKU"}
-                                              </span>
-                                            </div>
-
-                                            {box.productos.length === 0 ? (
-                                              <p className="text-xs text-neutral-400 italic py-2">Esta caja no tiene productos asignados</p>
-                                            ) : (
-                                              <div className="overflow-x-auto">
-                                                <Table className="text-xs">
-                                                  <TableHeader className="bg-neutral-50/50">
-                                                    <TableRow>
-                                                      <TableHead className="font-bold text-neutral-800">Producto (SKU)</TableHead>
-                                                      <TableHead className="font-bold text-neutral-800">Detalles</TableHead>
-                                                      <TableHead className="w-[180px] text-center font-bold text-neutral-800">Código EAN-13 (Escanear)</TableHead>
-                                                      <TableHead className="text-right w-[80px] font-bold text-neutral-800">Cantidad</TableHead>
-                                                    </TableRow>
-                                                  </TableHeader>
-                                                  <TableBody>
-                                                    {box.productos.map((item: any) => (
-                                                      <TableRow key={item.id_producto} className="hover:bg-neutral-50/50">
-                                                        <TableCell className="font-bold text-neutral-900 py-3">
-                                                          <div className="flex flex-col">
-                                                            <span>{item.productos.sku}</span>
-                                                            {item.productos.marca_sub && (
-                                                              <span className="text-[10px] text-neutral-400 font-normal">{item.productos.marca_sub}</span>
-                                                            )}
-                                                          </div>
-                                                        </TableCell>
-                                                        <TableCell className="py-3">
-                                                          <div className="flex gap-1.5 flex-wrap">
-                                                            <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
-                                                              {item.productos.tipo}
-                                                            </span>
-                                                            <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
-                                                              Talla {item.productos.talla}
-                                                            </span>
-                                                            <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
-                                                              {item.productos.temporada}
-                                                            </span>
-                                                          </div>
-                                                        </TableCell>
-                                                        <TableCell className="text-center py-2 flex justify-center">
-                                                          {item.productos.ean_13 ? (
-                                                            <EAN13Barcode code={item.productos.ean_13} />
-                                                          ) : (
-                                                            <span className="text-[10px] text-neutral-400 italic">Sin EAN-13</span>
-                                                          )}
-                                                        </TableCell>
-                                                        <TableCell className="text-right font-black text-sm pr-6 py-3">
-                                                          {item.cantidad}
-                                                        </TableCell>
-                                                      </TableRow>
-                                                    ))}
-                                                  </TableBody>
-                                                </Table>
-                                              </div>
+                                  {reportType === "summary" && summaryGrouping === "secciones" ? (
+                                    // Summarized by Sections
+                                    (() => {
+                                      let sectionTotal = 0;
+                                      sec.niveles.forEach((lvl: any) => {
+                                        lvl.cajas.forEach((box: any) => {
+                                          box.productos.forEach((p: any) => {
+                                            sectionTotal += p.cantidad || 0;
+                                          });
+                                        });
+                                      });
+                                      return (
+                                        <div className="border border-neutral-200 rounded-2xl p-5 bg-white shadow-sm flex items-center justify-between mb-4 page-break">
+                                          <div>
+                                            <span className="font-extrabold text-sm uppercase text-neutral-800">
+                                              SECCIÓN: {sec.nombre.toUpperCase()}
+                                            </span>
+                                            {pas.id_zona_pasillo && (
+                                              <p className="text-[10px] text-neutral-400 font-bold uppercase mt-1">
+                                                En Pasillo: {pas.nombre.toUpperCase()}
+                                              </p>
                                             )}
                                           </div>
-                                        ))}
+                                          <div className="bg-amber-100 border border-amber-200 text-amber-950 font-black px-4 py-2 rounded-xl text-center min-w-[110px] shadow-sm">
+                                            <p className="text-[8px] uppercase tracking-wider text-amber-800 font-bold leading-none mb-0.5">Cantidad</p>
+                                            <p className="text-xl leading-none font-black">{sectionTotal} <span className="text-xs font-semibold">Uds</span></p>
+                                          </div>
+                                        </div>
+                                      );
+                                    })()
+                                  ) : (
+                                    sec.niveles.map((lvl: any) => (
+                                      <div key={lvl.id_zona_nivel || 'sin-lvl'} className="mb-6 last:mb-0">
+                                        {lvl.id_zona_nivel && (
+                                          <div className="flex items-center gap-2 mb-3 border-l-4 border-neutral-500 pl-3 py-0.5">
+                                            <Layers size={14} className="text-neutral-500" />
+                                            <h5 className="font-bold text-xs uppercase tracking-wide text-neutral-700">
+                                              NIVEL: {lvl.nombre.toUpperCase()}
+                                            </h5>
+                                          </div>
+                                        )}
+
+                                        <div className={`grid grid-cols-1 gap-6 ${lvl.id_zona_nivel ? "ml-0 md:ml-4" : ""}`}>
+                                          {lvl.cajas.map((box: any) => {
+                                            const boxTotal = box.productos.reduce((sum: number, p: any) => sum + (p.cantidad || 0), 0);
+                                            return (
+                                              <div key={box.id_caja} className="border rounded-2xl p-5 bg-white shadow-sm page-break">
+                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-2 border-b">
+                                                  <div className="flex items-center gap-2">
+                                                    <span className="font-black text-xs bg-neutral-100 text-neutral-900 px-3 py-1 rounded-lg">
+                                                      CAJA {box.numero_caja}
+                                                    </span>
+                                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                                                      box.estado === 'vacia' 
+                                                        ? 'bg-neutral-100 text-neutral-600'
+                                                        : box.estado === 'activa'
+                                                        ? 'bg-blue-50 text-blue-700 border border-blue-100'
+                                                        : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                                    }`}>
+                                                      {box.estado}
+                                                    </span>
+                                                  </div>
+                                                  <span className="font-mono text-xs text-neutral-500 font-bold">
+                                                    SKU Caja: {box.sku || "Sin SKU"}
+                                                  </span>
+                                                </div>
+
+                                                {reportType === "summary" ? (
+                                                  <div className="flex items-center justify-between py-2 bg-neutral-50/50 px-4 rounded-xl border border-dashed">
+                                                    <span className="text-xs font-bold text-neutral-600 uppercase">Cantidad Total en Contenedor:</span>
+                                                    <span className="bg-amber-100 border border-amber-200 text-amber-950 font-black px-4 py-1.5 rounded-lg text-sm shadow-sm">
+                                                      {boxTotal} UNIDADES
+                                                    </span>
+                                                  </div>
+                                                ) : (
+                                                  box.productos.length === 0 ? (
+                                                    <p className="text-xs text-neutral-400 italic py-2">Esta caja no tiene productos asignados</p>
+                                                  ) : (
+                                                    <div className="overflow-x-auto">
+                                                      <Table className="text-xs">
+                                                        <TableHeader className="bg-neutral-50/50">
+                                                          <TableRow>
+                                                            <TableHead className="font-bold text-neutral-800">Producto (SKU)</TableHead>
+                                                            <TableHead className="font-bold text-neutral-800">Detalles</TableHead>
+                                                            <TableHead className="w-[180px] text-center font-bold text-neutral-800">Código EAN-13 (Escanear)</TableHead>
+                                                            <TableHead className="text-right w-[80px] font-bold text-neutral-800">Cantidad</TableHead>
+                                                          </TableRow>
+                                                        </TableHeader>
+                                                        <TableBody>
+                                                          {box.productos.map((item: any) => (
+                                                            <TableRow key={item.id_producto} className="hover:bg-neutral-50/50">
+                                                              <TableCell className="font-bold text-neutral-900 py-3">
+                                                                <div className="flex flex-col">
+                                                                  <span>{item.productos.sku}</span>
+                                                                  {item.productos.marca_sub && (
+                                                                    <span className="text-[10px] text-neutral-400 font-normal">{item.productos.marca_sub}</span>
+                                                                  )}
+                                                                </div>
+                                                              </TableCell>
+                                                              <TableCell className="py-3">
+                                                                <div className="flex gap-1.5 flex-wrap">
+                                                                  <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
+                                                                    {item.productos.tipo}
+                                                                  </span>
+                                                                  <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
+                                                                    Talla {item.productos.talla}
+                                                                  </span>
+                                                                  <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
+                                                                    {item.productos.temporada}
+                                                                  </span>
+                                                                </div>
+                                                              </TableCell>
+                                                              <TableCell className="text-center py-2 flex justify-center">
+                                                                {item.productos.ean_13 ? (
+                                                                  <EAN13Barcode code={item.productos.ean_13} />
+                                                                ) : (
+                                                                  <span className="text-[10px] text-neutral-400 italic">Sin EAN-13</span>
+                                                                )}
+                                                              </TableCell>
+                                                              <TableCell className="text-right font-black text-sm pr-6 py-3">
+                                                                {item.cantidad}
+                                                              </TableCell>
+                                                            </TableRow>
+                                                          ))}
+                                                        </TableBody>
+                                                      </Table>
+                                                    </div>
+                                                  )
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
                                       </div>
-                                    </div>
-                                  ))}
+                                    ))
+                                  )}
                                 </div>
                               </div>
                             ))}
@@ -4535,7 +4674,6 @@ export default function AlmacenView() {
         </div>
       )} */}
 
-      {/* Dynamic Style Injection: Carta paper, 4 labels per row */}
       {isPrintingLabels && (
         <style>{`
           @media print {
@@ -4546,6 +4684,54 @@ export default function AlmacenView() {
           }
         `}</style>
       )}
-    </>
+      {/* Loading Dialog for Inventory Report Generation */}
+      <Dialog open={isGeneratingReport && reportLoadingStage !== "idle"} onOpenChange={() => {}}>
+        <DialogContent className="max-w-md rounded-[2.5rem] border-none shadow-2xl p-6 flex flex-col items-center justify-center text-center outline-none bg-white">
+          <DialogHeader className="w-full flex flex-col items-center">
+            <div className="bg-neutral-100 p-4 rounded-full text-neutral-900 mb-2 animate-bounce">
+              <FileText size={28} />
+            </div>
+            <DialogTitle className="text-xl font-black uppercase tracking-tight text-neutral-900">
+              Generando Reporte de Inventario
+            </DialogTitle>
+            <DialogDescription className="text-sm text-neutral-500 mt-1">
+              Consolidando información de más de {reportData.length || 3000} productos...
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="w-full mt-6 space-y-4">
+            {/* Progress bar */}
+            <div className="w-full h-2.5 bg-neutral-100 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-neutral-900 transition-all duration-300 rounded-full"
+                style={{ width: `${reportProgress}%` }}
+              />
+            </div>
+            
+            {/* Stage items */}
+            <div className="space-y-2.5 text-left text-xs font-semibold text-neutral-600">
+              <div className="flex items-center gap-2">
+                <div className={`h-2.5 w-2.5 rounded-full ${reportLoadingStage === 'fetching' ? 'bg-amber-500 animate-pulse' : (reportProgress > 10 ? 'bg-emerald-500' : 'bg-neutral-200')}`} />
+                <span className={reportProgress > 10 ? 'text-neutral-400 line-through font-bold' : 'text-neutral-900 font-bold'}>
+                  1. Descargando datos desde la base de datos...
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className={`h-2.5 w-2.5 rounded-full ${reportLoadingStage === 'grouping' ? 'bg-amber-500 animate-pulse' : (reportProgress > 40 ? 'bg-emerald-500' : 'bg-neutral-200')}`} />
+                <span className={reportProgress > 40 ? 'text-neutral-400 line-through font-bold' : (reportLoadingStage === 'grouping' ? 'text-neutral-900 font-bold' : 'text-neutral-400 font-bold')}>
+                  2. Construyendo jerarquía (Almacenes, Pasillos, Secciones)...
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className={`h-2.5 w-2.5 rounded-full ${reportLoadingStage === 'rendering' ? 'bg-amber-500 animate-pulse' : (reportProgress >= 100 ? 'bg-emerald-500' : 'bg-neutral-200')}`} />
+                <span className={reportLoadingStage === 'rendering' ? 'text-neutral-900 font-bold' : 'text-neutral-400 font-bold'}>
+                  3. Renderizando vista previa interactiva...
+                </span>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      </>
   );
 }

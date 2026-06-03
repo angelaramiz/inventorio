@@ -115,6 +115,57 @@ export default function InventoryView() {
     setFilterTipo("");
   };
 
+  const groupCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    productos.forEach(p => {
+      const groupKey = p.modelo_grupo && p.modelo_grupo !== "sin modelo"
+        ? p.modelo_grupo.toLowerCase()
+        : `individual-${p.id_producto}`;
+      counts[groupKey] = (counts[groupKey] || 0) + 1;
+    });
+    return counts;
+  }, [productos]);
+
+  const getSizeWeight = (size: string): number => {
+    if (!size) return 0;
+    const clean = size.trim().toUpperCase();
+    if (clean === "SINTALLA" || clean === "SIN TALLA" || clean === "U" || clean === "UNICA" || clean === "ÚNICA" || clean === "ÚNICO" || clean === "UNICO") return 0;
+    
+    const letterIdx = TALLAS_LETRA.findIndex(t => t.toUpperCase() === clean);
+    if (letterIdx !== -1) return letterIdx;
+    
+    const parsed = parseFloat(clean);
+    if (!isNaN(parsed)) {
+      return 100 + parsed;
+    }
+    
+    return 999;
+  };
+
+  const sortedFiltered = React.useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const groupKeyA = a.modelo_grupo && a.modelo_grupo !== "sin modelo"
+        ? a.modelo_grupo.toLowerCase()
+        : `individual-${a.id_producto}`;
+      const groupKeyB = b.modelo_grupo && b.modelo_grupo !== "sin modelo"
+        ? b.modelo_grupo.toLowerCase()
+        : `individual-${b.id_producto}`;
+      
+      const countA = groupCounts[groupKeyA] || 0;
+      const countB = groupCounts[groupKeyB] || 0;
+      
+      if (countA !== countB) {
+        return countA - countB;
+      }
+      
+      if (groupKeyA !== groupKeyB) {
+        return groupKeyA.localeCompare(groupKeyB);
+      }
+      
+      return getSizeWeight(a.talla) - getSizeWeight(b.talla);
+    });
+  }, [filtered, groupCounts]);
+
   return (
     <div className="space-y-6 pb-20 md:pb-0">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -253,7 +304,7 @@ export default function InventoryView() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-1 gap-3">
             <AnimatePresence mode="popLayout">
-              {filtered.map((p) => (
+              {sortedFiltered.map((p) => (
                 <motion.div
                   layout
                   initial={{ opacity: 0, y: 20 }}
