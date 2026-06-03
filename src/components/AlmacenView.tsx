@@ -9,7 +9,7 @@ import JsBarcode from "jsbarcode";
 import { 
   Plus, Edit2, Trash2, Home, MapPin, 
   Loader2, Check, X, AlertTriangle, FileText, Printer, Download,
-  Network, Box, ChevronDown, ChevronUp, Layers
+  Network, Box, ChevronDown, ChevronUp, Layers, Search
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -121,6 +121,11 @@ const EAN13Barcode = ({ code }: { code: string }) => {
 
 export default function AlmacenView() {
   const [activeTab, setActiveTab] = useState<"zonas" | "pasillos" | "secciones" | "cajas" | "inventario">("zonas");
+  const [almacenSearchTerm, setAlmacenSearchTerm] = useState("");
+
+  useEffect(() => {
+    setAlmacenSearchTerm("");
+  }, [activeTab]);
   
   // Tag states for new section
   const [newSectionTipo, setNewSectionTipo] = useState<string>("todos");
@@ -348,6 +353,69 @@ export default function AlmacenView() {
       return () => clearTimeout(timer);
     }
   }, [activeBarcodeSection]);
+
+  const filteredZones = React.useMemo(() => {
+    const term = almacenSearchTerm.toLowerCase().trim();
+    if (!term) return zones;
+    return zones.filter(zone => zone.nombre.toLowerCase().includes(term));
+  }, [zones, almacenSearchTerm]);
+
+  const filteredPasillos = React.useMemo(() => {
+    const term = almacenSearchTerm.toLowerCase().trim();
+    if (!term) return pasillos;
+    return pasillos.filter(pasillo => 
+      pasillo.nombre.toLowerCase().includes(term) ||
+      (pasillo.almacen_nombre && pasillo.almacen_nombre.toLowerCase().includes(term))
+    );
+  }, [pasillos, almacenSearchTerm]);
+
+  const filteredSections = React.useMemo(() => {
+    const term = almacenSearchTerm.toLowerCase().trim();
+    if (!term) return sections;
+    return sections.filter(section => 
+      section.nombre.toLowerCase().includes(term) ||
+      (section.almacen_nombre && section.almacen_nombre.toLowerCase().includes(term)) ||
+      (section.pasillo_nombre && section.pasillo_nombre.toLowerCase().includes(term)) ||
+      (section.tags?.tipo_producto && section.tags.tipo_producto.toLowerCase().includes(term)) ||
+      (section.tags?.genero && section.tags.genero.toLowerCase().includes(term)) ||
+      (section.tags?.marca && section.tags.marca.toLowerCase().includes(term))
+    );
+  }, [sections, almacenSearchTerm]);
+
+  const filteredNiveles = React.useMemo(() => {
+    const term = almacenSearchTerm.toLowerCase().trim();
+    if (!term) return niveles;
+    return niveles.filter(lvl => 
+      lvl.nombre.toLowerCase().includes(term) ||
+      (lvl.almacen_nombre && lvl.almacen_nombre.toLowerCase().includes(term)) ||
+      (lvl.pasillo_nombre && lvl.pasillo_nombre.toLowerCase().includes(term)) ||
+      (lvl.seccion_nombre && lvl.seccion_nombre.toLowerCase().includes(term)) ||
+      (lvl.tags?.tipo_producto && lvl.tags.tipo_producto.toLowerCase().includes(term)) ||
+      (lvl.tags?.tipo_producto_exacto && lvl.tags.tipo_producto_exacto.toLowerCase().includes(term)) ||
+      (lvl.tags?.genero && lvl.tags.genero.toLowerCase().includes(term)) ||
+      (lvl.tags?.temporada && lvl.tags.temporada.toLowerCase().includes(term)) ||
+      (lvl.tags?.marca && lvl.tags.marca.toLowerCase().includes(term))
+    );
+  }, [niveles, almacenSearchTerm]);
+
+  const filteredBoxes = React.useMemo(() => {
+    const term = almacenSearchTerm.toLowerCase().trim();
+    const cleanBoxes = boxes.filter((box: any) => !box.numero_caja?.toUpperCase().startsWith("NIVEL:"));
+    if (!term) return cleanBoxes;
+    return cleanBoxes.filter(box => 
+      (box.numero_caja && box.numero_caja.toLowerCase().includes(term)) ||
+      (box.sku && box.sku.toLowerCase().includes(term)) ||
+      (box.almacen_nombre && box.almacen_nombre.toLowerCase().includes(term)) ||
+      (box.pasillo_nombre && box.pasillo_nombre.toLowerCase().includes(term)) ||
+      (box.seccion_nombre && box.seccion_nombre.toLowerCase().includes(term)) ||
+      (box.nivel_nombre && box.nivel_nombre.toLowerCase().includes(term)) ||
+      (box.estado && box.estado.toLowerCase().includes(term)) ||
+      (box.tags?.tipo_producto && box.tags.tipo_producto.toLowerCase().includes(term)) ||
+      (box.tags?.tipo_producto_exacto && box.tags.tipo_producto_exacto.toLowerCase().includes(term)) ||
+      (box.tags?.genero && box.tags.genero.toLowerCase().includes(term)) ||
+      (box.tags?.marca && box.tags.marca.toLowerCase().includes(term))
+    );
+  }, [boxes, almacenSearchTerm]);
 
   // Clean up print classes on afterprint
   useEffect(() => {
@@ -728,7 +796,7 @@ export default function AlmacenView() {
       });
     }
 
-    // Convert Maps to sorted arrays for rendering
+    // Convert Maps to sorted arrays for rendering, filtering out 0-quantity nodes
     const result: any[] = [];
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
     
@@ -737,39 +805,64 @@ export default function AlmacenView() {
     sortedZones.forEach(z => {
       const sortedPasillos = Array.from(z.pasillos.values()).sort((a: any, b: any) => collator.compare(a.nombre, b.nombre));
       const pasillosArr: any[] = [];
+      let zoneTotal = 0;
       
       sortedPasillos.forEach((p: any) => {
         const sortedSecciones = Array.from(p.secciones.values()).sort((a: any, b: any) => collator.compare(a.nombre, b.nombre));
         const seccionesArr: any[] = [];
+        let pasilloTotal = 0;
         
         sortedSecciones.forEach((s: any) => {
           const sortedNiveles = Array.from(s.niveles.values()).sort((a: any, b: any) => collator.compare(a.nombre, b.nombre));
           const nivelesArr: any[] = [];
+          let seccionTotal = 0;
           
           sortedNiveles.forEach((n: any) => {
             const sortedCajas = [...n.cajas].sort((a: any, b: any) => collator.compare(a.numero_caja || '', b.numero_caja || ''));
-            nivelesArr.push({
-              ...n,
-              cajas: sortedCajas
+            const cajasArr: any[] = [];
+            let nivelTotal = 0;
+            
+            sortedCajas.forEach((box: any) => {
+              const boxTotal = box.productos.reduce((sum: number, pr: any) => sum + (pr.cantidad || 0), 0);
+              if (boxTotal > 0) {
+                cajasArr.push(box);
+                nivelTotal += boxTotal;
+              }
             });
+            
+            if (cajasArr.length > 0) {
+              nivelesArr.push({
+                ...n,
+                cajas: cajasArr
+              });
+              seccionTotal += nivelTotal;
+            }
           });
           
-          seccionesArr.push({
-            ...s,
-            niveles: nivelesArr
-          });
+          if (seccionTotal > 0) {
+            seccionesArr.push({
+              ...s,
+              niveles: nivelesArr
+            });
+            pasilloTotal += seccionTotal;
+          }
         });
         
-        pasillosArr.push({
-          ...p,
-          secciones: seccionesArr
-        });
+        if (pasilloTotal > 0) {
+          pasillosArr.push({
+            ...p,
+            secciones: seccionesArr
+          });
+          zoneTotal += pasilloTotal;
+        }
       });
       
-      result.push({
-        ...z,
-        pasillos: pasillosArr
-      });
+      if (zoneTotal > 0) {
+        result.push({
+          ...z,
+          pasillos: pasillosArr
+        });
+      }
     });
 
     return result;
@@ -3519,6 +3612,39 @@ export default function AlmacenView() {
               )}
             </CardHeader>
             <CardContent className="p-0">
+              {activeTab !== "inventario" && (
+                <div className="p-4 border-b border-neutral-100 bg-neutral-50/20">
+                  <div className="relative">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400" size={16} />
+                    <Input
+                      type="text"
+                      placeholder={
+                        activeTab === "zonas" 
+                          ? "Buscar por nombre de zona..." 
+                          : activeTab === "pasillos" 
+                          ? "Buscar por pasillo, zona..." 
+                          : activeTab === "secciones" 
+                          ? "Buscar por sección, pasillo, zona o tag..." 
+                          : "Buscar por nivel, caja, sección, pasillo, zona, tag, estado o SKU..."
+                      }
+                      value={almacenSearchTerm}
+                      onChange={(e) => setAlmacenSearchTerm(e.target.value)}
+                      className="pl-10 pr-10 rounded-2xl h-11 bg-white border-neutral-200 text-sm font-semibold focus-visible:ring-1 focus-visible:ring-neutral-950"
+                    />
+                    {almacenSearchTerm && (
+                      <Button
+                        size="icon"
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setAlmacenSearchTerm("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 text-neutral-400 hover:text-neutral-900 rounded-lg"
+                      >
+                        <X size={14} />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
               
               {activeTab === "zonas" && (
                 <div className="border-b last:border-b-0 border-neutral-100">
@@ -3529,7 +3655,7 @@ export default function AlmacenView() {
                     <div className="flex items-center gap-2">
                       <Home size={18} className="text-neutral-500" />
                       <span className="font-bold text-sm">Zonas de Almacén</span>
-                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{zones.length}</Badge>
+                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{filteredZones.length}</Badge>
                       <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.zonas || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
                     </div>
                     {expandedTables.zonas ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
@@ -3547,7 +3673,7 @@ export default function AlmacenView() {
                   <div className="flex justify-center items-center py-16 text-neutral-400">
                     <Loader2 className="animate-spin" size={24} />
                   </div>
-                ) : zones.length === 0 ? (
+                ) : filteredZones.length === 0 ? (
                   <div className="text-center py-16 text-neutral-400 flex flex-col items-center">
                     <Home size={36} strokeWidth={1} className="opacity-40 mb-2" />
                     <p className="text-sm font-bold">No hay zonas de almacén registradas</p>
@@ -3562,7 +3688,7 @@ export default function AlmacenView() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {zones.map((zone) => (
+                      {filteredZones.map((zone) => (
                         <TableRow key={zone.id_zona_almacen}>
                           <TableCell className="font-extrabold text-sm uppercase">
                             {editingZoneId === zone.id_zona_almacen ? (
@@ -3646,7 +3772,7 @@ export default function AlmacenView() {
                     <div className="flex items-center gap-2">
                       <Network size={18} className="text-neutral-500" />
                       <span className="font-bold text-sm">Pasillos y Zonas Intermedias</span>
-                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{pasillos.length}</Badge>
+                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{filteredPasillos.length}</Badge>
                       <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.pasillos || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
                     </div>
                     {expandedTables.pasillos ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
@@ -3664,7 +3790,7 @@ export default function AlmacenView() {
                   <div className="flex justify-center items-center py-16 text-neutral-400">
                     <Loader2 className="animate-spin" size={24} />
                   </div>
-                ) : pasillos.length === 0 ? (
+                ) : filteredPasillos.length === 0 ? (
                   <div className="text-center py-16 text-neutral-400 flex flex-col items-center">
                     <Network size={36} strokeWidth={1} className="opacity-40 mb-2" />
                     <p className="text-sm font-bold">No hay pasillos registrados</p>
@@ -3680,7 +3806,7 @@ export default function AlmacenView() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {pasillos.map((pasillo) => (
+                      {filteredPasillos.map((pasillo) => (
                         <TableRow key={pasillo.id_zona_pasillo}>
                           <TableCell className="font-extrabold text-sm uppercase">
                             {editingPasilloId === pasillo.id_zona_pasillo ? (
@@ -3781,7 +3907,7 @@ export default function AlmacenView() {
                     <div className="flex items-center gap-2">
                       <MapPin size={18} className="text-neutral-500" />
                       <span className="font-bold text-sm">Secciones Físicas</span>
-                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{sections.length}</Badge>
+                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{filteredSections.length}</Badge>
                       <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.secciones || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
                     </div>
                     {expandedTables.secciones ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
@@ -3799,7 +3925,7 @@ export default function AlmacenView() {
                   <div className="flex justify-center items-center py-16 text-neutral-400">
                     <Loader2 className="animate-spin" size={24} />
                   </div>
-                ) : sections.length === 0 ? (
+                ) : filteredSections.length === 0 ? (
                   <div className="text-center py-16 text-neutral-400 flex flex-col items-center">
                     <MapPin size={36} strokeWidth={1} className="opacity-40 mb-2" />
                     <p className="text-sm font-bold">No hay secciones registradas</p>
@@ -3817,7 +3943,7 @@ export default function AlmacenView() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {sections.map((section: any) => (
+                      {filteredSections.map((section: any) => (
                         <TableRow key={section.id_zona_seccion}>
                           <TableCell className="font-extrabold text-sm uppercase">
                             {editingSectionId === section.id_zona_seccion ? (
@@ -3990,7 +4116,7 @@ export default function AlmacenView() {
                     <div className="flex items-center gap-2">
                       <Network size={18} className="text-neutral-500" />
                       <span className="font-bold text-sm">Niveles de Almacenamiento (Nivel 4)</span>
-                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{niveles.length}</Badge>
+                      <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">{filteredNiveles.length}</Badge>
                       <Badge variant="outline" className="ml-2 bg-white text-neutral-600 font-bold">Total Productos: {Object.values(productCounts.niveles || {}).reduce((a:any, b:any) => a + b, 0)} uds</Badge>
                     </div>
                     {expandedTables.niveles ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
@@ -4008,7 +4134,7 @@ export default function AlmacenView() {
                     <div className="flex justify-center items-center py-10 text-neutral-400">
                       <Loader2 className="animate-spin" size={20} />
                     </div>
-                  ) : niveles.length === 0 ? (
+                  ) : filteredNiveles.length === 0 ? (
                     <div className="text-center py-10 text-neutral-400 flex flex-col items-center">
                       <Network size={30} strokeWidth={1} className="opacity-40 mb-1" />
                       <p className="text-xs font-bold">No hay niveles registrados</p>
@@ -4027,7 +4153,7 @@ export default function AlmacenView() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {niveles.map((lvl: any) => {
+                        {filteredNiveles.map((lvl: any) => {
                           const isEditing = editingNivelId === lvl.id_zona_nivel;
                           return (
                             <TableRow key={lvl.id_zona_nivel}>
@@ -4212,7 +4338,7 @@ export default function AlmacenView() {
                       <Box size={18} className="text-neutral-500" />
                       <span className="font-bold text-sm">Cajas de Almacenamiento (Nivel 5)</span>
                       <Badge className="ml-2 bg-neutral-200 text-neutral-800 border-none">
-                        {boxes.filter((box: any) => !box.numero_caja?.toUpperCase().startsWith("NIVEL:")).length}
+                        {filteredBoxes.length}
                       </Badge>
                     </div>
                     {expandedTables.cajas ? <ChevronUp size={18} className="text-neutral-500" /> : <ChevronDown size={18} className="text-neutral-500" />}
@@ -4226,7 +4352,7 @@ export default function AlmacenView() {
                         className="overflow-hidden"
                       >
                         <div className="p-0 border-t border-neutral-100 flex flex-col">
-                  {boxes.filter((box: any) => !box.numero_caja?.toUpperCase().startsWith("NIVEL:")).length === 0 ? (
+                  {filteredBoxes.length === 0 ? (
                     <div className="text-center py-10 text-neutral-400 flex flex-col items-center">
                       <Box size={30} strokeWidth={1} className="opacity-40 mb-1" />
                       <p className="text-xs font-bold">No hay cajas registradas</p>
@@ -4246,9 +4372,7 @@ export default function AlmacenView() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {boxes
-                          .filter((box: any) => !box.numero_caja?.toUpperCase().startsWith("NIVEL:"))
-                          .map((box: any) => {
+                        {filteredBoxes.map((box: any) => {
                           const isEditing = editingCajaId === box.id_caja;
                           return (
                             <TableRow key={box.id_caja}>
