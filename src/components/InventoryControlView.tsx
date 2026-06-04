@@ -86,6 +86,12 @@ export default function InventoryControlView({ userRole }: Props) {
       fetchReports();
       setupNotificationsSSE();
       fetchManagerOptions();
+      
+      // Request browser notification permission
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+
       // Regular fallback poll
       const interval = setInterval(() => {
         fetchNotifications();
@@ -351,6 +357,16 @@ export default function InventoryControlView({ userRole }: Props) {
     }
   };
 
+  const triggerNativeNotification = (title: string, options?: NotificationOptions) => {
+    if ("Notification" in window && Notification.permission === "granted") {
+      try {
+        new Notification(title, options);
+      } catch (err) {
+        console.error("Error launching native notification:", err);
+      }
+    }
+  };
+
   const setupNotificationsSSE = () => {
     if (notificationsSSERef.current) notificationsSSERef.current.close();
     
@@ -362,8 +378,16 @@ export default function InventoryControlView({ userRole }: Props) {
           // Play a visual alert / toast
           if (data.tipo === "operador_activo") {
             toast.info(`🔔 Operador ${data.operator_id} activo en ${data.zone_name}`);
+            triggerNativeNotification(`Operador Activo`, {
+              body: `El operador ${data.operator_id} se ha activado en la zona ${data.zone_name}.`,
+              icon: "/icons/icon-192.png"
+            });
           } else if (data.tipo === "conteo_enviado") {
             toast.success(`📝 Nuevo conteo físico recibido de ${data.zone_name}`);
+            triggerNativeNotification(`Nuevo Conteo Recibido`, {
+              body: `Nuevo conteo físico enviado para la zona ${data.zone_name}.`,
+              icon: "/icons/icon-192.png"
+            });
             fetchCountRequests();
           }
           fetchNotifications();
@@ -1456,12 +1480,20 @@ export default function InventoryControlView({ userRole }: Props) {
 
                           <div className="bg-white border rounded-xl p-3 text-xs space-y-1">
                             <span className="font-bold text-neutral-500 uppercase block text-[9px] mb-1">Cantidades físicas declaradas:</span>
-                            {Object.entries(req.cantidades).map(([prodId, qty]) => (
-                              <div key={prodId} className="flex justify-between border-b last:border-0 pb-1 last:pb-0 mb-1 last:mb-0">
-                                <span className="font-mono">Producto ID: {prodId}</span>
-                                <span className="font-bold">{qty as any} unidades</span>
-                              </div>
-                            ))}
+                            {Object.entries(req.cantidades)
+                              .filter(([key]) => key !== "temp_skus")
+                              .map(([prodId, qty]) => {
+                                const tempSkus = (req.cantidades as any).temp_skus || {};
+                                const displayName = Number(prodId) < 0 && tempSkus[prodId]
+                                  ? tempSkus[prodId]
+                                  : `Producto ID: ${prodId}`;
+                                return (
+                                  <div key={prodId} className="flex justify-between border-b last:border-0 pb-1 last:pb-0 mb-1 last:mb-0">
+                                    <span className="font-mono">{displayName}</span>
+                                    <span className="font-bold">{qty as any} unidades</span>
+                                  </div>
+                                );
+                              })}
                           </div>
 
                           {req.estado === "pendiente" && (
