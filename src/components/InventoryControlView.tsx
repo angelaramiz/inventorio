@@ -68,6 +68,14 @@ export default function InventoryControlView({ userRole }: Props) {
   const [loadingReport, setLoadingReport] = useState(false);
   const [simulatingCount, setSimulatingCount] = useState(false);
 
+  // Selection options and states for manager scheduling
+  const [almacenOptions, setAlmacenOptions] = useState<any[]>([]);
+  const [pasilloOptions, setPasilloOptions] = useState<any[]>([]);
+  const [seccionOptions, setSeccionOptions] = useState<any[]>([]);
+  const [selectedAlmacenes, setSelectedAlmacenes] = useState<number[]>([]);
+  const [selectedPasillos, setSelectedPasillos] = useState<number[]>([]);
+  const [selectedSecciones, setSelectedSecciones] = useState<number[]>([]);
+
   const notificationsSSERef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -77,6 +85,7 @@ export default function InventoryControlView({ userRole }: Props) {
       fetchCountRequests();
       fetchReports();
       setupNotificationsSSE();
+      fetchManagerOptions();
       // Regular fallback poll
       const interval = setInterval(() => {
         fetchNotifications();
@@ -89,6 +98,21 @@ export default function InventoryControlView({ userRole }: Props) {
       fetchOperatorSections();
     }
   }, [userRole]);
+
+  const fetchManagerOptions = async () => {
+    try {
+      const [almacenesRes, pasillosRes, seccionesRes] = await Promise.all([
+        fetch("/api/almacen/zonas"),
+        fetch("/api/almacen/pasillos"),
+        fetch("/api/almacen/secciones")
+      ]);
+      if (almacenesRes.ok) setAlmacenOptions(await almacenesRes.json());
+      if (pasillosRes.ok) setPasilloOptions(await pasillosRes.json());
+      if (seccionesRes.ok) setSeccionOptions(await seccionesRes.json());
+    } catch (e) {
+      console.error("Error loading event options:", e);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -150,11 +174,37 @@ export default function InventoryControlView({ userRole }: Props) {
     setScannedBarcode("");
   };
 
+  const parsedEventConfig = (() => {
+    if (!activeEvent || !activeEvent.descripcion) return null;
+    try {
+      const parsed = JSON.parse(activeEvent.descripcion);
+      if (parsed && typeof parsed === "object" && "targets" in parsed) {
+        return parsed;
+      }
+    } catch (e) {}
+    return null;
+  })();
+
+  const eventDisplayName = parsedEventConfig ? parsedEventConfig.text : (activeEvent?.descripcion || "");
+
+  const filteredSections = (() => {
+    if (userRole === "operator" && parsedEventConfig && parsedEventConfig.targets) {
+      const { almacenes, pasillos, secciones } = parsedEventConfig.targets;
+      return sections.filter(s => {
+        if (almacenes && almacenes.length > 0 && !almacenes.includes(s.id_zona_almacen)) return false;
+        if (pasillos && pasillos.length > 0 && !pasillos.includes(s.id_zona_pasillo)) return false;
+        if (secciones && secciones.length > 0 && !secciones.includes(s.id_zona_seccion)) return false;
+        return true;
+      });
+    }
+    return sections;
+  })();
+
   const processScannedCode = (code: string) => {
     const sectionMatch = code.match(/^SEC-(\d+)$/i);
     if (sectionMatch) {
       const sectionId = parseInt(sectionMatch[1]);
-      const sectionObj = sections.find(s => s.id_zona_seccion === sectionId);
+      const sectionObj = filteredSections.find(s => s.id_zona_seccion === sectionId);
       if (sectionObj) {
         setActiveSection(sectionObj);
         setSelectedZone(null); // Reset active box
@@ -167,7 +217,7 @@ export default function InventoryControlView({ userRole }: Props) {
     }
 
     // Buscar sección directamente por nombre/código (ej: AN0RPA01)
-    const sectionObjByName = sections.find(s => s.nombre.toLowerCase() === code.toLowerCase().trim());
+    const sectionObjByName = filteredSections.find(s => s.nombre.toLowerCase() === code.toLowerCase().trim());
     if (sectionObjByName) {
       setActiveSection(sectionObjByName);
       setSelectedZone(null); // Reset active box
@@ -177,7 +227,7 @@ export default function InventoryControlView({ userRole }: Props) {
     }
 
     // Otherwise, check if it's a box SKU or box number
-    const boxObj = zones.find(
+    const boxObj = filteredZones.find(
       b => b.sku?.toLowerCase() === code.toLowerCase() || 
            b.numero_caja?.toLowerCase() === code.toLowerCase() ||
            b.numero_caja?.toLowerCase().includes(code.toLowerCase())
@@ -185,7 +235,7 @@ export default function InventoryControlView({ userRole }: Props) {
 
     if (boxObj) {
       // Find the section this box belongs to
-      const sectionObj = sections.find(s => 
+      const sectionObj = filteredSections.find(s => 
         s.id_zona_seccion === boxObj.id_zona_seccion ||
         (boxObj.seccion_nombre && s.nombre && s.nombre.toLowerCase() === boxObj.seccion_nombre.toLowerCase())
       );
@@ -329,12 +379,23 @@ export default function InventoryControlView({ userRole }: Props) {
     if (!newEventDesc.trim()) return;
 
     setCreatingEvent(true);
+
+    const eventPayload = {
+      text: newEventDesc.trim(),
+      targets: {
+        almacenes: selectedAlmacenes,
+        pasillos: selectedPasillos,
+        secciones: selectedSecciones
+      }
+    };
+    const serializedDesc = JSON.stringify(eventPayload);
+
     try {
       const resp = await fetch("/api/inventory/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          descripcion: newEventDesc,
+          descripcion: serializedDesc,
           fecha: newEventDate || null
         })
       });
@@ -342,6 +403,9 @@ export default function InventoryControlView({ userRole }: Props) {
         toast.success("Evento de inventario programado");
         setNewEventDesc("");
         setNewEventDate("");
+        setSelectedAlmacenes([]);
+        setSelectedPasillos([]);
+        setSelectedSecciones([]);
         fetchEvents();
       }
     } catch (e) {
@@ -724,12 +788,25 @@ export default function InventoryControlView({ userRole }: Props) {
     return Object.entries(groups).filter(([_, group]) => group.items.length > 0);
   })();
 
-  const filteredZones = activeSection
-    ? zones.filter(box => 
+  const filteredZones = (() => {
+    let list = zones;
+    if (userRole === "operator" && parsedEventConfig && parsedEventConfig.targets) {
+      const { almacenes, pasillos, secciones } = parsedEventConfig.targets;
+      list = list.filter(box => {
+        if (almacenes && almacenes.length > 0 && !almacenes.includes(box.id_zona_almacen)) return false;
+        if (pasillos && pasillos.length > 0 && !pasillos.includes(box.id_zona_pasillo)) return false;
+        if (secciones && secciones.length > 0 && !secciones.includes(box.id_zona_seccion)) return false;
+        return true;
+      });
+    }
+    if (activeSection) {
+      list = list.filter(box => 
         box.id_zona_seccion === activeSection.id_zona_seccion ||
         (box.seccion_nombre && activeSection.nombre && box.seccion_nombre.toLowerCase() === activeSection.nombre.toLowerCase())
-      )
-    : zones;
+      );
+    }
+    return list;
+  })();
 
   return (
     <div className="space-y-6">
@@ -742,6 +819,12 @@ export default function InventoryControlView({ userRole }: Props) {
               <p className="text-xs text-neutral-500 font-medium mt-1">
                 Registra cantidades reales en contenedores para validación gerencial
               </p>
+              {activeEvent && (
+                <div className="mt-2.5 flex items-center gap-2 text-xs font-bold text-neutral-600 bg-neutral-100/75 py-1 px-2.5 rounded-full w-fit">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-550 animate-ping"></span>
+                  <span>EVENTO: <span className="font-black uppercase text-neutral-950">{eventDisplayName}</span></span>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-neutral-400 uppercase">Operador:</span>
@@ -890,7 +973,7 @@ export default function InventoryControlView({ userRole }: Props) {
                                     : `CAJA: ${box.numero_caja}`}
                                 </span>
                                 <Badge className={`${selectedZone?.id_caja === box.id_caja ? "bg-amber-400 text-black border-none" : "bg-neutral-100 text-neutral-700"}`}>
-                                  {box.estado.toUpperCase()}
+                                  {userRole === "operator" ? "PENDIENTE" : box.estado.toUpperCase()}
                                 </Badge>
                               </div>
                               <span className={`text-[10px] ${selectedZone?.id_caja === box.id_caja ? "text-neutral-400" : "text-neutral-400"}`}>
@@ -1116,7 +1199,7 @@ export default function InventoryControlView({ userRole }: Props) {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="pt-4">
-                  <form onSubmit={handleCreateEvent} className="space-y-3">
+                  <form onSubmit={handleCreateEvent} className="space-y-4">
                     <div className="space-y-1">
                       <label className="text-[10px] uppercase font-bold text-neutral-400">Descripción del Evento</label>
                       <Input 
@@ -1136,10 +1219,101 @@ export default function InventoryControlView({ userRole }: Props) {
                         className="rounded-xl h-10 border-neutral-200"
                       />
                     </div>
+
+                    {/* Almacenes Selection */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Almacenes (Zonas) a Contar</label>
+                      <div className="border border-neutral-200 rounded-2xl p-2.5 max-h-36 overflow-y-auto space-y-1.5 text-xs bg-neutral-50/50 custom-scrollbar">
+                        {almacenOptions.length === 0 ? (
+                          <p className="text-neutral-400 text-center py-2 font-medium">Cargando almacenes...</p>
+                        ) : (
+                          almacenOptions.map(a => (
+                            <label key={a.id_zona_almacen} className="flex items-center gap-2 cursor-pointer font-bold py-1 px-1.5 hover:bg-neutral-100 rounded-xl transition-all uppercase text-neutral-700">
+                              <input 
+                                type="checkbox"
+                                checked={selectedAlmacenes.includes(a.id_zona_almacen)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedAlmacenes([...selectedAlmacenes, a.id_zona_almacen]);
+                                  } else {
+                                    setSelectedAlmacenes(selectedAlmacenes.filter(id => id !== a.id_zona_almacen));
+                                  }
+                                }}
+                                className="rounded border-neutral-300 text-neutral-900 focus:ring-neutral-400 w-4 h-4"
+                              />
+                              <span>{a.nombre}</span>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Pasillos Selection */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Pasillos / Zonas Intermedias</label>
+                      <div className="border border-neutral-200 rounded-2xl p-2.5 max-h-36 overflow-y-auto space-y-1.5 text-xs bg-neutral-50/50 custom-scrollbar">
+                        {pasilloOptions.length === 0 ? (
+                          <p className="text-neutral-400 text-center py-2 font-medium">Cargando pasillos...</p>
+                        ) : (
+                          pasilloOptions.map(p => {
+                            const parentAlm = p.zonas_almacen?.nombre || p.almacen_nombre || "General";
+                            return (
+                              <label key={p.id_zona_pasillo} className="flex items-center gap-2 cursor-pointer font-bold py-1 px-1.5 hover:bg-neutral-100 rounded-xl transition-all uppercase text-neutral-700">
+                                <input 
+                                  type="checkbox"
+                                  checked={selectedPasillos.includes(p.id_zona_pasillo)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedPasillos([...selectedPasillos, p.id_zona_pasillo]);
+                                    } else {
+                                      setSelectedPasillos(selectedPasillos.filter(id => id !== p.id_zona_pasillo));
+                                    }
+                                  }}
+                                  className="rounded border-neutral-300 text-neutral-900 focus:ring-neutral-400 w-4 h-4"
+                                />
+                                <span>{p.nombre} <span className="text-[10px] text-neutral-400 font-semibold lowercase">({parentAlm})</span></span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Secciones Selection */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Secciones Físicas</label>
+                      <div className="border border-neutral-200 rounded-2xl p-2.5 max-h-36 overflow-y-auto space-y-1.5 text-xs bg-neutral-50/50 custom-scrollbar">
+                        {seccionOptions.length === 0 ? (
+                          <p className="text-neutral-400 text-center py-2 font-medium">Cargando secciones...</p>
+                        ) : (
+                          seccionOptions.map(s => {
+                            const parentAlm = s.almacen_nombre || "General";
+                            return (
+                              <label key={s.id_zona_seccion} className="flex items-center gap-2 cursor-pointer font-bold py-1 px-1.5 hover:bg-neutral-100 rounded-xl transition-all uppercase text-neutral-700">
+                                <input 
+                                  type="checkbox"
+                                  checked={selectedSecciones.includes(s.id_zona_seccion)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedSecciones([...selectedSecciones, s.id_zona_seccion]);
+                                    } else {
+                                      setSelectedSecciones(selectedSecciones.filter(id => id !== s.id_zona_seccion));
+                                    }
+                                  }}
+                                  className="rounded border-neutral-300 text-neutral-900 focus:ring-neutral-400 w-4 h-4"
+                                />
+                                <span>{s.nombre} <span className="text-[10px] text-neutral-400 font-semibold lowercase">({parentAlm})</span></span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
                     <Button 
                       type="submit" 
                       disabled={creatingEvent} 
-                      className="w-full rounded-xl bg-neutral-900 text-white font-bold h-10 text-xs"
+                      className="w-full rounded-xl bg-neutral-900 text-white font-bold h-11 text-xs uppercase tracking-wider"
                     >
                       {creatingEvent ? <Loader2 className="animate-spin" size={16} /> : "Programar Evento"}
                     </Button>
