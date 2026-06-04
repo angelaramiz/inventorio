@@ -2233,12 +2233,16 @@ export default function InventoryControlView({ userRole }: Props) {
       )}
 
       {/* Hidden print area for pdf generation */}
-      <div id="report-print-area" className="hidden html2pdf-mode:block p-8 bg-white">
+      <div id="report-print-area" className="p-8 bg-white">
         <style dangerouslySetInnerHTML={{ __html: `
+          #report-print-area:not(.html2pdf-mode) {
+            display: none !important;
+          }
           .html2pdf-mode .no-print {
             display: none !important;
           }
           .html2pdf-mode {
+            display: block !important;
             background-color: white !important;
             color: black !important;
           }
