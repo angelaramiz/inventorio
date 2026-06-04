@@ -1212,6 +1212,44 @@ export default function InventoryControlView({ userRole }: Props) {
             <p className="text-sm text-neutral-500 font-medium">Programa eventos, aprueba conteos y compila informes</p>
           </div>
 
+          {activeEvent && (
+            <Card className="border border-neutral-200 shadow-md rounded-3xl bg-white overflow-hidden p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <span className="bg-emerald-100 text-emerald-800 font-black uppercase text-[9px] px-2.5 py-1 rounded-full w-fit flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Evento en Progreso
+                </span>
+                <h3 className="text-base font-black uppercase text-neutral-900 mt-1.5">{eventDisplayName}</h3>
+                <p className="text-xs text-neutral-500 font-semibold">
+                  Fecha límite: <span className="font-extrabold text-neutral-800">{activeEvent.fecha ? new Date(activeEvent.fecha).toLocaleDateString() : 'Sin fecha límite'}</span>
+                </p>
+              </div>
+              <Button
+                onClick={async () => {
+                  if (window.confirm("¿Estás seguro de que deseas finalizar este evento de inventario? Esto impedirá que los operadores sigan enviando conteos.")) {
+                    try {
+                      const resp = await fetch(`/api/inventory/events/${activeEvent.id}/finalizar`, {
+                        method: "POST"
+                      });
+                      if (resp.ok) {
+                        toast.success("Evento de inventario finalizado con éxito.");
+                        setActiveEvent(null);
+                        fetchEvents();
+                      } else {
+                        toast.error("Error al finalizar el evento.");
+                      }
+                    } catch (e) {
+                      toast.error("Error de conexión al finalizar el evento.");
+                    }
+                  }
+                }}
+                className="bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold text-xs uppercase px-5 py-2.5 h-11 shrink-0 shadow-md shadow-rose-600/10 border-none transition-all"
+              >
+                Finalizar Evento
+              </Button>
+            </Card>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
             {/* Left Panel: Schedulling and live notifications */}
             <div className="lg:col-span-2 space-y-6">

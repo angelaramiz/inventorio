@@ -2959,15 +2959,38 @@ app.post("/api/inventory/approvals", async (req, res) => {
           }
         }
       }
-      
-      // Update inventory event status to completed
-      await supabase
-        .from("inventory_events")
-        .update({ estado: "completado" })
-        .eq("id", event_id);
     }
     
     res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/inventory/events/:id/finalizar - Manually finalize inventory event
+app.post("/api/inventory/events/:id/finalizar", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const eventId = parseInt(req.params.id);
+    
+    const { data, error } = await supabase
+      .from("inventory_events")
+      .update({ estado: "completado" })
+      .eq("id", eventId)
+      .select();
+      
+    if (error) throw error;
+    
+    // Broadcast notification to active operators that the event has ended
+    const newNotification = {
+      id: Date.now(),
+      tipo: "evento_finalizado",
+      event_id: eventId,
+      timestamp: new Date().toISOString()
+    };
+    stockEvents.emit("manager-notification", newNotification);
+    
+    res.json(data[0] || { success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
