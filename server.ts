@@ -2891,13 +2891,50 @@ app.post("/api/inventory/approvals", async (req, res) => {
       .single();
       
     if (status === "aprobado" && request) {
-      const cantidades = request.cantidades;
+      const cantidades = request.cantidades || {};
+      const tempSkus = cantidades.temp_skus || {};
       const event_id = request.event_id;
       const zone_id = request.zone_id;
       
       for (const [prodIdStr, qty] of Object.entries(cantidades)) {
-        const prodId = parseInt(prodIdStr);
+        if (prodIdStr === "temp_skus") continue;
+        let prodId = parseInt(prodIdStr);
         const quantity = parseInt(qty as any);
+        
+        if (prodId < 0) {
+          const tempSku = tempSkus[prodIdStr];
+          if (tempSku) {
+            // Check if product exists in Supabase products
+            const { data: existingProd } = await supabase
+              .from("productos")
+              .select("id_producto")
+              .eq("sku", tempSku)
+              .maybeSingle();
+              
+            if (!existingProd) {
+              // Create a default placeholder product for this level
+              const { data: newProd, error: pErr } = await supabase
+                .from("productos")
+                .insert([{
+                  sku: tempSku,
+                  talla: "UNICA",
+                  temporada: "todouso",
+                  tipo: "nivel",
+                  marca_sub: "TEMPORAL",
+                  activo: true
+                }])
+                .select("id_producto")
+                .single();
+              if (pErr) throw pErr;
+              prodId = newProd.id_producto;
+            } else {
+              prodId = existingProd.id_producto;
+            }
+          } else {
+            // No SKU provided for negative ID, skip to avoid database error
+            continue;
+          }
+        }
         
         await supabase
           .from("counts")

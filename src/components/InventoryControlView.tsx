@@ -459,6 +459,29 @@ export default function InventoryControlView({ userRole }: Props) {
     }
   };
 
+  const getTemporaryProductForLevel = (box: any) => {
+    const levelName = (box.numero_caja || "").replace(/^NIVEL:\s*/i, "").trim();
+    const sectionName = box.seccion_nombre || "SIN-SECCION";
+    const cleanLevel = levelName.replace(/[\s_]+/g, "-");
+    const cleanSection = sectionName.replace(/[\s_]+/g, "-");
+    const sku = `TEMP-NV-${cleanSection}-${cleanLevel}`.toUpperCase();
+    
+    return {
+      id_producto: -999,
+      productos: {
+        id_producto: -999,
+        sku: sku,
+        ean_13: "",
+        talla: "UNICA",
+        temporada: "todouso",
+        tipo: "nivel",
+        marca_sub: "TEMPORAL",
+        has_foto: false
+      },
+      cantidad: box.total_unidades || 0
+    };
+  };
+
   // Operator: Select Zone/Box
   const handleSelectZone = async (box: any) => {
     setSelectedZone(box);
@@ -466,7 +489,9 @@ export default function InventoryControlView({ userRole }: Props) {
     setCountedQuantities({});
     setLoadingProducts(true);
 
-    const zoneName = `Caja ${box.numero_caja} (${box.almacen_nombre || "Sin almacén"})`;
+    const zoneName = box.numero_caja.toUpperCase().startsWith("NIVEL:")
+      ? `${box.numero_caja} (${box.almacen_nombre || "Sin almacén"})`
+      : `Caja ${box.numero_caja} (${box.almacen_nombre || "Sin almacén"})`;
 
     // Notify manager that operator is active in this zone
     try {
@@ -485,17 +510,49 @@ export default function InventoryControlView({ userRole }: Props) {
       const resp = await fetch(`/api/cajas/${box.id_caja}/productos`);
       if (resp.ok) {
         const data = await resp.json();
-        setBoxProducts(data);
         
-        // Populate initial counted quantities with zeroes or existing quantities
+        if (box.numero_caja.toUpperCase().startsWith("NIVEL:") && data.length === 0) {
+          const tempProduct = getTemporaryProductForLevel(box);
+          setBoxProducts([tempProduct]);
+          setCountedQuantities({ [tempProduct.id_producto]: 0 });
+        } else {
+          setBoxProducts(data);
+          const initialCounts: Record<number, number> = {};
+          data.forEach((item: any) => {
+            initialCounts[item.id_producto] = 0;
+          });
+          setCountedQuantities(initialCounts);
+        }
+      } else {
+        throw new Error("Failed to load products from network");
+      }
+    } catch (e) {
+      // Graceful offline fallback
+      let cachedBox = null;
+      try {
+        const { getHistory } = await import("../utils/db");
+        const history = await getHistory();
+        cachedBox = history.find((h: any) => h.id_caja === box.id_caja);
+      } catch (err) {}
+
+      if (cachedBox && cachedBox.productos && cachedBox.productos.length > 0) {
+        setBoxProducts(cachedBox.productos);
         const initialCounts: Record<number, number> = {};
-        data.forEach((item: any) => {
+        cachedBox.productos.forEach((item: any) => {
           initialCounts[item.id_producto] = 0;
         });
         setCountedQuantities(initialCounts);
+        toast.info("Cargado desde caché local offline");
+      } else {
+        if (box.numero_caja.toUpperCase().startsWith("NIVEL:")) {
+          const tempProduct = getTemporaryProductForLevel(box);
+          setBoxProducts([tempProduct]);
+          setCountedQuantities({ [tempProduct.id_producto]: 0 });
+          toast.warning("Modo offline: se creó un registro temporal para este nivel");
+        } else {
+          toast.error("Error de conexión y no hay datos offline para esta caja");
+        }
       }
-    } catch (e) {
-      toast.error("Error al cargar productos del contenedor");
     } finally {
       setLoadingProducts(false);
     }
@@ -508,12 +565,29 @@ export default function InventoryControlView({ userRole }: Props) {
     if (Object.keys(countedQuantities).length === 0) return toast.error("No hay cantidades de conteo ingresadas");
 
     setSendingCount(true);
-    const zoneName = `Caja ${selectedZone.numero_caja} (${selectedZone.almacen_nombre || "Sin almacén"})`;
+    const zoneName = selectedZone.numero_caja.toUpperCase().startsWith("NIVEL:")
+      ? `${selectedZone.numero_caja} (${selectedZone.almacen_nombre || "Sin almacén"})`
+      : `Caja ${selectedZone.numero_caja} (${selectedZone.almacen_nombre || "Sin almacén"})`;
     
     try {
-      const finalQuantities: Record<number, number> = {};
+      const finalQuantities: Record<number, number | any> = {};
+      const tempSkus: Record<string, string> = {};
+
       for (const [key, val] of Object.entries(countedQuantities)) {
-        finalQuantities[Number(key)] = (val as any) === "" ? 0 : (val as number);
+        const prodId = Number(key);
+        const finalVal = val === "" ? 0 : (val as number);
+        finalQuantities[prodId] = finalVal;
+        
+        if (prodId < 0) {
+          const item = boxProducts.find(p => p.id_producto === prodId);
+          if (item && item.productos && item.productos.sku) {
+            tempSkus[key] = item.productos.sku;
+          }
+        }
+      }
+
+      if (Object.keys(tempSkus).length > 0) {
+        (finalQuantities as any).temp_skus = tempSkus;
       }
 
       const resp = await fetch("/api/inventory/count-request", {
@@ -537,7 +611,49 @@ export default function InventoryControlView({ userRole }: Props) {
         toast.error("Error al enviar el conteo físico");
       }
     } catch (e) {
-      toast.error("Error de conexión");
+      // Offline Fetch fallback queueing
+      try {
+        const { offlineFetch } = await import("../utils/pwaDb");
+        const finalQuantities: Record<number, number | any> = {};
+        const tempSkus: Record<string, string> = {};
+
+        for (const [key, val] of Object.entries(countedQuantities)) {
+          const prodId = Number(key);
+          const finalVal = val === "" ? 0 : (val as number);
+          finalQuantities[prodId] = finalVal;
+          
+          if (prodId < 0) {
+            const item = boxProducts.find(p => p.id_producto === prodId);
+            if (item && item.productos && item.productos.sku) {
+              tempSkus[key] = item.productos.sku;
+            }
+          }
+        }
+
+        if (Object.keys(tempSkus).length > 0) {
+          (finalQuantities as any).temp_skus = tempSkus;
+        }
+
+        const resp = await offlineFetch("/api/inventory/count-request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event_id: activeEvent.id,
+            operator_id: operatorId,
+            zone_id: selectedZone.id_caja,
+            zone_name: zoneName,
+            cantidades: finalQuantities
+          })
+        });
+
+        if (resp.ok) {
+          setSelectedZone(null);
+          setBoxProducts([]);
+          setCountedQuantities({});
+        }
+      } catch (err) {
+        toast.error("Error al guardar conteo en cola offline");
+      }
     } finally {
       setSendingCount(false);
     }
@@ -608,12 +724,12 @@ export default function InventoryControlView({ userRole }: Props) {
     return Object.entries(groups).filter(([_, group]) => group.items.length > 0);
   })();
 
-  const filteredZones = (activeSection
+  const filteredZones = activeSection
     ? zones.filter(box => 
         box.id_zona_seccion === activeSection.id_zona_seccion ||
         (box.seccion_nombre && activeSection.nombre && box.seccion_nombre.toLowerCase() === activeSection.nombre.toLowerCase())
       )
-    : zones).filter(box => !box.numero_caja?.toUpperCase().startsWith("NIVEL:"));
+    : zones;
 
   return (
     <div className="space-y-6">
@@ -768,7 +884,11 @@ export default function InventoryControlView({ userRole }: Props) {
                               }`}
                             >
                               <div className="flex justify-between w-full">
-                                <span>CAJA: {box.numero_caja}</span>
+                                <span>
+                                  {box.numero_caja.toUpperCase().startsWith("NIVEL:") 
+                                    ? box.numero_caja.toUpperCase() 
+                                    : `CAJA: ${box.numero_caja}`}
+                                </span>
                                 <Badge className={`${selectedZone?.id_caja === box.id_caja ? "bg-amber-400 text-black border-none" : "bg-neutral-100 text-neutral-700"}`}>
                                   {box.estado.toUpperCase()}
                                 </Badge>
@@ -808,13 +928,45 @@ export default function InventoryControlView({ userRole }: Props) {
                       <CardHeader className="bg-neutral-950 text-white pb-6">
                         <CardTitle className="text-lg flex items-center gap-2">
                           <Scan size={20} className="text-amber-400" />
-                          Conteo en: Caja {selectedZone.numero_caja}
+                          {selectedZone.numero_caja.toUpperCase().startsWith("NIVEL:")
+                            ? `Conteo en: ${selectedZone.numero_caja.replace("NIVEL:", "").trim()}`
+                            : `Conteo en: Caja ${selectedZone.numero_caja}`}
                         </CardTitle>
                         <CardDescription className="text-neutral-400 font-bold text-xs uppercase pt-1">
                           📍 {selectedZone.almacen_nombre || "Sin ubicación"} {selectedZone.seccion_nombre ? `| ${selectedZone.seccion_nombre}` : ""}
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="pt-6 space-y-6">
+                        {/* System Quantity Banner for Level */}
+                        {selectedZone.numero_caja.toUpperCase().startsWith("NIVEL:") && !loadingProducts && boxProducts.length > 0 && (
+                          <div className="bg-neutral-50 border border-neutral-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                            <div className="space-y-1">
+                              <p className="font-extrabold text-neutral-800 uppercase tracking-tight">
+                                Resumen de Sistema para Nivel
+                              </p>
+                              <p className="text-neutral-550 font-semibold">
+                                Actualmente hay registrados <span className="text-neutral-950 font-black">{boxProducts.reduce((sum, item) => sum + (item.cantidad || 0), 0)}</span> unidades de sistema en este nivel.
+                              </p>
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  const confirmedCounts: Record<number, number> = {};
+                                  boxProducts.forEach((item: any) => {
+                                    confirmedCounts[item.id_producto] = item.cantidad || 0;
+                                  });
+                                  setCountedQuantities(confirmedCounts);
+                                  toast.success("Cantidades del sistema aplicadas");
+                                }}
+                                className="bg-neutral-900 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider"
+                              >
+                                Confirmar Sistema
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+
                         {loadingProducts ? (
                           <div className="py-12 flex flex-col items-center justify-center text-neutral-400">
                             <Loader2 className="animate-spin mb-2" />
