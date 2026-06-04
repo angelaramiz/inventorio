@@ -185,11 +185,12 @@ export default function InventoryControlView({ userRole }: Props) {
 
     if (boxObj) {
       // Find the section this box belongs to
-      if (boxObj.id_zona_seccion) {
-        const sectionObj = sections.find(s => s.id_zona_seccion === boxObj.id_zona_seccion);
-        if (sectionObj) {
-          setActiveSection(sectionObj);
-        }
+      const sectionObj = sections.find(s => 
+        s.id_zona_seccion === boxObj.id_zona_seccion ||
+        (boxObj.seccion_nombre && s.nombre && s.nombre.toLowerCase() === boxObj.seccion_nombre.toLowerCase())
+      );
+      if (sectionObj) {
+        setActiveSection(sectionObj);
       }
       handleSelectZone(boxObj);
       toast.success(`Caja escaneada y seleccionada: ${boxObj.numero_caja}`);
@@ -608,7 +609,10 @@ export default function InventoryControlView({ userRole }: Props) {
   })();
 
   const filteredZones = (activeSection
-    ? zones.filter(box => box.id_zona_seccion === activeSection.id_zona_seccion)
+    ? zones.filter(box => 
+        box.id_zona_seccion === activeSection.id_zona_seccion ||
+        (box.seccion_nombre && activeSection.nombre && box.seccion_nombre.toLowerCase() === activeSection.nombre.toLowerCase())
+      )
     : zones).filter(box => !box.numero_caja?.toUpperCase().startsWith("NIVEL:"));
 
   return (
