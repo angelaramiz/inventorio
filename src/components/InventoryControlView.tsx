@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { 
   ClipboardList, Calendar, Bell, ShieldCheck, User, CheckCircle2, 
   XCircle, Loader2, AlertCircle, FileText, Download, Scan, Plus, MapPin,
-  RefreshCw, X, Camera, Power
+  RefreshCw, X, Camera, Power, ChevronDown, ChevronRight, Home, Network, Layers
 } from "lucide-react";
 import { toast } from "sonner";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
@@ -28,6 +28,188 @@ const waitForElement = (id: string, maxAttempts = 10, interval = 100): Promise<H
     };
     check();
   });
+};
+
+const parseRgba = (colorStr: string): [number, number, number, number] => {
+  const str = colorStr.trim().toLowerCase();
+  if (str === 'transparent') return [0, 0, 0, 0];
+  if (str === 'white') return [255, 255, 255, 1];
+  if (str === 'black') return [0, 0, 0, 1];
+  
+  const rgbMatch = str.match(/rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*([0-9.]+))?\s*\)/i) ||
+                   str.match(/rgba?\(\s*([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)(?:\s*[\/,]\s*([0-9.]+))?\s*\)/i);
+  if (rgbMatch) {
+    return [
+      parseFloat(rgbMatch[1]),
+      parseFloat(rgbMatch[2]),
+      parseFloat(rgbMatch[3]),
+      rgbMatch[4] !== undefined ? parseFloat(rgbMatch[4]) : 1
+    ];
+  }
+  
+  if (str.startsWith('#')) {
+    const hex = str.slice(1);
+    if (hex.length === 3) {
+      return [
+        parseInt(hex[0] + hex[0], 16),
+        parseInt(hex[1] + hex[1], 16),
+        parseInt(hex[2] + hex[2], 16),
+        1
+      ];
+    }
+    if (hex.length === 6) {
+      return [
+        parseInt(hex.slice(0, 2), 16),
+        parseInt(hex.slice(2, 4), 16),
+        parseInt(hex.slice(4, 6), 16),
+        1
+      ];
+    }
+    if (hex.length === 8) {
+      return [
+        parseInt(hex.slice(0, 2), 16),
+        parseInt(hex.slice(2, 4), 16),
+        parseInt(hex.slice(4, 6), 16),
+        parseInt(hex.slice(6, 8), 16) / 255
+      ];
+    }
+  }
+  
+  return [0, 0, 0, 1];
+};
+
+const resolveColorMix = (colorMixStr: string): string => {
+  try {
+    const regex = /color-mix\(\s*in\s+srgb\s*,\s*([^,]+?)(?:\s+([0-9.]+)%)?\s*,\s*([^,)]+?)(?:\s+([0-9.]+)%)?\s*\)/gi;
+    
+    return colorMixStr.replace(regex, (match, color1Str, w1Str, color2Str, w2Str) => {
+      const c1 = parseRgba(color1Str);
+      const c2 = parseRgba(color2Str);
+      
+      let w1 = w1Str !== undefined ? parseFloat(w1Str) / 100 : null;
+      let w2 = w2Str !== undefined ? parseFloat(w2Str) / 100 : null;
+      
+      if (w1 === null && w2 === null) {
+        w1 = 0.5;
+        w2 = 0.5;
+      } else if (w1 !== null && w2 === null) {
+        w2 = 1 - w1;
+      } else if (w1 === null && w2 !== null) {
+        w1 = 1 - w2;
+      }
+      
+      const r = Math.round(c1[0] * w1 + c2[0] * w2);
+      const g = Math.round(c1[1] * w1 + c2[1] * w2);
+      const b = Math.round(c1[2] * w1 + c2[2] * w2);
+      const a = c1[3] * w1 + c2[3] * w2;
+      
+      return `rgba(${r}, ${g}, ${b}, ${a})`;
+    });
+  } catch (err) {
+    console.error("Error resolving color-mix:", err);
+    return colorMixStr;
+  }
+};
+
+const oklabToRgbString = (L: number, a: number, b: number, alpha: number): string => {
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+
+  const l_3 = l_ * l_ * l_;
+  const m_3 = m_ * m_ * m_;
+  const s_3 = s_ * s_ * s_;
+
+  let rL = +4.0767416621 * l_3 - 3.3077115913 * m_3 + 0.2309699292 * s_3;
+  let gL = -1.2684380046 * l_3 + 2.6097574011 * m_3 - 0.3413193965 * s_3;
+  let bL = -0.0041960863 * l_3 - 0.7034186147 * m_3 + 1.7076147010 * s_3;
+
+  const toSRGB = (c: number) => {
+    c = Math.max(0, Math.min(1, c));
+    return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  };
+
+  const rVal = Math.round(toSRGB(rL) * 255);
+  const gVal = Math.round(toSRGB(gL) * 255);
+  const bVal = Math.round(toSRGB(bL) * 255);
+
+  return `rgba(${rVal}, ${gVal}, ${bVal}, ${alpha})`;
+};
+
+const colorToRgb = (colorStr: string): string => {
+  if (!colorStr || typeof colorStr !== 'string') return colorStr;
+  
+  let result = colorStr;
+  
+  if (result.includes('oklch')) {
+    const oklchRegex = /oklch\(\s*([0-9.%]+)(?:\s+|\s*,\s*)([0-9.]+)(?:\s+|\s*,\s*)([0-9.]+)(?:\s*[\/,]\s*([0-9.]+))?\s*\)/gi;
+    result = result.replace(oklchRegex, (match, p1, p2, p3, p4) => {
+      try {
+        let L = parseFloat(p1);
+        if (p1.includes('%')) {
+          L = parseFloat(p1) / 100;
+        }
+        const C = parseFloat(p2);
+        const H = parseFloat(p3);
+        const alpha = p4 !== undefined ? parseFloat(p4) : 1;
+
+        const hRad = (H * Math.PI) / 180;
+        const a = C * Math.cos(hRad);
+        const b = C * Math.sin(hRad);
+
+        return oklabToRgbString(L, a, b, alpha);
+      } catch (e) {
+        return match;
+      }
+    });
+  }
+  
+  if (result.includes('oklab')) {
+    const oklabRegex = /oklab\(\s*([0-9.%]+)(?:\s+|\s*,\s*)([-0-9.]+)(?:\s+|\s*,\s*)([-0-9.]+)(?:\s*[\/,]\s*([0-9.]+))?\s*\)/gi;
+    result = result.replace(oklabRegex, (match, p1, p2, p3, p4) => {
+      try {
+        let L = parseFloat(p1);
+        if (p1.includes('%')) {
+          L = parseFloat(p1) / 100;
+        }
+        const a = parseFloat(p2);
+        const b = parseFloat(p3);
+        const alpha = p4 !== undefined ? parseFloat(p4) : 1;
+
+        return oklabToRgbString(L, a, b, alpha);
+      } catch (e) {
+        return match;
+      }
+    });
+  }
+
+  if (result.includes('color-mix')) {
+    result = resolveColorMix(result);
+  }
+
+  if (result.includes('color(')) {
+    const colorRegex = /color\(\s*(?:srgb|display-p3)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)(?:\s*[\/,]\s*([0-9.]+))?\s*\)/gi;
+    result = result.replace(colorRegex, (match, rStr, gStr, bStr, aStr) => {
+      try {
+        const r = Math.round(Math.max(0, Math.min(1, parseFloat(rStr))) * 255);
+        const g = Math.round(Math.max(0, Math.min(1, parseFloat(gStr))) * 255);
+        const b = Math.round(Math.max(0, Math.min(1, parseFloat(bStr))) * 255);
+        const alpha = aStr !== undefined ? parseFloat(aStr) : 1;
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      } catch (e) {
+        return match;
+      }
+    });
+  }
+
+  if (result.includes('light-dark(')) {
+    const lightDarkRegex = /light-dark\(\s*([^,]+)\s*,\s*([^)]+)\)/gi;
+    result = result.replace(lightDarkRegex, (match, p1) => {
+      return p1.trim();
+    });
+  }
+  
+  return result;
 };
 
 interface Props {
@@ -67,6 +249,284 @@ export default function InventoryControlView({ userRole }: Props) {
   const [reports, setReports] = useState<any[]>([]);
   const [loadingReport, setLoadingReport] = useState(false);
   const [simulatingCount, setSimulatingCount] = useState(false);
+  const [downloadingPDF, setDownloadingPDF] = useState(false);
+  const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
+
+  const groupedReportTree = React.useMemo(() => {
+    const tree: Record<string, {
+      name: string;
+      totalCantidad: number;
+      pasillos: Record<string, {
+        name: string;
+        totalCantidad: number;
+        secciones: Record<string, {
+          name: string;
+          totalCantidad: number;
+          cajas: Record<string, {
+            name: string;
+            zona_id: number;
+            totalCantidad: number;
+            productos: Array<{
+              id: number;
+              sku: string;
+              tipo: string;
+              talla: string;
+              cantidad: number;
+            }>;
+          }>;
+        }>;
+      }>;
+    }> = {};
+
+    reports.forEach((r) => {
+      const box = zones.find(z => z.id_caja === r.zona_id);
+      const almName = box?.almacen_nombre || "Sin Almacén";
+      const pasName = box?.pasillo_nombre || "Sin Pasillo/Zona";
+      const secName = box?.seccion_nombre || "Sin Sección";
+      const boxName = box?.numero_caja || `Caja ${r.zona_id}`;
+      
+      const qty = r.cantidad_final || 0;
+
+      if (!tree[almName]) {
+        tree[almName] = { name: almName, totalCantidad: 0, pasillos: {} };
+      }
+      if (!tree[almName].pasillos[pasName]) {
+        tree[almName].pasillos[pasName] = { name: pasName, totalCantidad: 0, secciones: {} };
+      }
+      if (!tree[almName].pasillos[pasName].secciones[secName]) {
+        tree[almName].pasillos[pasName].secciones[secName] = { name: secName, totalCantidad: 0, cajas: {} };
+      }
+      if (!tree[almName].pasillos[pasName].secciones[secName].cajas[boxName]) {
+        tree[almName].pasillos[pasName].secciones[secName].cajas[boxName] = {
+          name: boxName,
+          zona_id: r.zona_id,
+          totalCantidad: 0,
+          productos: []
+        };
+      }
+
+      tree[almName].totalCantidad += qty;
+      tree[almName].pasillos[pasName].totalCantidad += qty;
+      tree[almName].pasillos[pasName].secciones[secName].totalCantidad += qty;
+      tree[almName].pasillos[pasName].secciones[secName].cajas[boxName].totalCantidad += qty;
+      
+      tree[almName].pasillos[pasName].secciones[secName].cajas[boxName].productos.push({
+        id: r.id,
+        sku: r.productos?.sku || `Prod ID: ${r.producto_id}`,
+        tipo: r.productos?.tipo || "Desconocido",
+        talla: r.productos?.talla || "N/A",
+        cantidad: qty
+      });
+    });
+
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+    return Object.values(tree)
+      .map(alm => ({
+        ...alm,
+        pasillos: Object.values(alm.pasillos)
+          .map(pas => ({
+            ...pas,
+            secciones: Object.values(pas.secciones)
+              .map(sec => ({
+                ...sec,
+                cajas: Object.values(sec.cajas)
+                  .map(box => ({
+                    ...box,
+                    productos: box.productos.sort((a, b) => a.sku.localeCompare(b.sku))
+                  })).sort((a, b) => collator.compare(a.name, b.name))
+              })).sort((a, b) => collator.compare(a.name, b.name))
+          })).sort((a, b) => collator.compare(a.name, b.name))
+      })).sort((a, b) => collator.compare(a.name, b.name));
+  }, [reports, zones]);
+
+  const toggleNode = (nodeKey: string) => {
+    setExpandedNodes(prev => ({
+      ...prev,
+      [nodeKey]: !prev[nodeKey]
+    }));
+  };
+
+  const handleToggleAll = (expand: boolean) => {
+    if (!expand) {
+      setExpandedNodes({});
+    } else {
+      const newExpanded: Record<string, boolean> = {};
+      groupedReportTree.forEach(alm => {
+        newExpanded[alm.name] = true;
+        alm.pasillos.forEach(pas => {
+          const pasKey = `${alm.name} > ${pas.name}`;
+          newExpanded[pasKey] = true;
+          pas.secciones.forEach(sec => {
+            const secKey = `${pasKey} > ${sec.name}`;
+            newExpanded[secKey] = true;
+            sec.cajas.forEach(box => {
+              const boxKey = `${secKey} > ${box.name}`;
+              newExpanded[boxKey] = true;
+            });
+          });
+        });
+      });
+      setExpandedNodes(newExpanded);
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    setDownloadingPDF(true);
+    toast.info("Generando archivo PDF para descarga...");
+    
+    const isDark = document.documentElement.classList.contains("dark");
+    const originalStyles = document.documentElement.getAttribute("style");
+
+    const originalGetComputedStyle = window.getComputedStyle;
+    const originalDefaultViewGetComputedStyle = document.defaultView?.getComputedStyle;
+
+    try {
+      if (isDark) {
+        document.documentElement.classList.remove("dark");
+      }
+
+      const hexVariables: Record<string, string> = {
+        "--background": "#ffffff",
+        "--foreground": "#252525",
+        "--card": "#ffffff",
+        "--card-foreground": "#252525",
+        "--popover": "#ffffff",
+        "--popover-foreground": "#252525",
+        "--primary": "#333333",
+        "--primary-foreground": "#fafafa",
+        "--secondary": "#f5f5f5",
+        "--secondary-foreground": "#333333",
+        "--muted": "#f5f5f5",
+        "--muted-foreground": "#8e8e8e",
+        "--accent": "#f5f5f5",
+        "--accent-foreground": "#333333",
+        "--destructive": "#dc2626",
+        "--border": "#ebebeb",
+        "--input": "#ebebeb",
+        "--ring": "#b5b5b5",
+        "--chart-1": "#dfdfdf",
+        "--chart-2": "#8e8e8e",
+        "--chart-3": "#707070",
+        "--chart-4": "#5e5e5e",
+        "--chart-5": "#444444",
+        "--sidebar": "#fafafa",
+        "--sidebar-foreground": "#252525",
+        "--sidebar-primary": "#333333",
+        "--sidebar-primary-foreground": "#fafafa",
+        "--sidebar-accent": "#f5f5f5",
+        "--sidebar-accent-foreground": "#333333",
+        "--sidebar-border": "#ebebeb",
+        "--sidebar-ring": "#b5b5b5",
+      };
+
+      Object.entries(hexVariables).forEach(([key, val]) => {
+        document.documentElement.style.setProperty(key, val, "important");
+      });
+
+      const customGetComputedStyle = function(el: Element, pseudoElt?: string) {
+        const style = originalGetComputedStyle(el, pseudoElt);
+        return new Proxy(style, {
+          get(target, prop) {
+            const hasOklchOrOklabOrMix = (v: any) => 
+              typeof v === 'string' && (v.includes('oklch') || v.includes('oklab') || v.includes('color-mix') || v.includes('color(') || v.includes('light-dark('));
+
+            if (prop === "getPropertyValue") {
+              return function(propertyName: string) {
+                const value = target.getPropertyValue(propertyName);
+                if (hasOklchOrOklabOrMix(value)) {
+                  return colorToRgb(value);
+                }
+                return value;
+              };
+            }
+            
+            const value = Reflect.get(target, prop);
+            if (hasOklchOrOklabOrMix(value)) {
+              return colorToRgb(value);
+            }
+            if (typeof value === 'function') {
+              return value.bind(target);
+            }
+            return value;
+          }
+        }) as any;
+      };
+
+      window.getComputedStyle = customGetComputedStyle;
+      if (document.defaultView) {
+        document.defaultView.getComputedStyle = customGetComputedStyle;
+      }
+
+      const html2pdf = await new Promise<any>((resolve, reject) => {
+        if ((window as any).html2pdf) {
+          resolve((window as any).html2pdf);
+          return;
+        }
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+        script.onload = () => resolve((window as any).html2pdf);
+        script.onerror = () => reject(new Error("No se pudo cargar el motor de PDF"));
+        document.head.appendChild(script);
+      });
+
+      const element = document.getElementById("report-print-area");
+      if (!element) throw new Error("Elemento de reporte no encontrado");
+
+      element.classList.add("html2pdf-mode");
+
+      const elementsWithStyle = element.querySelectorAll('[style]');
+      const originalInlineStyles = new Map<Element, string | null>();
+      
+      elementsWithStyle.forEach((el: any) => {
+        const styleAttr = el.getAttribute('style');
+        originalInlineStyles.set(el, styleAttr);
+        if (styleAttr && (styleAttr.includes('oklch') || styleAttr.includes('oklab') || styleAttr.includes('color-mix') || styleAttr.includes('color(') || styleAttr.includes('light-dark('))) {
+          el.setAttribute('style', colorToRgb(styleAttr));
+        }
+      });
+
+      const opt = {
+        margin:       10,
+        filename:     `reporte-consolidado-inventario-${new Date().toISOString().slice(0,10)}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true, logging: false, scrollY: 0, scrollX: 0 },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak:    { mode: ['css', 'legacy'], avoid: ['tr'] }
+      };
+
+      await html2pdf().set(opt).from(element).save();
+
+      originalInlineStyles.forEach((styleAttr, el) => {
+        if (styleAttr === null) {
+          el.removeAttribute('style');
+        } else {
+          el.setAttribute('style', styleAttr);
+        }
+      });
+
+      element.classList.remove("html2pdf-mode");
+      toast.success("Descarga iniciada");
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Error al generar PDF: " + err.message);
+    } finally {
+      window.getComputedStyle = originalGetComputedStyle;
+      if (document.defaultView && originalDefaultViewGetComputedStyle) {
+        document.defaultView.getComputedStyle = originalDefaultViewGetComputedStyle;
+      }
+
+      if (isDark) {
+        document.documentElement.classList.add("dark");
+      }
+      if (originalStyles) {
+        document.documentElement.setAttribute("style", originalStyles);
+      } else {
+        document.documentElement.removeAttribute("style");
+      }
+      setDownloadingPDF(false);
+    }
+  };
 
   // Selection options and states for manager scheduling
   const [almacenOptions, setAlmacenOptions] = useState<any[]>([]);
@@ -1562,18 +2022,37 @@ export default function InventoryControlView({ userRole }: Props) {
               {/* Informes Finales */}
               <Card className="border-none shadow-lg rounded-3xl bg-white overflow-hidden">
                 <CardHeader className="bg-neutral-50 border-b pb-4">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-wrap gap-2 justify-between items-center">
                     <CardTitle className="text-sm font-bold flex items-center gap-1.5 uppercase text-neutral-800">
                       <FileText size={16} /> Reporte Consolidado de Inventario
                     </CardTitle>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={fetchReports}
-                      className="h-8 rounded-xl text-xs"
-                    >
-                      <RefreshCw size={12} className="mr-1" /> Recargar
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={handleDownloadPDF}
+                        disabled={downloadingPDF || reports.length === 0}
+                        className="h-8 rounded-xl text-xs bg-amber-400 text-neutral-950 hover:bg-amber-300 font-bold border-none"
+                      >
+                        {downloadingPDF ? (
+                          <>
+                            <Loader2 size={12} className="mr-1 animate-spin" /> Generando...
+                          </>
+                        ) : (
+                          <>
+                            <Download size={12} className="mr-1" /> Descargar PDF
+                          </>
+                        )}
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={fetchReports}
+                        className="h-8 rounded-xl text-xs"
+                      >
+                        <RefreshCw size={12} className="mr-1" /> Recargar
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="pt-4">
@@ -1587,25 +2066,160 @@ export default function InventoryControlView({ userRole }: Props) {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      <div className="border rounded-2xl overflow-hidden overflow-x-auto max-h-[300px] custom-scrollbar">
+                      {/* Controls for Expand All / Collapse All */}
+                      <div className="flex justify-between items-center gap-2 mb-2 no-print">
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[10px] rounded-lg px-2.5 font-bold"
+                            onClick={() => handleToggleAll(true)}
+                          >
+                            Expandir Todo
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[10px] rounded-lg px-2.5 font-bold"
+                            onClick={() => handleToggleAll(false)}
+                          >
+                            Colapsar Todo
+                          </Button>
+                        </div>
+                        <div className="text-[11px] text-neutral-400 font-bold uppercase">
+                          Total Consolidado: <span className="text-neutral-900 font-black">{reports.reduce((sum, r) => sum + (r.cantidad_final || 0), 0)} uds</span>
+                        </div>
+                      </div>
+
+                      <div className="border rounded-2xl overflow-hidden overflow-x-auto max-h-[500px] custom-scrollbar bg-white">
                         <Table>
-                          <TableHeader className="bg-neutral-50">
+                          <TableHeader className="bg-neutral-50 sticky top-0 z-10 shadow-sm">
                             <TableRow>
-                              <TableHead>SKU</TableHead>
-                              <TableHead>Tipo / Talla</TableHead>
-                              <TableHead>Caja ID</TableHead>
-                              <TableHead className="text-right">Cantidad Final</TableHead>
+                              <TableHead className="font-extrabold text-neutral-800">Estructura / Prenda (SKU)</TableHead>
+                              <TableHead className="font-extrabold text-neutral-800">Detalles</TableHead>
+                              <TableHead className="font-extrabold text-neutral-800">Contenedor</TableHead>
+                              <TableHead className="text-right font-extrabold text-neutral-800">Cantidad Final</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {reports.map((r) => (
-                              <TableRow key={r.id}>
-                                <TableCell className="font-bold text-neutral-900">{r.productos?.sku || `Prod ID: ${r.producto_id}`}</TableCell>
-                                <TableCell className="capitalize">{r.productos?.tipo} / {r.productos?.talla}</TableCell>
-                                <TableCell className="font-semibold">Caja {r.zona_id}</TableCell>
-                                <TableCell className="text-right font-black text-emerald-600">{r.cantidad_final} uds</TableCell>
-                              </TableRow>
-                            ))}
+                            {groupedReportTree.map((alm) => {
+                              const almKey = alm.name;
+                              const almExpanded = !!expandedNodes[almKey];
+                              return (
+                                <React.Fragment key={almKey}>
+                                  {/* Almacén Row */}
+                                  <TableRow 
+                                    className="bg-neutral-100/70 hover:bg-neutral-100 cursor-pointer font-bold select-none border-b"
+                                    onClick={() => toggleNode(almKey)}
+                                  >
+                                    <TableCell className="py-2.5 font-black text-neutral-955 flex items-center gap-1.5 uppercase text-xs">
+                                      {almExpanded ? <ChevronDown size={14} className="text-neutral-500 shrink-0" /> : <ChevronRight size={14} className="text-neutral-500 shrink-0" />}
+                                      <Home size={13} className="text-neutral-600 shrink-0" /> Almacén: {alm.name}
+                                    </TableCell>
+                                    <TableCell className="py-2.5 text-[10px] uppercase text-neutral-400 font-bold">Almacén</TableCell>
+                                    <TableCell className="py-2.5 text-[10px] text-neutral-400">-</TableCell>
+                                    <TableCell className="py-2.5 text-right font-black text-xs text-neutral-950">
+                                      {alm.totalCantidad} uds
+                                    </TableCell>
+                                  </TableRow>
+
+                                  {almExpanded && alm.pasillos.map((pas) => {
+                                    const pasKey = `${almKey} > ${pas.name}`;
+                                    const pasExpanded = !!expandedNodes[pasKey];
+                                    return (
+                                      <React.Fragment key={pasKey}>
+                                        {/* Pasillo Row */}
+                                        <TableRow 
+                                          className="bg-neutral-50/80 hover:bg-neutral-50 cursor-pointer font-semibold select-none border-b"
+                                          onClick={() => toggleNode(pasKey)}
+                                        >
+                                          <TableCell className="py-2.5 pl-6 font-extrabold text-neutral-800 flex items-center gap-1.5 uppercase text-xs">
+                                            {pasExpanded ? <ChevronDown size={14} className="text-neutral-400 shrink-0" /> : <ChevronRight size={14} className="text-neutral-400 shrink-0" />}
+                                            <Network size={13} className="text-neutral-500 shrink-0" /> Pasillo: {pas.name}
+                                          </TableCell>
+                                          <TableCell className="py-2.5 text-[10px] uppercase text-neutral-400 font-bold">Pasillo/Zona</TableCell>
+                                          <TableCell className="py-2.5 text-[10px] text-neutral-400">-</TableCell>
+                                          <TableCell className="py-2.5 text-right font-bold text-xs text-neutral-800">
+                                            {pas.totalCantidad} uds
+                                          </TableCell>
+                                        </TableRow>
+
+                                        {pasExpanded && pas.secciones.map((sec) => {
+                                          const secKey = `${pasKey} > ${sec.name}`;
+                                          const secExpanded = !!expandedNodes[secKey];
+                                          return (
+                                            <React.Fragment key={secKey}>
+                                              {/* Sección Row */}
+                                              <TableRow 
+                                                className="bg-white hover:bg-neutral-50/50 cursor-pointer select-none border-b"
+                                                onClick={() => toggleNode(secKey)}
+                                              >
+                                                <TableCell className="py-2.5 pl-10 font-bold text-neutral-750 flex items-center gap-1.5 uppercase text-xs">
+                                                  {secExpanded ? <ChevronDown size={14} className="text-neutral-400 shrink-0" /> : <ChevronRight size={14} className="text-neutral-400 shrink-0" />}
+                                                  <MapPin size={13} className="text-neutral-500 shrink-0" /> Sección: {sec.name}
+                                                </TableCell>
+                                                <TableCell className="py-2.5 text-[10px] uppercase text-neutral-400 font-bold">Sección</TableCell>
+                                                <TableCell className="py-2.5 text-[10px] text-neutral-400">-</TableCell>
+                                                <TableCell className="py-2.5 text-right font-semibold text-xs text-neutral-700">
+                                                  {sec.totalCantidad} uds
+                                                </TableCell>
+                                              </TableRow>
+
+                                              {secExpanded && sec.cajas.map((box) => {
+                                                const boxKey = `${secKey} > ${box.name}`;
+                                                const boxExpanded = !!expandedNodes[boxKey];
+                                                const isNivel = box.name.toUpperCase().startsWith("NIVEL:");
+                                                return (
+                                                  <React.Fragment key={boxKey}>
+                                                    {/* Caja / Nivel Row */}
+                                                    <TableRow 
+                                                      className="bg-neutral-50/20 hover:bg-neutral-50/50 cursor-pointer select-none border-b"
+                                                      onClick={() => toggleNode(boxKey)}
+                                                    >
+                                                      <TableCell className="py-2.5 pl-14 font-semibold text-neutral-700 flex items-center gap-1.5 uppercase text-[11px]">
+                                                        {boxExpanded ? <ChevronDown size={12} className="text-neutral-400 shrink-0" /> : <ChevronRight size={12} className="text-neutral-400 shrink-0" />}
+                                                        <Layers size={12} className="text-neutral-400 shrink-0" /> {box.name}
+                                                      </TableCell>
+                                                      <TableCell className="py-2.5 text-[9px] uppercase text-neutral-400 font-bold">
+                                                        {isNivel ? "Nivel" : "Caja"}
+                                                      </TableCell>
+                                                      <TableCell className="py-2.5 font-mono text-[10px] text-neutral-500">
+                                                        ID: {box.zona_id}
+                                                      </TableCell>
+                                                      <TableCell className="py-2.5 text-right font-bold text-[11px] text-neutral-600">
+                                                        {box.totalCantidad} uds
+                                                      </TableCell>
+                                                    </TableRow>
+
+                                                    {boxExpanded && box.productos.map((prod) => (
+                                                      /* Product Row */
+                                                      <TableRow key={prod.id} className="hover:bg-neutral-50/10 bg-neutral-50/5 border-b">
+                                                        <TableCell className="py-2 pl-20 font-bold text-neutral-900 text-xs">
+                                                          {prod.sku}
+                                                        </TableCell>
+                                                        <TableCell className="py-2 text-[10px] capitalize text-neutral-500 font-medium">
+                                                          {prod.tipo} / {prod.talla}
+                                                        </TableCell>
+                                                        <TableCell className="py-2 font-semibold text-[10px] text-neutral-600">
+                                                          {box.name}
+                                                        </TableCell>
+                                                        <TableCell className="py-2 text-right font-black text-xs text-emerald-600">
+                                                          {prod.cantidad} uds
+                                                        </TableCell>
+                                                      </TableRow>
+                                                    ))}
+                                                  </React.Fragment>
+                                                );
+                                              })}
+                                            </React.Fragment>
+                                          );
+                                        })}
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </React.Fragment>
+                              );
+                            })}
                           </TableBody>
                         </Table>
                       </div>
@@ -1617,6 +2231,178 @@ export default function InventoryControlView({ userRole }: Props) {
           </div>
         </div>
       )}
+
+      {/* Hidden print area for pdf generation */}
+      <div id="report-print-area" className="hidden html2pdf-mode:block p-8 bg-white">
+        <style dangerouslySetInnerHTML={{ __html: `
+          .html2pdf-mode .no-print {
+            display: none !important;
+          }
+          .html2pdf-mode {
+            background-color: white !important;
+            color: black !important;
+          }
+          .html2pdf-mode * {
+            color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
+          }
+          .html2pdf-mode .bg-neutral-900 {
+            background-color: #171717 !important;
+            color: white !important;
+          }
+          .html2pdf-mode table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+          }
+          .html2pdf-mode th, .html2pdf-mode td {
+            border-bottom: 1px solid #e5e7eb !important;
+            padding: 8px 12px !important;
+          }
+          .html2pdf-mode tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          .page-break {
+            page-break-inside: auto !important;
+            break-inside: auto !important;
+          }
+        `}} />
+
+        {/* Premium Corporate Header */}
+        <div className="mb-8 border-b-2 border-neutral-900 pb-6">
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-3xl font-black tracking-tight text-neutral-950 uppercase leading-none">
+                REPORTE CONSOLIDADO DE INVENTARIO
+              </h1>
+              <p className="text-sm font-black text-amber-600 tracking-widest uppercase mt-2">
+                MODO DETALLADO (CONTEOS FÍSICOS APROBADOS)
+              </p>
+            </div>
+            <div className="text-right">
+              <span className="px-3.5 py-1.5 bg-neutral-900 text-white rounded-xl text-[10px] font-black tracking-widest uppercase">
+                REPORTE OFICIAL
+              </span>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-4 border-t border-dashed border-neutral-200 text-xs">
+            <div>
+              <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Fecha de Emisión</p>
+              <p className="font-extrabold text-neutral-800">{new Date().toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Total del Inventario</p>
+              <p className="font-black text-amber-600 text-sm leading-none mt-1">
+                {reports.reduce((sum, r) => sum + (r.cantidad_final || 0), 0)} UNIDADES
+              </p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Tipo Reporte</p>
+              <p className="font-extrabold text-neutral-800 uppercase">Consolidado Físico</p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold">Ubicaciones</p>
+              <p className="font-bold text-neutral-600 uppercase truncate">TODAS</p>
+            </div>
+          </div>
+        </div>
+
+        {groupedReportTree.length === 0 ? (
+          <div className="text-center py-16 text-neutral-400">
+            <p className="text-sm font-bold">No se encontraron datos de reportes</p>
+          </div>
+        ) : (
+          groupedReportTree.map((zone) => (
+            <div key={zone.name} className="mb-8 last:mb-0 border-b pb-8 last:border-b-0 page-break">
+              {/* Zone Header */}
+              <div className="bg-neutral-900 text-white px-5 py-3.5 rounded-2xl flex items-center gap-2 mb-4">
+                <Home size={18} />
+                <h3 className="font-black text-sm uppercase tracking-wider">
+                  ALMACÉN: {zone.name.toUpperCase()}
+                </h3>
+              </div>
+
+              {zone.pasillos.map((pas: any) => (
+                <div key={pas.name} className="ml-4 mb-6">
+                  <div className="flex items-center gap-2 mb-3 border-l-4 border-neutral-400 pl-3 py-0.5">
+                    <Network size={14} className="text-neutral-500" />
+                    <h4 className="font-bold text-xs uppercase tracking-wide text-neutral-600">
+                      PASILLO/ZONA: {pas.name.toUpperCase()}
+                    </h4>
+                  </div>
+
+                  <div className="ml-4">
+                    {pas.secciones.map((sec: any) => (
+                      <div key={sec.name} className="mb-6 last:mb-0">
+                        <div className="flex items-center gap-2 mb-3 border-l-4 border-neutral-700 pl-3 py-0.5">
+                          <MapPin size={14} className="text-neutral-700" />
+                          <h4 className="font-extrabold text-xs uppercase tracking-wide text-neutral-800">
+                            SECCIÓN: {sec.name.toUpperCase()}
+                          </h4>
+                        </div>
+
+                        <div className="ml-4">
+                          {sec.cajas.map((box: any) => {
+                            return (
+                              <div key={box.name} className="border rounded-2xl p-5 bg-white shadow-sm mb-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-2 border-b">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-black text-xs bg-neutral-100 text-neutral-900 px-3 py-1 rounded-lg">
+                                      {box.name.toUpperCase()} (ID: {box.zona_id})
+                                    </span>
+                                  </div>
+                                  <span className="font-mono text-xs text-neutral-500 font-bold">
+                                    Total Contenedor: {box.totalCantidad} Uds
+                                  </span>
+                                </div>
+
+                                <div className="overflow-x-auto">
+                                  <table className="text-xs w-full">
+                                    <thead>
+                                      <tr className="bg-neutral-50">
+                                        <th className="font-bold text-neutral-800 text-left">Producto (SKU)</th>
+                                        <th className="font-bold text-neutral-800 text-left">Detalles</th>
+                                        <th className="text-right font-bold text-neutral-800">Cantidad Final</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {box.productos.map((item: any) => (
+                                        <tr key={item.id} className="hover:bg-neutral-55">
+                                          <td className="font-bold text-neutral-900 py-3">
+                                            {item.sku}
+                                          </td>
+                                          <td className="py-3">
+                                            <div className="flex gap-1.5 flex-wrap">
+                                              <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
+                                                {item.tipo}
+                                              </span>
+                                              <span className="px-2 py-0.5 bg-neutral-100 rounded-lg text-[9px] uppercase font-bold text-neutral-600">
+                                                Talla {item.talla}
+                                              </span>
+                                            </div>
+                                          </td>
+                                          <td className="text-right font-black text-sm pr-6 py-3 text-emerald-600">
+                                            {item.cantidad} uds
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
