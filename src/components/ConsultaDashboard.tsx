@@ -96,6 +96,7 @@ export default function ConsultaDashboard() {
   const [unifiedQuery, setUnifiedQuery] = useState("");
   const [unifiedLoading, setUnifiedLoading] = useState(false);
   const [isUnifiedScannerActive, setIsUnifiedScannerActive] = useState(false);
+  const [ocrLoading, setOcrLoading] = useState(false);
 
   // Result States
   const [currentBox, setCurrentBox] = useState<CajaHistorial | null>(null);
@@ -265,6 +266,47 @@ export default function ConsultaDashboard() {
       toast.error("Error al conectar con la base de datos");
     } finally {
       setUnifiedLoading(false);
+    }
+  };
+
+  const handleOcrFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setOcrLoading(true);
+    toast.info("Enviando foto a Inteligencia Artificial...");
+
+    const fd = new FormData();
+    fd.append("foto", file);
+
+    try {
+      const resp = await fetch("/api/ocr/extract-label", {
+        method: "POST",
+        body: fd
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        toast.success("Etiqueta analizada con éxito");
+
+        const targetSearch = data.sku || data.modelo_grupo;
+        if (targetSearch) {
+          const cleanSearch = targetSearch.trim().toUpperCase();
+          setUnifiedQuery(cleanSearch);
+          handleUnifiedSearch(cleanSearch);
+        } else {
+          toast.warning("No se pudo identificar un código o modelo en la etiqueta");
+        }
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "No se pudo extraer información clara");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error al conectar con el servidor OCR");
+    } finally {
+      setOcrLoading(false);
+      e.target.value = "";
     }
   };
 
@@ -450,6 +492,34 @@ export default function ConsultaDashboard() {
                   className="rounded-xl h-11 bg-neutral-900 hover:bg-neutral-800 font-bold shrink-0 px-4 text-white"
                 >
                   {unifiedLoading ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                </Button>
+              </div>
+
+              <div className="flex flex-col gap-2 pt-1.5 border-t border-neutral-100">
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  capture="environment"
+                  onChange={handleOcrFileChange} 
+                  className="hidden" 
+                  id="ocr-dashboard-input" 
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={ocrLoading || unifiedLoading}
+                  onClick={() => document.getElementById("ocr-dashboard-input")?.click()}
+                  className="w-full h-10 rounded-xl text-xs bg-amber-400 hover:bg-amber-300 hover:scale-[1.01] text-neutral-950 font-extrabold border-none flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                >
+                  {ocrLoading ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" /> Analizando etiqueta...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={14} /> Consultar Etiqueta con IA
+                    </>
+                  )}
                 </Button>
               </div>
             </CardContent>
