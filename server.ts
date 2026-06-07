@@ -3028,11 +3028,42 @@ app.get("/api/inventory/reports", async (req, res) => {
   }
 });
 
+// Specific rate limiter for AI OCR to prevent abuse
+const ocrIpLimits = new Map<string, { count: number, resetTime: number }>();
+const OCR_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const OCR_MAX_REQUESTS = 10; // Max 10 OCR scans per minute per IP
+
+function ocrRateLimiter(req: any, res: any, next: any) {
+  const ip = (req.headers['x-forwarded-for'] as string || req.ip || req.socket.remoteAddress || "unknown").split(',')[0].trim();
+  const now = Date.now();
+  const record = ocrIpLimits.get(ip);
+
+  if (!record || now > record.resetTime) {
+    ocrIpLimits.set(ip, { count: 1, resetTime: now + OCR_LIMIT_WINDOW });
+    return next();
+  }
+
+  record.count++;
+  if (record.count > OCR_MAX_REQUESTS) {
+    return res.status(429).json({ 
+      error: "Has excedido el límite de escaneos permitidos por minuto (máximo 10). Por favor, espera un momento." 
+    });
+  }
+
+  next();
+}
+
 // POST /api/ocr/extract-label - Extract information from a label image using Gemini 1.5 Flash
-app.post("/api/ocr/extract-label", upload.single("foto"), async (req, res) => {
+app.post("/api/ocr/extract-label", ocrRateLimiter, upload.single("foto"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No se recibió ninguna imagen de etiqueta" });
+    }
+
+    // Enforce strict mime-type validation to prevent uploading malicious or unsupported files
+    const allowedMimeTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"];
+    if (!allowedMimeTypes.includes(req.file.mimetype.toLowerCase())) {
+      return res.status(400).json({ error: "Solo se permiten imágenes (JPEG, PNG, WEBP, GIF)" });
     }
 
     const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
