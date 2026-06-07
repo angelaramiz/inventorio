@@ -99,13 +99,28 @@ export default function ProductQuickRegister({
         const data = await resp.json();
         toast.success("Etiqueta analizada con éxito");
 
-        // 1. Rellenar SKU o Modelo Grupo
+        // 1. Rellenar Modelo de Grupo
+        if (data.modelo_grupo) {
+          const cleanModel = data.modelo_grupo.trim().toUpperCase();
+          setFormData(prev => ({ ...prev, modelo_grupo: cleanModel }));
+          checkModelExists(cleanModel);
+        }
+
+        // 2. Rellenar SKU / Código de barras (si se detectó uno en la etiqueta)
         if (data.sku) {
           const cleanSku = data.sku.trim().toUpperCase();
           if (isGroup) {
-            setFormData(prev => ({ ...prev, modelo_grupo: cleanSku }));
-            checkModelExists(cleanSku);
+            // En modo grupal, rellenamos el SKU de la primera variación
+            setVariaciones(prev => {
+              const updated = [...prev];
+              if (updated[0]) {
+                updated[0].sku = cleanSku;
+              }
+              return updated;
+            });
+            checkSkuExists(cleanSku);
           } else {
+            // En modo individual, rellenamos el SKU y EAN-13 principal
             setFormData(prev => ({ ...prev, sku: cleanSku, ean_13: cleanSku }));
             checkSkuExists(cleanSku);
           }

@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 import multer from "multer";
 import { EventEmitter } from "events";
 import fs from "fs";
-import { GoogleGenAI, Type } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 // In-memory event emitter for real-time stock updates
 const stockEvents = new EventEmitter();
@@ -97,7 +97,7 @@ function sanitizeIdentifier(str: any, maxLength = 100): string {
 
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 200 * 1024 } // 200KB limit
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
 // Supabase Client (Lazy Load)
@@ -3035,7 +3035,7 @@ app.post("/api/ocr/extract-label", upload.single("foto"), async (req, res) => {
       return res.status(400).json({ error: "No se recibió ninguna imagen de etiqueta" });
     }
 
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
     // Convert label image buffer to base64
     const imagePart = {
@@ -3048,25 +3048,27 @@ app.post("/api/ocr/extract-label", upload.single("foto"), async (req, res) => {
     const prompt = `
       Analiza detenidamente la foto de esta etiqueta de ropa. Identifica y extrae la información relevante.
       Devuelve los datos estrictamente en formato JSON adaptando la respuesta a esta estructura:
-      - sku: Código de modelo o estilo de la prenda.
+      - modelo_grupo: Código de modelo, estilo o referencia de la prenda (ej: GMSIROCCO-N, gmYUJEN2, gwVALICE).
+      - sku: Código de barras numérico impreso en la etiqueta (típicamente UPC o EAN-13 de 12 o 13 dígitos, ej: 199593307730) si se encuentra. Si no se encuentra un código de barras numérico, omítelo.
       - marca: Marca identificada (GUESS, MARCIANO, etc.).
       - talla: Talla de la prenda (ej: S, M, L, XL, 32, 34).
       - tipo_producto: Tipo de prenda (ej: Playera, Jeans, Camisa, Vestido, Gorra).
     `;
 
     const model = ai.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: Type.OBJECT,
+          type: SchemaType.OBJECT,
           properties: {
-            sku: { type: Type.STRING },
-            marca: { type: Type.STRING },
-            talla: { type: Type.STRING },
-            tipo_producto: { type: Type.STRING }
+            modelo_grupo: { type: SchemaType.STRING },
+            sku: { type: SchemaType.STRING },
+            marca: { type: SchemaType.STRING },
+            talla: { type: SchemaType.STRING },
+            tipo_producto: { type: SchemaType.STRING }
           },
-          required: ["sku"]
+          required: ["modelo_grupo"]
         }
       }
     });
