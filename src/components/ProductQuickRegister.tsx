@@ -48,6 +48,7 @@ export default function ProductQuickRegister({
   defaultAlmacenId
 }: Props) {
   const [loading, setLoading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
   const [cantidad, setCantidad] = useState<number | "">(defaultQty);
@@ -77,6 +78,93 @@ export default function ProductQuickRegister({
 
   const [existingSkus, setExistingSkus] = useState<Record<string, boolean>>({});
   const [existingModel, setExistingModel] = useState<boolean>(false);
+
+  const handleOcrFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setAnalyzing(true);
+    toast.info("Enviando foto a Inteligencia Artificial...");
+
+    const fd = new FormData();
+    fd.append("foto", file);
+
+    try {
+      const resp = await fetch("/api/ocr/extract-label", {
+        method: "POST",
+        body: fd
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        toast.success("Etiqueta analizada con éxito");
+
+        // 1. Rellenar SKU o Modelo Grupo
+        if (data.sku) {
+          const cleanSku = data.sku.trim().toUpperCase();
+          if (isGroup) {
+            setFormData(prev => ({ ...prev, modelo_grupo: cleanSku }));
+            checkModelExists(cleanSku);
+          } else {
+            setFormData(prev => ({ ...prev, sku: cleanSku, ean_13: cleanSku }));
+            checkSkuExists(cleanSku);
+          }
+        }
+
+        // 2. Rellenar Marca
+        if (data.marca) {
+          const matchMarca = marcas.find(m => m.toLowerCase().includes(data.marca.toLowerCase()) || data.marca.toLowerCase().includes(m.toLowerCase()));
+          if (matchMarca) {
+            setFormData(prev => ({ ...prev, marca_sub: matchMarca }));
+          }
+        }
+
+        // 3. Rellenar Tipo (prenda)
+        if (data.tipo_producto) {
+          const cleanTipo = data.tipo_producto.toLowerCase().trim();
+          const matchTipo = tipos.find(t => t.toLowerCase() === cleanTipo || t.toLowerCase().includes(cleanTipo) || cleanTipo.includes(t.toLowerCase()));
+          if (matchTipo) {
+            setFormData(prev => ({ ...prev, tipo: matchTipo as any }));
+          }
+        }
+
+        // 4. Rellenar Talla
+        if (data.talla) {
+          const cleanTalla = data.talla.trim().toUpperCase();
+          const isNum = /^[0-9]+(?:\.[0-9]+)?$/.test(cleanTalla);
+          if (isNum) {
+            setTallaTipo("numero");
+            setTallaValue(cleanTalla);
+          } else {
+            setTallaTipo("letra");
+            const matchTalla = TALLAS_LETRA.find(t => t.toUpperCase() === cleanTalla);
+            if (matchTalla) {
+              setTallaValue(matchTalla);
+            } else {
+              setTallaValue(cleanTalla);
+            }
+          }
+        }
+
+        // 5. Cargar previsualización de la foto capturada
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setPhoto(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+
+      } else {
+        const err = await resp.json();
+        toast.error(err.error || "No se pudo extraer información clara");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error al conectar con el servidor OCR");
+    } finally {
+      setAnalyzing(false);
+      e.target.value = "";
+    }
+  };
 
   const checkSkuExists = async (sku: string) => {
     if (!sku || !sku.trim()) return;
@@ -540,40 +628,70 @@ export default function ProductQuickRegister({
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto custom-scrollbar flex-1">
           {/* Photo Capture Section */}
-          <div className="flex justify-center flex-col items-center">
-            {photo ? (
-              <div className="relative group">
-                <img src={photo} alt="Preview" className="w-40 h-40 object-cover rounded-2xl shadow-md border-2 border-white" />
+          <div className="flex justify-center flex-col items-center gap-3">
+            <div className="flex gap-4 items-center">
+              {photo ? (
+                <div className="relative group">
+                  <img src={photo} alt="Preview" className="w-40 h-40 object-cover rounded-2xl shadow-md border-2 border-white" />
+                  <button 
+                    type="button"
+                    onClick={() => setPhoto(null)}
+                    className="absolute -top-2 -right-2 bg-rose-500 text-white p-1.5 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : showCamera ? (
+                <div className="relative w-40 h-40 bg-black rounded-2xl overflow-hidden mx-auto">
+                  <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                  <div className="absolute bottom-2 left-0 right-0 flex justify-center">
+                    <Button type="button" onClick={capturePhoto} className="rounded-full h-9 w-9 bg-white text-black hover:bg-neutral-200 shadow-xl border-2 border-neutral-900/10 flex items-center justify-center p-0">
+                      <div className="h-6 w-6 rounded-full border border-black"></div>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
                 <button 
                   type="button"
-                  onClick={() => setPhoto(null)}
-                  className="absolute -top-2 -right-2 bg-rose-500 text-white p-1.5 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={startCamera}
+                  className="w-40 h-40 bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-2xl flex flex-col items-center justify-center text-neutral-400 hover:bg-neutral-50 hover:border-neutral-400 transition-all group"
                 >
-                  <X size={14} />
+                  <Camera size={32} className="mb-2 group-hover:scale-110 transition-transform" />
+                  <span className="text-xs font-semibold">Tomar Foto</span>
                 </button>
-              </div>
-            ) : showCamera ? (
-              <div className="relative w-40 h-40 bg-black rounded-2xl overflow-hidden mx-auto">
-                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                <div className="absolute bottom-2 left-0 right-0 flex justify-center">
-                  <Button type="button" onClick={capturePhoto} className="rounded-full h-9 w-9 bg-white text-black hover:bg-neutral-200 shadow-xl border-2 border-neutral-900/10 flex items-center justify-center p-0">
-                    <div className="h-6 w-6 rounded-full border border-black"></div>
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <button 
+              )}
+            </div>
+
+            <div className="flex flex-col items-center gap-1.5 mt-1">
+              <input 
+                type="file" 
+                accept="image/*" 
+                capture="environment"
+                onChange={handleOcrFileChange} 
+                className="hidden" 
+                id="ocr-file-input" 
+              />
+              <Button
                 type="button"
-                onClick={startCamera}
-                className="w-40 h-40 bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-2xl flex flex-col items-center justify-center text-neutral-400 hover:bg-neutral-50 hover:border-neutral-400 transition-all group"
+                variant="outline"
+                disabled={analyzing}
+                onClick={() => document.getElementById("ocr-file-input")?.click()}
+                className="h-8 rounded-xl text-xs bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold border-none px-4 flex items-center gap-1.5"
               >
-                <Camera size={32} className="mb-2 group-hover:scale-110 transition-transform" />
-                <span className="text-xs font-semibold">Tomar Foto</span>
-              </button>
-            )}
-            <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider mt-2">
-              {isGroup ? "Foto compartida para todo el grupo" : "Foto del producto"}
-            </span>
+                {analyzing ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" /> Analizando etiqueta...
+                  </>
+                ) : (
+                  <>
+                    <Scan size={12} /> Escanear Etiqueta con IA
+                  </>
+                )}
+              </Button>
+              <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">
+                {isGroup ? "Foto compartida para todo el grupo" : "Foto del producto"}
+              </span>
+            </div>
           </div>
 
           {/* Group Details / Core Parameters */}

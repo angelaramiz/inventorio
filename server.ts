@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import multer from "multer";
 import { EventEmitter } from "events";
 import fs from "fs";
+import { GoogleGenAI, Type } from "@google/generative-ai";
 
 // In-memory event emitter for real-time stock updates
 const stockEvents = new EventEmitter();
@@ -3024,6 +3025,60 @@ app.get("/api/inventory/reports", async (req, res) => {
     res.json(data);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/ocr/extract-label - Extract information from a label image using Gemini 1.5 Flash
+app.post("/api/ocr/extract-label", upload.single("foto"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No se recibió ninguna imagen de etiqueta" });
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+    // Convert label image buffer to base64
+    const imagePart = {
+      inlineData: {
+        data: req.file.buffer.toString("base64"),
+        mimeType: req.file.mimetype
+      }
+    };
+
+    const prompt = `
+      Analiza detenidamente la foto de esta etiqueta de ropa. Identifica y extrae la información relevante.
+      Devuelve los datos estrictamente en formato JSON adaptando la respuesta a esta estructura:
+      - sku: Código de modelo o estilo de la prenda.
+      - marca: Marca identificada (GUESS, MARCIANO, etc.).
+      - talla: Talla de la prenda (ej: S, M, L, XL, 32, 34).
+      - tipo_producto: Tipo de prenda (ej: Playera, Jeans, Camisa, Vestido, Gorra).
+    `;
+
+    const model = ai.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            sku: { type: Type.STRING },
+            marca: { type: Type.STRING },
+            talla: { type: Type.STRING },
+            tipo_producto: { type: Type.STRING }
+          },
+          required: ["sku"]
+        }
+      }
+    });
+
+    const result = await model.generateContent([prompt, imagePart]);
+    const responseText = result.response.text();
+    
+    const extractedData = JSON.parse(responseText);
+    res.json(extractedData);
+  } catch (error: any) {
+    console.error("Error al procesar etiqueta con Gemini:", error);
+    res.status(500).json({ error: error.message || "Error al analizar la etiqueta" });
   }
 });
 
