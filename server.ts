@@ -2665,44 +2665,70 @@ app.get("/api/dashboard/stats", async (req, res) => {
       niveles: totalNiveles || 0
     };
 
-    // 5. Recent exits history
-    let recentExits = [];
+    // 5. Recent exits history — using two separate queries to avoid FK join issues
+    let recentExits: any[] = [];
     try {
+      // 5a. Get recent exits (last 50) — column is "fecha" not "created_at"
       const { data: exits, error: exitsErr } = await supabase
         .from("registro_salidas")
-        .select(`
-          id,
-          vendedor_id,
-          tipo_salida,
-          created_at,
-          registro_salidas_detalles (
-            cantidad,
-            productos (
-              sku,
-              talla,
-              marca_sub
-            )
-          )
-        `)
-        .order("created_at", { ascending: false })
+        .select("id, vendedor_id, tipo_salida, fecha")
+        .order("fecha", { ascending: false })
         .limit(50);
-        
-      if (!exitsErr && exits) {
+
+      if (exitsErr) {
+        console.error("Error fetching exits:", exitsErr);
+      } else if (exits && exits.length > 0) {
+        const exitIds = exits.map((e: any) => e.id);
+
+        // 5b. Get all details for those exits, with product info
+        const { data: detailsRaw, error: dErr } = await supabase
+          .from("registro_salidas_detalles")
+          .select("registro_salida_id, producto_id, cantidad")
+          .in("registro_salida_id", exitIds);
+
+        // 5c. Get product info for the referenced products
+        let productMap: Record<number, { sku: string; talla: string; marca: string }> = {};
+        if (!dErr && detailsRaw && detailsRaw.length > 0) {
+          const productIds = [...new Set(detailsRaw.map((d: any) => d.producto_id).filter(Boolean))];
+          if (productIds.length > 0) {
+            const { data: prods } = await supabase
+              .from("productos")
+              .select("id_producto, sku, talla, marca_sub")
+              .in("id_producto", productIds);
+            if (prods) {
+              for (const p of prods) {
+                productMap[p.id_producto] = { sku: p.sku || "Sin SKU", talla: p.talla || "", marca: p.marca_sub || "" };
+              }
+            }
+          }
+        }
+
+        // 5d. Aggregate details by exit
+        const detailsByExit: Record<number, any[]> = {};
+        if (!dErr && detailsRaw) {
+          for (const det of detailsRaw) {
+            if (!detailsByExit[det.registro_salida_id]) detailsByExit[det.registro_salida_id] = [];
+            const prod = productMap[det.producto_id] || { sku: "Sin SKU", talla: "", marca: "" };
+            detailsByExit[det.registro_salida_id].push({
+              sku: prod.sku,
+              talla: prod.talla,
+              marca: prod.marca,
+              cantidad: det.cantidad
+            });
+          }
+        }
+
+        // 5e. Build final recentExits array
         recentExits = exits.map((ex: any) => {
-          const itemsCount = (ex.registro_salidas_detalles || []).reduce((sum: number, det: any) => sum + (det.cantidad || 0), 0);
-          const detailsList = (ex.registro_salidas_detalles || []).map((det: any) => ({
-            sku: det.productos?.sku || "Sin SKU",
-            talla: det.productos?.talla || "",
-            marca: det.productos?.marca_sub || "",
-            cantidad: det.cantidad
-          }));
+          const dets = detailsByExit[ex.id] || [];
+          const totalUnidades = dets.reduce((sum: number, d: any) => sum + (d.cantidad || 0), 0);
           return {
             id: ex.id,
-            vendedor_id: ex.vendedor_id,
-            tipo_salida: ex.tipo_salida,
-            created_at: ex.created_at,
-            total_unidades: itemsCount,
-            detalles: detailsList
+            vendedor_id: ex.vendedor_id || "—",
+            tipo_salida: ex.tipo_salida || "salida",
+            created_at: ex.fecha,   // map 'fecha' → 'created_at' for frontend compatibility
+            total_unidades: totalUnidades,
+            detalles: dets
           };
         });
       }
