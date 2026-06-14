@@ -32,6 +32,8 @@ export default function CajasView() {
   const [niveles, setNiveles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [newCajaNumber, setNewCajaNumber] = useState("");
+  const [newCajaSku, setNewCajaSku] = useState("");
+  const [newCajaPrefix, setNewCajaPrefix] = useState("manual");
   const [zones, setZones] = useState<any[]>([]);
   const [sections, setSections] = useState<any[]>([]);
   const [selectedValue, setSelectedValue] = useState("");
@@ -325,6 +327,33 @@ export default function CajasView() {
     }
   };
 
+  const handlePrefixChange = async (prefix: string) => {
+    setNewCajaPrefix(prefix);
+    if (prefix === "manual") {
+      return;
+    }
+    
+    let lookupPrefix = "";
+    if (prefix === "CJ-X") lookupPrefix = "CJ-";
+    else if (prefix === "CJ-PLX") lookupPrefix = "CJ-PL";
+    else if (prefix === "CJ-PFX") lookupPrefix = "CJ-PF";
+    
+    if (!lookupPrefix) return;
+    
+    try {
+      const resp = await fetch(`/api/cajas/next-number?prefix=${encodeURIComponent(lookupPrefix)}`);
+      if (resp.ok) {
+        const { nextNumber } = await resp.json();
+        const code = `${lookupPrefix}${nextNumber}`;
+        setNewCajaNumber(code);
+        setNewCajaSku(code);
+      }
+    } catch (err) {
+      console.error("Error fetching next box number:", err);
+      toast.error("Error al autogenerar número de caja");
+    }
+  };
+
   const handleCreateCaja = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCajaNumber) return;
@@ -344,6 +373,7 @@ export default function CajasView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           numero_caja: newCajaNumber,
+          sku: newCajaSku || null,
           id_zona_seccion,
           id_zona_almacen,
           temporada_default: newCajaTemporada || null,
@@ -357,6 +387,8 @@ export default function CajasView() {
       if (resp.ok) {
         toast.success("Caja creada correctamente");
         setNewCajaNumber("");
+        setNewCajaSku("");
+        setNewCajaPrefix("manual");
         setSelectedValue("");
         setNewCajaTemporada("");
         setCajaTipo("todos");
@@ -1043,6 +1075,20 @@ export default function CajasView() {
 
           <form onSubmit={handleCreateCaja} className="space-y-4 pt-4">
             <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Patrón de Prefijo</label>
+              <select
+                value={newCajaPrefix}
+                onChange={e => handlePrefixChange(e.target.value)}
+                className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
+              >
+                <option value="manual">Manual (Personalizado)</option>
+                <option value="CJ-X">CJ-X (Caja Normal)</option>
+                <option value="CJ-PLX">CJ-PLX (Caja Plana/PL)</option>
+                <option value="CJ-PFX">CJ-PFX (Caja Perfume/PF)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
               <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Identificador / Número de Caja</label>
               <Input
                 placeholder="Ej: CJ-15 o Estante Superior A"
@@ -1050,6 +1096,16 @@ export default function CajasView() {
                 onChange={e => setNewCajaNumber(e.target.value)}
                 className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
                 required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">SKU / Código Barra (Opcional)</label>
+              <Input
+                placeholder="Ej: CJ-15"
+                value={newCajaSku}
+                onChange={e => setNewCajaSku(e.target.value)}
+                className="rounded-xl h-11 bg-neutral-50 border-neutral-200"
               />
             </div>
 

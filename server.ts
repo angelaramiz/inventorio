@@ -340,11 +340,52 @@ app.get("/api/cajas", async (req, res) => {
   }
 });
 
+// GET /api/cajas/next-number - Fetch next sequential sequence number for standard prefixes
+app.get("/api/cajas/next-number", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { prefix } = req.query as Record<string, string>;
+    if (!prefix) {
+      return res.status(400).json({ error: "El prefijo es requerido" });
+    }
+    
+    const { data: boxes, error } = await supabase
+      .from("cajas")
+      .select("numero_caja, sku")
+      .or(`numero_caja.ilike.${prefix}%,sku.ilike.${prefix}%`);
+      
+    if (error) throw error;
+    
+    let maxNum = 0;
+    const escapedPrefix = prefix.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+    const regex = new RegExp(`${escapedPrefix}(\\d+)`, 'i');
+    
+    if (boxes && boxes.length > 0) {
+      for (const box of boxes) {
+        const matchName = box.numero_caja ? box.numero_caja.match(regex) : null;
+        if (matchName) {
+          const num = parseInt(matchName[1], 10);
+          if (num > maxNum) maxNum = num;
+        }
+        const matchSku = box.sku ? box.sku.match(regex) : null;
+        if (matchSku) {
+          const num = parseInt(matchSku[1], 10);
+          if (num > maxNum) maxNum = num;
+        }
+      }
+    }
+    
+    res.json({ nextNumber: maxNum + 1 });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // POST /api/cajas
 app.post("/api/cajas", async (req, res) => {
   try {
     const supabase = getSupabase();
-    let { numero_caja, id_zona_seccion, id_zona_almacen, id_zona_nivel, temporada_default, tags } = req.body;
+    let { numero_caja, sku, id_zona_seccion, id_zona_almacen, id_zona_nivel, temporada_default, tags } = req.body;
     
     numero_caja = sanitizeIdentifier(numero_caja, 50);
     if (!numero_caja) {
@@ -352,6 +393,10 @@ app.post("/api/cajas", async (req, res) => {
     }
     
     const insertData: any = { numero_caja, estado: 'vacia' };
+    if (sku !== undefined && sku !== null) {
+      const cleanSku = sanitizeIdentifier(sku, 100);
+      insertData.sku = cleanSku === "" ? null : cleanSku;
+    }
     if (id_zona_nivel !== undefined && id_zona_nivel !== null && id_zona_nivel !== "") {
       const parsedLvl = parseInt(id_zona_nivel);
       if (isNaN(parsedLvl) || parsedLvl <= 0) {
@@ -754,7 +799,7 @@ app.get("/api/cajas/:id/productos", async (req, res) => {
       .select(`
         id_producto,
         cantidad,
-        productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at)
+        productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo)
       `)
       .eq("id_caja", id);
     
