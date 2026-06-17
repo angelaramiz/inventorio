@@ -238,6 +238,10 @@ export default function InventoryControlView({ userRole }: Props) {
   const [isScannerActive, setIsScannerActive] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
+  // New Operator Add SKU manually states
+  const [newSkuInput, setNewSkuInput] = useState("");
+  const [isAddingSku, setIsAddingSku] = useState(false);
+
   // Manager states
   const [newEventDesc, setNewEventDesc] = useState("");
   const [newEventDate, setNewEventDate] = useState("");
@@ -1106,6 +1110,45 @@ export default function InventoryControlView({ userRole }: Props) {
     }
   };
 
+  const handleAddNewSku = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSkuInput.trim() || !selectedZone) return;
+    setIsAddingSku(true);
+    try {
+      const resp = await fetch(`/api/productos?exactSku=${encodeURIComponent(newSkuInput.trim())}`);
+      if (resp.ok) {
+        const prodDataArray = await resp.json();
+        if (prodDataArray && prodDataArray.length > 0) {
+          const prodData = prodDataArray[0];
+          if (boxProducts.find(p => p.id_producto === prodData.id_producto)) {
+             toast.error("El producto ya está en la lista de conteo.");
+          } else {
+             const newItem = {
+               id_producto: prodData.id_producto,
+               cantidad: 0,
+               productos: prodData
+             };
+             setBoxProducts([newItem, ...boxProducts]);
+             setCountedQuantities({
+               ...countedQuantities,
+               [prodData.id_producto]: 0
+             });
+             toast.success(`Producto ${prodData.sku} agregado al conteo.`);
+             setNewSkuInput("");
+          }
+        } else {
+          toast.error("El SKU no existe en la base de datos.");
+        }
+      } else {
+        toast.error("Error al buscar el SKU.");
+      }
+    } catch (err) {
+      toast.error("Error de red al buscar el SKU.");
+    } finally {
+      setIsAddingSku(false);
+    }
+  };
+
   // Operator: Submit counts
   const handleSendCounts = async () => {
     if (!activeEvent) return toast.error("No hay un evento de inventario programado activo");
@@ -1456,9 +1499,20 @@ export default function InventoryControlView({ userRole }: Props) {
                                     ? box.numero_caja.toUpperCase() 
                                     : `CAJA: ${box.numero_caja}`}
                                 </span>
-                                <Badge className={`${selectedZone?.id_caja === box.id_caja ? "bg-amber-400 text-black border-none" : "bg-neutral-100 text-neutral-700"}`}>
-                                  {userRole === "operator" ? "PENDIENTE" : box.estado.toUpperCase()}
-                                </Badge>
+                                {userRole === "operator" ? (
+                                  (() => {
+                                    const req = countRequests.find((r: any) => r.zone_id === box.id_caja && r.event_id === activeEvent?.id);
+                                    if (!req) return <Badge className={`${selectedZone?.id_caja === box.id_caja ? "bg-amber-400 text-black border-none" : "bg-neutral-100 text-neutral-700"}`}>PENDIENTE</Badge>;
+                                    if (req.estado === "pendiente") return <Badge className="bg-amber-200 text-amber-900 border-none">ENVIADO</Badge>;
+                                    if (req.estado === "aprobado") return <Badge className="bg-emerald-200 text-emerald-900 border-none">APROBADO</Badge>;
+                                    if (req.estado === "rechazado") return <Badge className="bg-rose-200 text-rose-900 border-none">RECHAZADO</Badge>;
+                                    return <Badge className={`${selectedZone?.id_caja === box.id_caja ? "bg-amber-400 text-black border-none" : "bg-neutral-100 text-neutral-700"}`}>PENDIENTE</Badge>;
+                                  })()
+                                ) : (
+                                  <Badge className={`${selectedZone?.id_caja === box.id_caja ? "bg-amber-400 text-black border-none" : "bg-neutral-100 text-neutral-700"}`}>
+                                    {box.estado.toUpperCase()}
+                                  </Badge>
+                                )}
                               </div>
                               <span className={`text-[10px] ${selectedZone?.id_caja === box.id_caja ? "text-neutral-400" : "text-neutral-400"}`}>
                                 📍 {box.almacen_nombre || "Sin ubicación"} {box.seccion_nombre ? `| ${box.seccion_nombre}` : ""}
@@ -1534,6 +1588,23 @@ export default function InventoryControlView({ userRole }: Props) {
                           </div>
                         )}
 
+                        {/* Add SKU Manual Input */}
+                        <form onSubmit={handleAddNewSku} className="flex gap-2">
+                          <Input
+                            placeholder="Añadir SKU extra al conteo (Ej. SKU-123)..."
+                            value={newSkuInput}
+                            onChange={(e) => setNewSkuInput(e.target.value)}
+                            className="flex-1 h-10 rounded-xl text-xs"
+                          />
+                          <Button 
+                            type="submit" 
+                            disabled={isAddingSku || !newSkuInput.trim()}
+                            className="bg-neutral-900 text-white rounded-xl h-10 px-4 text-xs font-bold"
+                          >
+                            {isAddingSku ? <Loader2 className="w-4 h-4 animate-spin" /> : "Añadir SKU"}
+                          </Button>
+                        </form>
+
                         {loadingProducts ? (
                           <div className="py-12 flex flex-col items-center justify-center text-neutral-400">
                             <Loader2 className="animate-spin mb-2" />
@@ -1541,8 +1612,8 @@ export default function InventoryControlView({ userRole }: Props) {
                           </div>
                         ) : boxProducts.length === 0 ? (
                           <div className="py-12 text-center text-neutral-400 space-y-2">
-                            <p className="font-semibold text-sm">Este contenedor no registra prendas en sistema.</p>
-                            <p className="text-xs">¿Registrar prendas físicas de todos modos? Registra primero prendas en el inventario.</p>
+                            <p className="font-semibold text-sm">Este contenedor está vacío o no registra prendas en sistema.</p>
+                            <p className="text-xs">Usa el campo de arriba para buscar y agregar prendas físicamente encontradas.</p>
                           </div>
                         ) : (
                           <div className="space-y-4">
