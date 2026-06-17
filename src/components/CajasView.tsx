@@ -66,6 +66,8 @@ export default function CajasView() {
   const [quickFindLoading, setQuickFindLoading] = useState(false);
   const [isScannerActive, setIsScannerActive] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const [skuMatchingBoxIds, setSkuMatchingBoxIds] = useState<number[] | null>(null);
+  const [isSkuSearch, setIsSkuSearch] = useState(false);
 
   // Transfer form state
   const [transferOriginId, setTransferOriginId] = useState("");
@@ -140,18 +142,39 @@ export default function CajasView() {
     if (!q) return;
     setQuickFindLoading(true);
     try {
+      // 1. Try to search as a product SKU first
+      const productResp = await fetch(`/api/consultar-producto/${encodeURIComponent(q)}`);
+      if (productResp.ok) {
+        const productData = await productResp.json();
+        if (productData.product && productData.boxes) {
+          const boxIds = productData.boxes.map((b: any) => b.cajas?.id_caja).filter(Boolean);
+          setSkuMatchingBoxIds(boxIds);
+          setIsSkuSearch(true);
+          toast.success(`Mostrando contenedores con el producto SKU: ${productData.product.sku}`);
+          setQuickFindLoading(false);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("No es SKU de producto o falló validación. Buscando contenedor...");
+    }
+
+    // Fallback: If not a product SKU, clear SKU search filters and search container name
+    setIsSkuSearch(false);
+    setSkuMatchingBoxIds(null);
+
+    try {
       if (activeSubTab === "niveles") {
         const match = niveles.find(
           (n: any) =>
             n.nombre?.toUpperCase() === q ||
-            n.sku?.toUpperCase() === q ||
             n.nombre?.toUpperCase().includes(q)
         );
         if (match) {
           toast.success(`Nivel encontrado: ${match.nombre}`);
           await handleOpenNivelDetails(match);
         } else {
-          toast.error(`No se encontró ningún nivel con "${rawQuery.trim()}" en esta pestaña`);
+          toast.error(`No se encontró ningún nivel o SKU con "${rawQuery.trim()}"`);
         }
       } else {
         // Standard or CJ-X cajas
@@ -187,7 +210,7 @@ export default function CajasView() {
               toast.success(`Contenedor encontrado: ${freshMatch.numero_caja}`);
               openCajaModal(freshMatch, true);
             } else {
-              toast.error(`No se encontró "${rawQuery.trim()}" en la pestaña activa`);
+              toast.error(`No se encontró ningún contenedor o SKU con "${rawQuery.trim()}"`);
             }
           }
         }
@@ -674,7 +697,11 @@ export default function CajasView() {
           {/* Clear query */}
           {quickFindQuery && !isScannerActive && (
             <button
-              onClick={() => setQuickFindQuery("")}
+              onClick={() => {
+                setQuickFindQuery("");
+                setSkuMatchingBoxIds(null);
+                setIsSkuSearch(false);
+              }}
               className="text-neutral-400 hover:text-neutral-700 p-1 shrink-0"
             >
               <X size={14} />
@@ -716,16 +743,38 @@ export default function CajasView() {
               if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) return false;
               if (filterAlmacen === "sin_asignar") return !c.almacen_nombre;
               if (filterAlmacen !== "todos") return c.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+              if (quickFindQuery.trim()) {
+                if (isSkuSearch && skuMatchingBoxIds) {
+                  return skuMatchingBoxIds.includes(c.id_caja);
+                } else {
+                  const q = quickFindQuery.toLowerCase();
+                  return (
+                    c.numero_caja?.toLowerCase().includes(q) ||
+                    c.sku?.toLowerCase().includes(q)
+                  );
+                }
+              }
               return true;
             }).length === 0 ? (
               <div className="col-span-full py-20 text-center text-neutral-400">
                 <Box size={48} className="mx-auto mb-4 opacity-20" />
-                <p>No hay cajas registradas aún.</p>
+                <p>No hay cajas registradas aún o ninguna coincide con la búsqueda.</p>
               </div>
             ) : cajas.filter((c: any) => {
               if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) return false;
               if (filterAlmacen === "sin_asignar") return !c.almacen_nombre;
               if (filterAlmacen !== "todos") return c.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+              if (quickFindQuery.trim()) {
+                if (isSkuSearch && skuMatchingBoxIds) {
+                  return skuMatchingBoxIds.includes(c.id_caja);
+                } else {
+                  const q = quickFindQuery.toLowerCase();
+                  return (
+                    c.numero_caja?.toLowerCase().includes(q) ||
+                    c.sku?.toLowerCase().includes(q)
+                  );
+                }
+              }
               return true;
             }).map((caja) => (
               <Card 
@@ -893,12 +942,48 @@ export default function CajasView() {
               Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="h-48 bg-neutral-100 animate-pulse rounded-2xl border" />
               ))
-            ) : niveles.length === 0 ? (
+            ) : niveles.filter((nivel: any) => {
+              if (filterAlmacen === "sin_asignar") return !nivel.almacen_nombre;
+              if (filterAlmacen !== "todos") return nivel.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+              if (quickFindQuery.trim()) {
+                if (isSkuSearch && skuMatchingBoxIds) {
+                  const matchingCaja = cajas.find((c: any) => c.id_zona_nivel === nivel.id_zona_nivel);
+                  return matchingCaja && skuMatchingBoxIds.includes(matchingCaja.id_caja);
+                } else {
+                  const q = quickFindQuery.toLowerCase();
+                  return (
+                    nivel.nombre?.toLowerCase().includes(q) ||
+                    nivel.almacen_nombre?.toLowerCase().includes(q) ||
+                    nivel.pasillo_nombre?.toLowerCase().includes(q) ||
+                    nivel.seccion_nombre?.toLowerCase().includes(q)
+                  );
+                }
+              }
+              return true;
+            }).length === 0 ? (
               <div className="col-span-full py-20 text-center text-neutral-400">
                 <Network size={48} className="mx-auto mb-4 opacity-20" />
-                <p>No hay niveles registrados aún.</p>
+                <p>No hay niveles registrados aún o ninguno coincide con la búsqueda.</p>
               </div>
-            ) : niveles.map((nivel) => (
+            ) : niveles.filter((nivel: any) => {
+              if (filterAlmacen === "sin_asignar") return !nivel.almacen_nombre;
+              if (filterAlmacen !== "todos") return nivel.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+              if (quickFindQuery.trim()) {
+                if (isSkuSearch && skuMatchingBoxIds) {
+                  const matchingCaja = cajas.find((c: any) => c.id_zona_nivel === nivel.id_zona_nivel);
+                  return matchingCaja && skuMatchingBoxIds.includes(matchingCaja.id_caja);
+                } else {
+                  const q = quickFindQuery.toLowerCase();
+                  return (
+                    nivel.nombre?.toLowerCase().includes(q) ||
+                    nivel.almacen_nombre?.toLowerCase().includes(q) ||
+                    nivel.pasillo_nombre?.toLowerCase().includes(q) ||
+                    nivel.seccion_nombre?.toLowerCase().includes(q)
+                  );
+                }
+              }
+              return true;
+            }).map((nivel) => (
               <Card 
                 key={nivel.id_zona_nivel} 
                 className={`group relative overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1 rounded-2xl border-2 border-neutral-100 bg-white`}
@@ -1285,6 +1370,19 @@ export default function CajasView() {
     return cjxContainers.filter((node) => {
       if (filterAlmacen === "sin_asignar") return !node.almacen_nombre;
       if (filterAlmacen !== "todos") return node.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+      
+      if (quickFindQuery.trim()) {
+        if (isSkuSearch && skuMatchingBoxIds) {
+          return skuMatchingBoxIds.includes(node.id);
+        } else {
+          const q = quickFindQuery.toLowerCase();
+          const code = `${node.prefijo}-${node.secuencia}`;
+          return (
+            code.toLowerCase().includes(q) ||
+            node.sku_validado?.toLowerCase().includes(q)
+          );
+        }
+      }
       return true;
     }).map((node) => {
       const code = `${node.prefijo}-${node.secuencia}`;
