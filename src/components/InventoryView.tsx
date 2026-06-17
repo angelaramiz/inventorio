@@ -114,14 +114,14 @@ export default function InventoryView() {
 
   const filtered = productos.filter(p => {
     const term = searchTerm.toLowerCase();
-    const matchesSearch = !term || 
-      p.sku.toLowerCase().includes(term) ||
-      p.ean_13.toLowerCase().includes(term) ||
-      p.marca_sub.toLowerCase().includes(term);
-    const matchesMarca = !filterMarca || p.marca_sub.toLowerCase() === filterMarca.toLowerCase();
-    const matchesTalla = !filterTalla || p.talla.toLowerCase() === filterTalla.toLowerCase();
-    const matchesTemporada = !filterTemporada || p.temporada.toLowerCase() === filterTemporada.toLowerCase();
-    const matchesTipo = !filterTipo || (p.tipo && p.tipo.toLowerCase() === filterTipo.toLowerCase());
+    const matchesSearch = !term ||
+      (p.sku || "").toLowerCase().includes(term) ||
+      (p.ean_13 || "").toLowerCase().includes(term) ||
+      (p.marca_sub || "").toLowerCase().includes(term);
+    const matchesMarca = !filterMarca || (p.marca_sub || "").toLowerCase() === filterMarca.toLowerCase();
+    const matchesTalla = !filterTalla || (p.talla || "").toLowerCase() === filterTalla.toLowerCase();
+    const matchesTemporada = !filterTemporada || (p.temporada || "").toLowerCase() === filterTemporada.toLowerCase();
+    const matchesTipo = !filterTipo || (p.tipo || "").toLowerCase() === filterTipo.toLowerCase();
     return matchesSearch && matchesMarca && matchesTalla && matchesTemporada && matchesTipo;
   });
 
