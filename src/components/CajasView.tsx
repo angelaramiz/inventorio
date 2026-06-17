@@ -20,12 +20,14 @@ interface CJXContainer {
   secuencia: number;
   sku_validado: string;
   estado: string; // 'vacia', 'activa', 'llena', 'vieja', 'rota'
+  almacen_nombre?: string | null;
   stock_heredado?: any;
   created_at: string;
 }
 
 export default function CajasView() {
   const [activeSubTab, setActiveSubTab] = useState<"standard" | "cjx" | "niveles">("standard");
+  const [filterAlmacen, setFilterAlmacen] = useState<string>("todos");
 
   // Legacy cajas state
   const [cajas, setCajas] = useState<Caja[]>([]);
@@ -221,6 +223,7 @@ export default function CajasView() {
             secuencia: parseInt(parts[1]) || f.id_caja,
             sku_validado: f.numero_caja, // maps to number
             estado: f.estado,
+            almacen_nombre: f.almacen_nombre,
             created_at: f.fecha_creacion
           };
         }));
@@ -615,7 +618,7 @@ export default function CajasView() {
           {/* Scanner is now rendered inside a Dialog modal */}
 
           {/* Search input */}
-          <div className="relative flex-1 min-w-0">
+          <div className="relative flex-1 min-w-[200px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
             <Input
               placeholder={`Buscar ${activeSubTab === "niveles" ? "nivel" : "contenedor"} por nombre, número o SKU...`}
@@ -664,6 +667,21 @@ export default function CajasView() {
               <X size={14} />
             </button>
           )}
+          
+          {/* Almacen Filter */}
+          <div className="flex items-center">
+            <select
+              value={filterAlmacen}
+              onChange={e => setFilterAlmacen(e.target.value)}
+              className="h-9 px-3 rounded-xl bg-neutral-50 border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 truncate max-w-[140px]"
+            >
+              <option value="todos">Todas las zonas</option>
+              <option value="sin_asignar">Sin asignar</option>
+              {zones.map((z: any) => (
+                <option key={z.id_zona_almacen} value={z.nombre}>{z.nombre.toUpperCase()}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -681,12 +699,22 @@ export default function CajasView() {
               Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="h-48 bg-neutral-100 animate-pulse rounded-2xl border" />
               ))
-            ) : cajas.filter((c: any) => !c.numero_caja?.toUpperCase().startsWith("NIVEL:")).length === 0 ? (
+            ) : cajas.filter((c: any) => {
+              if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) return false;
+              if (filterAlmacen === "sin_asignar") return !c.almacen_nombre;
+              if (filterAlmacen !== "todos") return c.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+              return true;
+            }).length === 0 ? (
               <div className="col-span-full py-20 text-center text-neutral-400">
                 <Box size={48} className="mx-auto mb-4 opacity-20" />
                 <p>No hay cajas registradas aún.</p>
               </div>
-            ) : cajas.filter((c: any) => !c.numero_caja?.toUpperCase().startsWith("NIVEL:")).map((caja) => (
+            ) : cajas.filter((c: any) => {
+              if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) return false;
+              if (filterAlmacen === "sin_asignar") return !c.almacen_nombre;
+              if (filterAlmacen !== "todos") return c.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+              return true;
+            }).map((caja) => (
               <Card 
                 key={caja.id_caja} 
                 className={`group relative overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1 rounded-2xl border-2 ${
@@ -1241,7 +1269,11 @@ export default function CajasView() {
   );
 
   function cjjxContainersToShow() {
-    return cjxContainers.map((node) => {
+    return cjxContainers.filter((node) => {
+      if (filterAlmacen === "sin_asignar") return !node.almacen_nombre;
+      if (filterAlmacen !== "todos") return node.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+      return true;
+    }).map((node) => {
       const code = `${node.prefijo}-${node.secuencia}`;
       return (
         <Card 
