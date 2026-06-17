@@ -1829,7 +1829,23 @@ export default function AlmacenView() {
     }
   };
 
-  const reportGrandTotal = reportData.reduce((sum: number, item: any) => sum + (item.cantidad || 0), 0);
+  const reportGrandTotal = React.useMemo(() => {
+    let sum = 0;
+    groupedReportData.forEach((zone: any) => {
+      zone.pasillos.forEach((pas: any) => {
+        pas.secciones.forEach((sec: any) => {
+          sec.niveles.forEach((lvl: any) => {
+            lvl.cajas.forEach((box: any) => {
+              box.productos.forEach((p: any) => {
+                sum += p.cantidad || 0;
+              });
+            });
+          });
+        });
+      });
+    });
+    return sum;
+  }, [groupedReportData]);
 
   return (
     <>

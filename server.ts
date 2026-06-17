@@ -157,6 +157,30 @@ app.get('/api/app-version', (req, res) => {
   }
 });
 
+// GET /api/android-version - Returns the latest Android app version
+app.get("/api/android-version", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data: settings, error } = await supabase
+      .from("warehouse_settings")
+      .select("valor")
+      .eq("clave", "android_version")
+      .single();
+      
+    if (error && error.code !== 'PGRST116') throw error;
+    
+    const versionInfo = settings?.valor || {
+      versionCode: 1,
+      versionName: "1.0.0",
+      apkUrl: "/public/inventorio.apk"
+    };
+    
+    res.json(versionInfo);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- API ROUTES ---
 
 // GET /api/productos - EXCLUDING foto column for performance. Supports ?q, ?marca, ?talla, ?temporada, ?tipo filters
@@ -340,6 +364,54 @@ app.get("/api/cajas", async (req, res) => {
   }
 });
 
+// GET /api/cajas/suggested-prefixes - Auto-discover prefix patterns
+app.get("/api/cajas/suggested-prefixes", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data: boxes, error } = await supabase
+      .from("cajas")
+      .select("numero_caja");
+      
+    if (error) throw error;
+    
+    const counts: Record<string, number> = {};
+    if (boxes) {
+      for (const box of boxes) {
+        if (!box.numero_caja) continue;
+        const match = box.numero_caja.match(/^([a-zA-Z-]+)(\d+)$/);
+        if (match) {
+          const prefix = match[1].toUpperCase();
+          counts[prefix] = (counts[prefix] || 0) + 1;
+        }
+      }
+    }
+    
+    const suggested = Object.entries(counts)
+      .filter(([prefix, count]) => count >= 3)
+      .map(([prefix, count]) => prefix)
+      .sort();
+      
+    const standardPrefixes = ["CJ-", "CJ-PL-", "CJ-PF-", "CJ-PR-"];
+    for (const p of standardPrefixes) {
+      if (!suggested.includes(p)) suggested.push(p);
+    }
+
+    const responseFormat = suggested.map(prefix => {
+       if (prefix === "CJ-") return { id: "CJ-X", base: "CJ-", label: "CJ-X (Caja Normal)" };
+       if (prefix === "CJ-PL-") return { id: "CJ-PLX", base: "CJ-PL-", label: "CJ-PLX (Caja Plana/PL)" };
+       if (prefix === "CJ-PF-") return { id: "CJ-PFX", base: "CJ-PF-", label: "CJ-PFX (Caja Perfume/PF)" };
+       if (prefix === "CJ-PR-") return { id: "CJ-PRX", base: "CJ-PR-", label: "CJ-PRX (Caja Prenda/PR)" };
+       
+       const cleanBase = prefix.endsWith('-') ? prefix.slice(0, -1) : prefix;
+       return { id: `${cleanBase}-X`, base: prefix, label: `${cleanBase}-X (Auto-detectado)` };
+    });
+    
+    res.json(responseFormat);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/cajas/next-number - Fetch next sequential sequence number for standard prefixes
 app.get("/api/cajas/next-number", async (req, res) => {
   try {
@@ -463,6 +535,7 @@ app.put("/api/cajas/:id", async (req, res) => {
       const cleanSku = sanitizeIdentifier(sku, 100);
       updateData.sku = cleanSku === "" ? null : cleanSku;
     }
+
     if (temporada_default !== undefined) {
       if (temporada_default === null || temporada_default === "") {
         updateData.temporada_default = null;
@@ -4192,6 +4265,11 @@ async function startServer() {
     console.error("Error al iniciar normalización de marcas:", err.message);
   }
 
+  // Serve static public assets in both dev and prod
+  if (fs.existsSync(path.join(process.cwd(), "public"))) {
+      app.use('/public', express.static(path.join(process.cwd(), "public")));
+  }
+
   if (NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -4200,6 +4278,12 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
+    
+    if (fs.existsSync(path.join(process.cwd(), "public"))) {
+        console.log("Serving static files from /public");
+        app.use('/public', express.static(path.join(process.cwd(), "public")));
+    }
+
     // Serve static assets with cache, but disable cache for index.html
     app.use(express.static(distPath, {
       maxAge: '1d',

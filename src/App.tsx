@@ -151,7 +151,12 @@ export default function App() {
             <span className="font-extrabold tracking-tight">INVENTARIO <span className="text-neutral-400 font-medium text-sm ml-1">| ALPHA</span></span>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            {localStorage.getItem("app_version") && (
+              <span className="text-[10px] font-black tracking-widest text-neutral-400 bg-neutral-100 px-2.5 py-1 rounded-full uppercase">
+                v{localStorage.getItem("app_version")}
+              </span>
+            )}
             <SyncStatusBadge />
             <nav className="hidden xl:flex items-center gap-1 bg-neutral-100 p-1 rounded-xl">
               <TabButton 
@@ -346,7 +351,12 @@ function AppHeader({ subtitle, actionLabel, actionUrl }: { subtitle: string, act
           </span>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          {localStorage.getItem("app_version") && (
+            <span className="text-[10px] font-black tracking-widest text-neutral-400 bg-neutral-100 px-2.5 py-1 rounded-full uppercase">
+              v{localStorage.getItem("app_version")}
+            </span>
+          )}
           <SyncStatusBadge />
           {actionLabel && actionUrl && (
             <button 

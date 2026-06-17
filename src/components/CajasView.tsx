@@ -36,6 +36,7 @@ export default function CajasView() {
   const [newCajaNumber, setNewCajaNumber] = useState("");
   const [newCajaSku, setNewCajaSku] = useState("");
   const [newCajaPrefix, setNewCajaPrefix] = useState("manual");
+  const [suggestedPrefixes, setSuggestedPrefixes] = useState<{id: string, base: string, label: string}[]>([]);
   const [zones, setZones] = useState<any[]>([]);
   const [sections, setSections] = useState<any[]>([]);
   const [selectedValue, setSelectedValue] = useState("");
@@ -81,6 +82,7 @@ export default function CajasView() {
     fetchLocations();
     fetchTemporadas();
     fetchCjxContainers();
+    fetchSuggestedPrefixes();
     const saved = localStorage.getItem("activeCaja");
     if (saved) {
       setActiveCajaId(JSON.parse(saved).id_caja);
@@ -239,12 +241,26 @@ export default function CajasView() {
     setLoading(true);
     try {
       const resp = await fetch("/api/cajas");
-      const data = await resp.json();
-      setCajas(data);
+      if (resp.ok) {
+        const data = await resp.json();
+        setCajas(data);
+      }
     } catch (err) {
-      toast.error("Error al cargar cajas");
+      console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSuggestedPrefixes = async () => {
+    try {
+      const resp = await fetch("/api/cajas/suggested-prefixes");
+      if (resp.ok) {
+        const data = await resp.json();
+        setSuggestedPrefixes(data);
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -332,28 +348,25 @@ export default function CajasView() {
 
   const handlePrefixChange = async (prefix: string) => {
     setNewCajaPrefix(prefix);
-    if (prefix === "manual") {
-      return;
-    }
+    if (prefix === "manual") return;
     
-    let lookupPrefix = "";
-    if (prefix === "CJ-X") lookupPrefix = "CJ-";
-    else if (prefix === "CJ-PLX") lookupPrefix = "CJ-PL";
-    else if (prefix === "CJ-PFX") lookupPrefix = "CJ-PF";
+    const suggested = suggestedPrefixes.find(p => p.id === prefix);
+    const lookupPrefix = suggested ? suggested.base : "";
     
     if (!lookupPrefix) return;
     
     try {
       const resp = await fetch(`/api/cajas/next-number?prefix=${encodeURIComponent(lookupPrefix)}`);
       if (resp.ok) {
-        const { nextNumber } = await resp.json();
-        const code = `${lookupPrefix}${nextNumber}`;
+        const data = await resp.json();
+        const code = `${lookupPrefix}${data.nextNumber}`;
         setNewCajaNumber(code);
         setNewCajaSku(code);
+      } else {
+        toast.error("Error al obtener número automático");
       }
     } catch (err) {
-      console.error("Error fetching next box number:", err);
-      toast.error("Error al autogenerar número de caja");
+      toast.error("Error de red");
     }
   };
 
@@ -1110,9 +1123,9 @@ export default function CajasView() {
                 className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
               >
                 <option value="manual">Manual (Personalizado)</option>
-                <option value="CJ-X">CJ-X (Caja Normal)</option>
-                <option value="CJ-PLX">CJ-PLX (Caja Plana/PL)</option>
-                <option value="CJ-PFX">CJ-PFX (Caja Perfume/PF)</option>
+                {suggestedPrefixes.map(p => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
               </select>
             </div>
 
