@@ -171,10 +171,11 @@ export default function AlmacenView() {
   const [reportProgress, setReportProgress] = useState(0);
   const [reportType, setReportType] = useState<"detailed" | "summary">("detailed");
   const [summaryGrouping, setSummaryGrouping] = useState<"cajas" | "secciones">("cajas");
+  const [excludeLevels, setExcludeLevels] = useState(false);
 
   const groupedReportData = React.useMemo(() => {
     return generateGroupedReportData();
-  }, [reportData, selectedReportZoneId, selectedReportPasilloId, selectedReportSectionId, selectedReportNivelId, selectedReportBoxId, boxes, niveles, sections, pasillos, zones, reportType, summaryGrouping]);
+  }, [reportData, selectedReportZoneId, selectedReportPasilloId, selectedReportSectionId, selectedReportNivelId, selectedReportBoxId, boxes, niveles, sections, pasillos, zones, reportType, summaryGrouping, excludeLevels]);
 
   // Loading states
   const [loadingZones, setLoadingZones] = useState(false);
@@ -785,11 +786,11 @@ export default function AlmacenView() {
       }
       const seccionNode = pasilloNode.secciones.get(secIdKey);
 
-      const lvlIdKey = box.id_zona_nivel || "sin-nivel";
+      const lvlIdKey = excludeLevels ? "sin-nivel" : (box.id_zona_nivel || "sin-nivel");
       if (!seccionNode.niveles.has(lvlIdKey)) {
-        const lvlObj = box.id_zona_nivel ? niveles.find(n => n.id_zona_nivel === box.id_zona_nivel) : null;
+        const lvlObj = (!excludeLevels && box.id_zona_nivel) ? niveles.find(n => n.id_zona_nivel === box.id_zona_nivel) : null;
         seccionNode.niveles.set(lvlIdKey, {
-          id_zona_nivel: box.id_zona_nivel || null,
+          id_zona_nivel: excludeLevels ? null : (box.id_zona_nivel || null),
           nombre: lvlObj ? lvlObj.nombre : "Sin Nivel",
           cajas: []
         });
@@ -2121,6 +2122,23 @@ export default function AlmacenView() {
                 )}
               </div>
 
+              {/* Exclude levels option */}
+              <div className="flex items-center gap-2 mb-6 bg-neutral-50 p-3.5 rounded-2xl border border-neutral-100">
+                <input
+                  type="checkbox"
+                  id="excludeLevels"
+                  checked={excludeLevels}
+                  onChange={(e) => {
+                    setExcludeLevels(e.target.checked);
+                    setShowPreview(false);
+                  }}
+                  className="w-4 h-4 rounded accent-neutral-900"
+                />
+                <label htmlFor="excludeLevels" className="text-xs font-bold text-neutral-700 select-none cursor-pointer">
+                  Excluir Niveles de Almacenamiento (Omitir Niveles y ver solo Cajas directamente bajo Secciones)
+                </label>
+              </div>
+
               <Button
                 onClick={handleGenerateReport}
                 disabled={isGeneratingReport}
@@ -2545,7 +2563,7 @@ export default function AlmacenView() {
                                   ) : (
                                     sec.niveles.map((lvl: any) => (
                                       <div key={lvl.id_zona_nivel || 'sin-lvl'} className="mb-6 last:mb-0">
-                                        {lvl.id_zona_nivel && (
+                                        {!excludeLevels && lvl.id_zona_nivel && (
                                           <div className="flex items-center gap-2 mb-3 border-l-4 border-neutral-500 pl-3 py-0.5">
                                             <Layers size={14} className="text-neutral-500" />
                                             <h5 className="font-bold text-xs uppercase tracking-wide text-neutral-700">
@@ -2554,7 +2572,7 @@ export default function AlmacenView() {
                                           </div>
                                         )}
 
-                                        <div className={`grid grid-cols-1 gap-6 ${lvl.id_zona_nivel ? "ml-0 md:ml-4" : ""}`}>
+                                        <div className={`grid grid-cols-1 gap-6 ${(!excludeLevels && lvl.id_zona_nivel) ? "ml-0 md:ml-4" : ""}`}>
                                           {lvl.cajas.map((box: any) => {
                                             const boxTotal = box.productos.reduce((sum: number, p: any) => sum + (p.cantidad || 0), 0);
                                             return (
