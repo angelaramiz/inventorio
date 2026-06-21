@@ -226,7 +226,7 @@ export default function ConsultaDashboard() {
     }
   };
 
-  const handleUnifiedSearch = async (query: string) => {
+  const handleUnifiedSearch = async (query: string, fallbackQuery?: string) => {
     if (!query.trim()) return;
     setUnifiedLoading(true);
     // Clear all previous views to allow dynamic result displaying
@@ -259,8 +259,29 @@ export default function ConsultaDashboard() {
           toast.success(`Modelo "${result.data.modelo_grupo}" — ${result.data.variantes.length} variante(s) encontradas`);
         }
       } else {
-        const err = await resp.json();
-        toast.error(err.error || "Código no identificado en el sistema");
+        if (fallbackQuery && fallbackQuery.trim()) {
+          toast.info("Código no registrado, buscando por modelo...");
+          const fbResp = await fetch(`/api/consultar-dinamico/${encodeURIComponent(fallbackQuery.trim())}`);
+          if (fbResp.ok) {
+            const result = await fbResp.json();
+            if (result.type === "seccion") {
+              setCurrentSection(result.data);
+            } else if (result.type === "caja") {
+              setCurrentBox(result.data);
+            } else if (result.type === "producto") {
+              setCurrentProduct(result.data);
+            } else if (result.type === "modelo") {
+              setCurrentModelo(result.data);
+              toast.success(`Modelo "${result.data.modelo_grupo}" — ${result.data.variantes.length} variante(s) encontradas`);
+            }
+          } else {
+            const err = await fbResp.json();
+            toast.error(err.error || `Ni el código "${query}" ni el modelo "${fallbackQuery}" están registrados`);
+          }
+        } else {
+          const err = await resp.json();
+          toast.error(err.error || "Código no identificado en el sistema");
+        }
       }
     } catch (err) {
       toast.error("Error al conectar con la base de datos");
@@ -289,13 +310,18 @@ export default function ConsultaDashboard() {
         const data = await resp.json();
         toast.success("Etiqueta analizada con éxito");
 
-        const targetSearch = data.sku || data.modelo_grupo;
-        if (targetSearch) {
-          const cleanSearch = targetSearch.trim().toUpperCase();
-          setUnifiedQuery(cleanSearch);
-          handleUnifiedSearch(cleanSearch);
+        if (data.sku && data.modelo_grupo) {
+          setUnifiedQuery(data.sku.trim().toUpperCase());
+          handleUnifiedSearch(data.sku.trim().toUpperCase(), data.modelo_grupo.trim().toUpperCase());
         } else {
-          toast.warning("No se pudo identificar un código o modelo en la etiqueta");
+          const targetSearch = data.sku || data.modelo_grupo;
+          if (targetSearch) {
+            const cleanSearch = targetSearch.trim().toUpperCase();
+            setUnifiedQuery(cleanSearch);
+            handleUnifiedSearch(cleanSearch);
+          } else {
+            toast.warning("No se pudo identificar un código o modelo en la etiqueta");
+          }
         }
       } else {
         const err = await resp.json();
