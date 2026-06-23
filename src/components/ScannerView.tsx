@@ -117,6 +117,7 @@ export default function ScannerView() {
         const allCajas: Caja[] = await resp.json();
         const found = allCajas.find(
           c => c.numero_caja.toUpperCase() === code.toUpperCase() || 
+               (c.sku && c.sku.toUpperCase() === code.toUpperCase()) ||
                String(c.id_caja) === code
         );
         if (found) {
@@ -142,6 +143,7 @@ export default function ScannerView() {
     // Verificar si el input manual corresponde al nombre o ID de una caja
     const foundCaja = cajas.find(
       c => c.numero_caja.toUpperCase() === query.toUpperCase() || 
+           (c.sku && c.sku.toUpperCase() === query.toUpperCase()) ||
            String(c.id_caja) === query
     );
     if (foundCaja) {
@@ -451,6 +453,7 @@ export default function ScannerView() {
     // Verificar si el código corresponde a una caja registrada en el sistema
     const foundCaja = cajas.find(
       c => c.numero_caja.toUpperCase() === code.toUpperCase() || 
+           (c.sku && c.sku.toUpperCase() === code.toUpperCase()) ||
            String(c.id_caja) === code
     );
 

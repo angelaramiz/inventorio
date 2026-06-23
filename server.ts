@@ -2953,7 +2953,22 @@ app.get("/api/inventory/notifications/sse", (req, res) => {
 app.post("/api/inventory/count-request", async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { event_id, operator_id, zone_id, cantidades, zone_name } = req.body;
+    
+    // Support both web and mobile app param conventions
+    const event_id = req.body.event_id || req.body.inventario_evento_id;
+    const operator_id = req.body.operator_id || req.body.operador_id;
+    const zone_id = req.body.zone_id || req.body.zona_id;
+    const zone_name = req.body.zone_name || req.body.zona_name;
+    
+    let cantidades = req.body.cantidades;
+    if (!cantidades && req.body.detalles && Array.isArray(req.body.detalles)) {
+      cantidades = {};
+      for (const item of req.body.detalles) {
+        if (item.producto_id !== undefined && item.cantidad_contada !== undefined) {
+          cantidades[item.producto_id] = item.cantidad_contada;
+        }
+      }
+    }
     
     const { data, error } = await supabase
       .from("count_requests")
@@ -3108,6 +3123,25 @@ app.post("/api/inventory/approvals", async (req, res) => {
           }
         }
       }
+      
+      // Update actual box/level state based on total remaining units inside it
+      const { data: remainingProds } = await supabase
+        .from("caja_productos")
+        .select("cantidad")
+        .eq("id_caja", zone_id);
+        
+      const totalUnits = (remainingProds || []).reduce((sum: number, p: any) => sum + (p.cantidad || 0), 0);
+      const newBoxState = totalUnits > 0 ? "activa" : "vacia";
+      
+      await supabase
+        .from("cajas")
+        .update({ estado: newBoxState })
+        .eq("id_caja", zone_id);
+        
+      emitDomainEvent("caja:updated", {
+        action: "update",
+        id_caja: zone_id
+      });
     }
     
     res.json({ success: true });
