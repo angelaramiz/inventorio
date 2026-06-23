@@ -157,14 +157,18 @@ app.get('/api/app-version', (req, res) => {
   }
 });
 
-// GET /api/android-version - Returns the latest Android app version
+// GET /api/android-version - Returns the latest Android app version (supports ?app=conteo query param)
 app.get("/api/android-version", async (req, res) => {
   try {
+    const isConteo = req.query.app === "conteo";
+    const key = isConteo ? "android_version_conteo" : "android_version";
+    const defaultApk = isConteo ? "/public/inventorio-conteo.apk" : "/public/inventorio.apk";
+
     const supabase = getSupabase();
     const { data: settings, error } = await supabase
       .from("warehouse_settings")
       .select("valor")
-      .eq("clave", "android_version")
+      .eq("clave", key)
       .single();
       
     if (error && error.code !== 'PGRST116') throw error;
@@ -172,7 +176,7 @@ app.get("/api/android-version", async (req, res) => {
     const versionInfo = settings?.valor || {
       versionCode: 1,
       versionName: "1.0.0",
-      apkUrl: "/public/inventorio.apk"
+      apkUrl: defaultApk
     };
     
     res.json(versionInfo);
