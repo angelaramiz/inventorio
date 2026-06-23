@@ -138,6 +138,23 @@ export default function ScannerView() {
     if (!manualInput.trim()) return;
     
     const query = manualInput.trim();
+    
+    // Verificar si el input manual corresponde al nombre o ID de una caja
+    const foundCaja = cajas.find(
+      c => c.numero_caja.toUpperCase() === query.toUpperCase() || 
+           String(c.id_caja) === query
+    );
+    if (foundCaja) {
+      setActiveMode("caja");
+      setActiveCaja(foundCaja);
+      setResolvedTargetCaja(foundCaja);
+      localStorage.setItem("activeCaja", JSON.stringify(foundCaja));
+      toast.success(`Caja ${foundCaja.numero_caja} seleccionada automáticamente`);
+      setManualInput("");
+      setManualQty(1);
+      return;
+    }
+
     const finalQty = manualQty === "" ? 1 : manualQty;
     setScannedResult(query);
     verifyProduct(query, finalQty);
@@ -430,8 +447,27 @@ export default function ScannerView() {
   const onScanSuccess = (decodedText: string) => {
     if (isChecking) return;
     
+    const code = decodedText.trim();
+    // Verificar si el código corresponde a una caja registrada en el sistema
+    const foundCaja = cajas.find(
+      c => c.numero_caja.toUpperCase() === code.toUpperCase() || 
+           String(c.id_caja) === code
+    );
+
+    if (foundCaja) {
+      setActiveMode("caja");
+      setActiveCaja(foundCaja);
+      setResolvedTargetCaja(foundCaja);
+      localStorage.setItem("activeCaja", JSON.stringify(foundCaja));
+      toast.success(`Caja ${foundCaja.numero_caja} seleccionada automáticamente`);
+      if (!continuousScan) {
+        stopScanner();
+      }
+      return;
+    }
+
     if (!isTargetSelected()) {
-      toast.error("Selecciona un contenedor activo primero");
+      toast.error("Selecciona un contenedor activo primero o escanea una caja válida");
       return;
     }
 
