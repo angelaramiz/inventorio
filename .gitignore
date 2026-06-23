@@ -46,6 +46,5 @@ agent_context/
 # Scratch files
 scratch/
 test_db.ts
-inventorio alpha/
-inventorio conteo/
+apps movil/
 AGENTS.md
