@@ -132,7 +132,7 @@ class LabelOcrEngine(
 
     // ─── Fallback: servidor ───────────────────────────────────────────────────
 
-    private suspend fun analyzeRemote(bitmap: Bitmap): LabelOcrResult = withContext(Dispatchers.IO) {
+    suspend fun analyzeRemote(bitmap: Bitmap): LabelOcrResult = withContext(Dispatchers.IO) {
         try {
             val bytes = ByteArrayOutputStream().also { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)

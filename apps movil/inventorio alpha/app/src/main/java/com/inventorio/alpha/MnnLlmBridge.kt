@@ -23,7 +23,7 @@ import java.io.ByteArrayOutputStream
 object MnnLlmBridge {
 
     private const val TAG = "MnnLlmBridge"
-    private var isLoaded = false
+    var isLoaded = false
     private var sessionHandle: Long = 0L
 
     // ─── Estado ──────────────────────────────────────────────────────────────
