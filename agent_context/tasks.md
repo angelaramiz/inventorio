@@ -1,9 +1,9 @@
 # 📝 Tareas Activas — Inventorio Alpha
 
-**Última actualización:** 2026-06-23
+**Última actualización:** 2026-06-26
 
-## Tareas Actuales (Input: Organización de Proyectos y App Conteo)
+## Tareas Actuales (Input: Captura Avanzada y Parámetros)
 
-- `[ ]` 
+- Ninguna pendiente. Listo para recibir nuevas tareas.
 
 

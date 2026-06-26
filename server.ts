@@ -3376,6 +3376,285 @@ app.get("/api/image-tasks/:taskId", (req, res) => {
   res.json(job);
 });
 
+// GET /api/settings/image-sources - Retrieve custom image search sources
+app.get("/api/settings/image-sources", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data: settings, error } = await supabase
+      .from("warehouse_settings")
+      .select("valor")
+      .eq("clave", "custom_image_sources")
+      .single();
+      
+    if (error && error.code !== 'PGRST116') throw error;
+    res.json(settings?.valor || []);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/settings/image-sources - Save custom image search sources
+app.post("/api/settings/image-sources", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { sources } = req.body;
+    if (!Array.isArray(sources)) {
+      return res.status(400).json({ error: "Las fuentes deben ser un array de URLs" });
+    }
+    
+    const { error } = await supabase
+      .from("warehouse_settings")
+      .upsert({ clave: "custom_image_sources", valor: sources }, { onConflict: "clave" });
+      
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/productos/search-web-image - Search and assign product image from web in background
+app.post("/api/productos/search-web-image", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { productoId, query } = req.body;
+    
+    const pId = parseInt(productoId);
+    if (isNaN(pId)) {
+      return res.status(400).json({ error: "ID de producto inválido" });
+    }
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ error: "La consulta de búsqueda es obligatoria" });
+    }
+    
+    const taskId = "websearch_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+    
+    imageJobs.set(taskId, {
+      taskId,
+      productoId: pId,
+      progress: 0,
+      status: 'pending'
+    });
+    
+    const processWebSearch = async () => {
+      try {
+        const job = imageJobs.get(taskId);
+        if (!job) return;
+        
+        job.status = 'processing';
+        job.progress = 20;
+        
+        // Retrieve custom sources
+        const { data: settings } = await supabase
+          .from("warehouse_settings")
+          .select("valor")
+          .eq("clave", "custom_image_sources")
+          .single();
+          
+        const customSources = settings?.valor || [];
+        job.progress = 40;
+        
+        // Background search helper
+        const searchProductImage = async (q: string, sources: string[]): Promise<Buffer | null> => {
+          for (const source of sources) {
+            try {
+              const url = source.replace("{q}", encodeURIComponent(q));
+              const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+              if (!resp.ok) continue;
+              
+              const contentType = resp.headers.get("content-type") || "";
+              if (contentType.startsWith("image/")) {
+                return Buffer.from(await resp.arrayBuffer());
+              }
+
+              const html = await resp.text();
+              const imgRegex = /<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi;
+              let match;
+              while ((match = imgRegex.exec(html)) !== null) {
+                const imgUrl = match[1];
+                if (imgUrl.includes("logo") || imgUrl.includes("icon") || imgUrl.endsWith(".gif")) continue;
+                const imgResp = await fetch(imgUrl);
+                if (imgResp.ok) {
+                  return Buffer.from(await imgResp.arrayBuffer());
+                }
+              }
+            } catch (e) {
+              console.error("Custom source failed:", e);
+            }
+          }
+          // Fallback to DuckDuckGo HTML search
+          try {
+            const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q + " clothing product image")}`;
+            const resp = await fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+            if (resp.ok) {
+              const html = await resp.text();
+              const imgRegex = /<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi;
+              let match;
+              while ((match = imgRegex.exec(html)) !== null) {
+                const imgUrl = match[1];
+                if (imgUrl.includes("logo") || imgUrl.includes("icon") || imgUrl.includes("duckduckgo")) continue;
+                const finalUrl = imgUrl.startsWith("//") ? "https:" + imgUrl : imgUrl;
+                const imgResp = await fetch(finalUrl);
+                if (imgResp.ok) {
+                  return Buffer.from(await imgResp.arrayBuffer());
+                }
+              }
+            }
+          } catch (e) {
+            console.error("DuckDuckGo fallback search failed:", e);
+          }
+          return null;
+        };
+        
+        const imageBuffer = await searchProductImage(query, customSources);
+        job.progress = 80;
+        
+        if (!imageBuffer) {
+          throw new Error("No se encontró ninguna imagen de producto en la web");
+        }
+        
+        const fotoHex = '\\x' + imageBuffer.toString('hex');
+        const { error: updErr } = await supabase
+          .from("productos")
+          .update({ foto: fotoHex, has_foto: true })
+          .eq("id_producto", pId);
+          
+        if (updErr) throw updErr;
+        
+        job.progress = 100;
+        job.status = 'completed';
+      } catch (err: any) {
+        console.error("Web image search job failed:", err);
+        const job = imageJobs.get(taskId);
+        if (job) {
+          job.status = 'failed';
+          job.error = err.message;
+        }
+      }
+    };
+    
+    processWebSearch();
+    res.json({ success: true, taskId });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/productos/batch-ocr - Batch OCR process label images using Gemini
+app.post("/api/productos/batch-ocr", upload.array("fotos", 50), async (req, res) => {
+  try {
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: "No se recibieron imágenes de etiquetas" });
+    }
+    
+    const supabase = getSupabase();
+    const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+    const parsedProducts: any[] = [];
+    
+    for (const file of files) {
+      try {
+        const imagePart = {
+          inlineData: {
+            data: file.buffer.toString("base64"),
+            mimeType: file.mimetype
+          }
+        };
+        
+        const prompt = `
+          Analiza detenidamente la foto de esta etiqueta de ropa. Identifica y extrae la información relevante.
+          Devuelve los datos estrictamente en formato JSON adaptando la respuesta a esta estructura:
+          - modelo_grupo: Código de modelo, estilo o referencia de la prenda (ej: W6YK53Z1031 - F1PV, GMSIROCCO-N).
+          - sku: Código de barras numérico impreso en la etiqueta (ej: 199593307730) si se encuentra.
+          - marca: Marca identificada (GUESS, etc.).
+          - talla: Talla de la prenda (ej: S, M, L, XL).
+          - tipo_producto: Tipo de prenda (ej: Playera, Jeans, Calzado).
+        `;
+        
+        const model = ai.getGenerativeModel({
+          model: "gemini-2.5-flash",
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: SchemaType.OBJECT,
+              properties: {
+                modelo_grupo: { type: SchemaType.STRING },
+                sku: { type: SchemaType.STRING },
+                marca: { type: SchemaType.STRING },
+                talla: { type: SchemaType.STRING },
+                tipo_producto: { type: SchemaType.STRING }
+              },
+              required: ["modelo_grupo"]
+            }
+          }
+        });
+        
+        const result = await model.generateContent([prompt, imagePart]);
+        const responseText = result.response.text();
+        const rawData = JSON.parse(responseText);
+        
+        let modelo = rawData.modelo_grupo || "";
+        let colorCode = "";
+        
+        // Parse modelo y codigo_color si contiene un guion "-"
+        if (modelo.includes("-")) {
+          const parts = modelo.split("-");
+          modelo = parts[0].trim();
+          colorCode = parts[1].trim();
+        }
+        
+        // Lógica inteligente de género
+        let genero = "unisex";
+        if (modelo.length > 0) {
+          const firstChar = modelo.charAt(0).toUpperCase();
+          const secondChar = modelo.length > 1 ? modelo.charAt(1).toUpperCase() : "";
+          
+          const isCalzado = rawData.tipo_producto?.toLowerCase().includes("calzado") || 
+                            rawData.tipo_producto?.toLowerCase().includes("tenis") ||
+                            rawData.tipo_producto?.toLowerCase().includes("zapato") ||
+                            firstChar === "G";
+                            
+          if (isCalzado && secondChar) {
+            if (secondChar === "W") genero = "mujer";
+            else if (secondChar === "M") genero = "hombre";
+          } else {
+            if (firstChar === "W") genero = "mujer";
+            else if (firstChar === "M") genero = "hombre";
+          }
+        }
+        
+        // Validar si el modelo existe en la base de datos
+        let existeModelo = false;
+        if (modelo) {
+          const { data: extProd } = await supabase
+            .from("productos")
+            .select("id_producto")
+            .eq("sku", rawData.sku || modelo)
+            .limit(1);
+          existeModelo = !!(extProd && extProd.length > 0);
+        }
+        
+        parsedProducts.push({
+          modelo_grupo: modelo,
+          codigo_color: colorCode,
+          sku: rawData.sku || null,
+          marca: rawData.marca || null,
+          talla: rawData.talla || null,
+          tipo_producto: rawData.tipo_producto || null,
+          genero,
+          existeModelo
+        });
+      } catch (err: any) {
+        console.error("Error parseando etiqueta en lote:", err);
+      }
+    }
+    
+    res.json({ parsedProducts });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- WAREHOUSE LOCATIONS ENDPOINTS ---
 
 // GET /api/almacen/zonas - List all warehouse zones

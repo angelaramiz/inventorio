@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { 
-  Boxes, Package, Scan, LayoutDashboard, Tag, Warehouse, TrendingUp
+  Boxes, Package, Scan, LayoutDashboard, Tag, Warehouse, TrendingUp, Settings
 } from "lucide-react";
 import InventoryView from "./components/InventoryView";
 import CajasView from "./components/CajasView";
 import ScannerView from "./components/ScannerView";
 import ConceptosView from "./components/ConceptosView";
 import AlmacenView from "./components/AlmacenView";
+import SettingsView from "./components/SettingsView";
 import ConsultaDashboard from "./components/ConsultaDashboard";
 import ImageLightbox from "./components/ImageLightbox";
 import POSView from "./components/POSView";
@@ -195,6 +196,12 @@ export default function App() {
                 icon={<Warehouse size={15} />}
                 label="Almacén"
               />
+              <TabButton 
+                active={activeTab === "settings"} 
+                onClick={() => setActiveTab("settings")}
+                icon={<Settings size={15} />}
+                label="Ajustes"
+              />
             </nav>
           </div>
         </div>
@@ -239,6 +246,12 @@ export default function App() {
             icon={<Warehouse size={15} />}
             label="Almacén"
           />
+          <TabButton 
+            active={activeTab === "settings"} 
+            onClick={() => setActiveTab("settings")}
+            icon={<Settings size={15} />}
+            label="Ajustes"
+          />
         </nav>
       </div>
 
@@ -257,6 +270,7 @@ export default function App() {
             {activeTab === "boxes" && <CajasView />}
             {activeTab === "concepts" && <ConceptosView />}
             {activeTab === "almacen" && <AlmacenView />}
+            {activeTab === "settings" && <SettingsView />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -298,6 +312,12 @@ export default function App() {
           onClick={() => setActiveTab("almacen")}
           icon={<Warehouse size={20} />}
           label="Almacén"
+        />
+        <MobileNavButton 
+          active={activeTab === "settings"} 
+          onClick={() => setActiveTab("settings")}
+          icon={<Settings size={20} />}
+          label="Ajustes"
         />
       </nav>
 

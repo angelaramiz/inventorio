@@ -22,6 +22,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -180,6 +182,7 @@ fun MainAppScreen() {
             }
         }
     }
+    var showOcrDownloadDialog by remember { mutableStateOf(false) }
 
     val checkForUpdate: (Boolean) -> Unit = { manual ->
         if (manual) isCheckingUpdate = true
@@ -339,6 +342,7 @@ fun MainAppScreen() {
                 listOf(
                     Triple("dashboard", Icons.Default.Home, "Dashboard"),
                     Triple("scanner", Icons.Default.QrCodeScanner, "Escáner Barcode"),
+                    Triple("batch_ocr", Icons.Default.Collections, "Escáner por Lote"),
                     Triple("consulta", Icons.Default.ManageSearch, "Consulta Rápida"),
                     Triple("productos", Icons.Default.Category, "Productos (Stock)"),
                     Triple("cajas", Icons.Default.Inbox, "Contenedores (Cajas)"),
@@ -411,8 +415,7 @@ fun MainAppScreen() {
                                 onClick = {
                                     showOcrModelInfo = false
                                     scope.launch { drawerState.close() }
-                                    // Navegar al scanner donde el diálogo de descarga aparecerá
-                                    activeTab = "scanner"
+                                    showOcrDownloadDialog = true
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
                                 modifier = Modifier.fillMaxWidth(),
@@ -642,6 +645,13 @@ fun MainAppScreen() {
                             ocrEngine = ocrEngine
                         )
                     }
+                    "batch_ocr" -> {
+                        BatchOcrView(
+                            client = client,
+                            serverUrl = serverUrl,
+                            ocrEngine = ocrEngine
+                        )
+                    }
                     "consulta" -> {
                         ConsultaView(
                             client = client,
@@ -683,11 +693,23 @@ fun MainAppScreen() {
                             onUrlSaved = {
                                 serverUrl = it
                                 Toast.makeText(context, "Servidor guardado correctamente", Toast.LENGTH_SHORT).show()
-                            }
+                            },
+                            client = client
                         )
                     }
                 }
             }
+        }
+        
+        if (showOcrDownloadDialog) {
+            ModelDownloadDialog(
+                ocrEngine = ocrEngine,
+                onDismiss = { showOcrDownloadDialog = false },
+                onModelReady = {
+                    showOcrDownloadDialog = false
+                    Toast.makeText(context, "Modelo IA listo para usarse localmente", Toast.LENGTH_SHORT).show()
+                }
+            )
         }
     }
 }
@@ -905,12 +927,77 @@ fun RecentExitRow(exit: RecentExit) {
 }
 
 @Composable
-fun ConfigTab(serverUrl: String, onUrlSaved: (String) -> Unit) {
+fun ConfigTab(
+    serverUrl: String, 
+    onUrlSaved: (String) -> Unit,
+    client: OkHttpClient
+) {
     var urlInput by remember { mutableStateOf(serverUrl) }
+    var sourcesInput by remember { mutableStateOf("") }
+    var loadingSources by remember { mutableStateOf(false) }
+    var savingSources by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    LaunchedEffect(serverUrl) {
+        loadingSources = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                val req = Request.Builder().url("${serverUrl.trimEnd('/')}/api/settings/image-sources").build()
+                client.newCall(req).execute().use { res ->
+                    if (res.isSuccessful) {
+                        val body = res.body?.string() ?: "[]"
+                        val list = Gson().fromJson<List<String>>(body, object : TypeToken<List<String>>() {}.type)
+                        withContext(Dispatchers.Main) {
+                            sourcesInput = list.joinToString("\n")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ConfigTab", "Error loading sources: ${e.message}")
+            } finally {
+                withContext(Dispatchers.Main) {
+                    loadingSources = false
+                }
+            }
+        }
+    }
+
+    val saveSources: () -> Unit = {
+        savingSources = true
+        val list = sourcesInput.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        scope.launch(Dispatchers.IO) {
+            try {
+                val bodyJson = Gson().toJson(mapOf("sources" to list))
+                val req = Request.Builder()
+                    .url("${serverUrl.trimEnd('/')}/api/settings/image-sources")
+                    .post(bodyJson.toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { res ->
+                    withContext(Dispatchers.Main) {
+                        if (res.isSuccessful) {
+                            Toast.makeText(context, "Fuentes guardadas correctamente", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Error al guardar fuentes", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Error de conexión: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    savingSources = false
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -951,6 +1038,49 @@ fun ConfigTab(serverUrl: String, onUrlSaved: (String) -> Unit) {
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("Guardar Configuración", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Fuentes de Búsqueda de Imágenes",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 15.sp,
+                    color = Color(0xFF0F172A)
+                )
+                Text(
+                    text = "Introduce una URL por línea. Debe incluir {q} que será reemplazado por la consulta del producto.",
+                    fontSize = 11.sp,
+                    color = Color.Gray
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                OutlinedTextField(
+                    value = sourcesInput,
+                    onValueChange = { sourcesInput = it },
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                    label = { Text("Fuentes (una por línea)") },
+                    placeholder = { Text("https://www.zara.com/search?q={q}") },
+                    enabled = !loadingSources && !savingSources
+                )
+
+                Button(
+                    onClick = { saveSources() },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = !loadingSources && !savingSources
+                ) {
+                    Text("Guardar Fuentes", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

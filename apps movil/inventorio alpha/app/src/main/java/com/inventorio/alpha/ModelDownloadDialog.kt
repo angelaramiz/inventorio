@@ -45,6 +45,7 @@ fun ModelDownloadDialog(
     var downloadProgress by remember { mutableStateOf(0) }
     var isDownloading by remember { mutableStateOf(false) }
     var downloadFailed by remember { mutableStateOf(false) }
+    var downloadErrorMessage by remember { mutableStateOf("") }
     var downloadComplete by remember { mutableStateOf(false) }
 
     val animatedProgress by animateFloatAsState(
@@ -119,7 +120,7 @@ fun ModelDownloadDialog(
                         downloadComplete ->
                             "Qwen2.5-VL-2B está listo. Ahora puedes leer etiquetas sin conexión a internet."
                         downloadFailed ->
-                            "No se pudo descargar el modelo. Verifica tu conexión WiFi e intenta de nuevo."
+                            "No se pudo descargar el modelo.\nDetalle: ${downloadErrorMessage.ifEmpty { "Verifica tu conexión WiFi e intenta de nuevo." }}"
                         isDownloading ->
                             "Descargando modelo de visión IA... No cierres la app."
                         else ->
@@ -241,15 +242,26 @@ fun ModelDownloadDialog(
                             Button(
                                 onClick = {
                                     downloadFailed = false
+                                    downloadErrorMessage = ""
                                     isDownloading = true
                                     downloadProgress = 0
                                     scope.launch(Dispatchers.IO) {
                                         ocrEngine.downloadModel(
-                                            onProgress = { downloadProgress = it },
-                                            onDone = { success ->
-                                                isDownloading = false
-                                                if (success) downloadComplete = true
-                                                else downloadFailed = true
+                                            onProgress = { progress ->
+                                                scope.launch(Dispatchers.Main) {
+                                                    downloadProgress = progress
+                                                }
+                                            },
+                                            onDone = { success, errorMsg ->
+                                                scope.launch(Dispatchers.Main) {
+                                                    isDownloading = false
+                                                    if (success) {
+                                                        downloadComplete = true
+                                                    } else {
+                                                        downloadFailed = true
+                                                        downloadErrorMessage = errorMsg
+                                                    }
+                                                }
                                             }
                                         )
                                     }
@@ -288,16 +300,27 @@ fun ModelDownloadDialog(
                             Button(
                                 onClick = {
                                     isDownloading = true
+                                    downloadErrorMessage = ""
                                     scope.launch(Dispatchers.IO) {
                                         ocrEngine.downloadModel(
-                                            onProgress = { downloadProgress = it },
-                                            onDone = { success ->
-                                                isDownloading = false
-                                                if (success) {
-                                                    downloadComplete = true
-                                                    ocrEngine.initNativeModel()
-                                                } else {
-                                                    downloadFailed = true
+                                            onProgress = { progress ->
+                                                scope.launch(Dispatchers.Main) {
+                                                    downloadProgress = progress
+                                                }
+                                            },
+                                            onDone = { success, errorMsg ->
+                                                scope.launch(Dispatchers.Main) {
+                                                    isDownloading = false
+                                                    if (success) {
+                                                        downloadComplete = true
+                                                        // Init native model in background
+                                                        scope.launch(Dispatchers.IO) {
+                                                            ocrEngine.initNativeModel()
+                                                        }
+                                                    } else {
+                                                        downloadFailed = true
+                                                        downloadErrorMessage = errorMsg
+                                                    }
                                                 }
                                             }
                                         )

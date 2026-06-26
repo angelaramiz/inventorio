@@ -17,5 +17,6 @@
 
 ## Input Actual
 
+- Ninguno pendiente. Ready para recibir nuevas instrucciones.
 
 ---

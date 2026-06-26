@@ -13,6 +13,8 @@ export interface Producto {
   foto?: string;
   has_foto?: boolean;
   activo: boolean;
+  fecha_temporada?: string;
+  codigo_color?: string;
   created_at: string;
 }
 

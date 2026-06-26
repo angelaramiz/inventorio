@@ -36,19 +36,19 @@ class LabelOcrEngine(
         private const val MODEL_DIR_NAME = "qwen_ocr_model"
 
         // URL de descarga del modelo MNN pre-convertido
-        // Fuente: DakeQQ/Qwen2.5-VL-2B-Instruct-For-Android en HuggingFace
+        // Fuente: MNN/Qwen2-VL-2B-Instruct-MNN en ModelScope
         private const val MODEL_BASE_URL =
-            "https://huggingface.co/DakeQQ/Qwen2.5-VL-2B-Instruct-For-Android/resolve/main/"
+            "https://modelscope.cn/api/v1/models/MNN/Qwen2-VL-2B-Instruct-MNN/repo?FilePath="
 
         // Archivos que componen el modelo (en orden de descarga)
         private val MODEL_FILES = listOf(
             "config.json",
-            "tokenizer.json",
-            "tokenizer_config.json",
-            "embedding.mnn",
-            "prefill.mnn",
-            "decode.mnn",
-            "visual.mnn"
+            "llm.mnn",
+            "llm.mnn.weight",
+            "embeddings_bf16.bin",
+            "visual.mnn",
+            "visual.mnn.weight",
+            "tokenizer.txt"
         )
 
         // Prompt para extracción estructurada de etiqueta
@@ -71,7 +71,7 @@ class LabelOcrEngine(
 
     val isModelReady: Boolean
         get() = File(modelDir, "config.json").exists() &&
-                File(modelDir, "decode.mnn").exists()
+                File(modelDir, "llm.mnn.weight").exists()
 
     val modelSizeDescription: String
         get() {
@@ -199,9 +199,9 @@ class LabelOcrEngine(
      * Debe llamarse desde un hilo de I/O.
      *
      * @param onProgress Int del 0 al 100
-     * @param onDone Boolean: true si tuvo éxito, false si falló
+     * @param onDone (Boolean, String) -> Unit. El primer parámetro indica éxito, el segundo contiene el mensaje de error si falló.
      */
-    fun downloadModel(onProgress: (Int) -> Unit, onDone: (Boolean) -> Unit) {
+    fun downloadModel(onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
         try {
             modelDir.mkdirs()
             val totalFiles = MODEL_FILES.size
@@ -215,31 +215,34 @@ class LabelOcrEngine(
                 }
 
                 Log.i(TAG, "Descargando $fileName...")
-                val url = URL(MODEL_BASE_URL + fileName)
-                val connection = url.openConnection().also {
-                    it.connectTimeout = 30_000
-                    it.readTimeout = 120_000
-                    it.connect()
-                }
+                val fileUrl = MODEL_BASE_URL + fileName
+                val request = Request.Builder().url(fileUrl).build()
 
-                val totalBytes = connection.contentLengthLong
-                var downloaded = 0L
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw java.io.IOException("Error del servidor: ${response.code} al descargar $fileName")
+                    }
 
-                connection.getInputStream().use { input ->
-                    FileOutputStream(dest).use { output ->
-                        val buffer = ByteArray(8192)
-                        var bytesRead: Int
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                            downloaded += bytesRead
+                    val responseBody = response.body ?: throw java.io.IOException("Cuerpo de respuesta vacío para $fileName")
+                    val totalBytes = responseBody.contentLength()
+                    var downloaded = 0L
 
-                            // Progreso global: archivo actual + fracción del actual
-                            val fileProgress = if (totalBytes > 0) {
-                                (downloaded * 100 / totalBytes).toInt()
-                            } else 50
+                    responseBody.byteStream().use { input ->
+                        FileOutputStream(dest).use { output ->
+                            val buffer = ByteArray(16384) // Buffer más grande para mayor velocidad
+                            var bytesRead: Int
+                            while (input.read(buffer).also { bytesRead = it } != -1) {
+                                output.write(buffer, 0, bytesRead)
+                                downloaded += bytesRead
 
-                            val globalProgress = (index * 100 + fileProgress) / totalFiles
-                            onProgress(globalProgress.coerceIn(0, 99))
+                                // Progreso global: archivo actual + fracción del actual
+                                val fileProgress = if (totalBytes > 0) {
+                                    (downloaded * 100 / totalBytes).toInt()
+                                } else 50
+
+                                val globalProgress = (index * 100 + fileProgress) / totalFiles
+                                onProgress(globalProgress.coerceIn(0, 99))
+                            }
                         }
                     }
                 }
@@ -248,10 +251,10 @@ class LabelOcrEngine(
             }
 
             onProgress(100)
-            onDone(true)
+            onDone(true, "")
         } catch (e: Exception) {
-            Log.e(TAG, "Error descargando modelo: ${e.message}")
-            onDone(false)
+            Log.e(TAG, "Error descargando modelo: ${e.message}", e)
+            onDone(false, e.message ?: "Error desconocido")
         }
     }
 
