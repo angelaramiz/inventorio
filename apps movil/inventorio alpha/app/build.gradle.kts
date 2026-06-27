@@ -11,10 +11,13 @@ android {
     applicationId = "com.inventorio.alpha"
     minSdk = 24
     targetSdk = 36
-    versionCode = 29
-    versionName = "2.0.19"
+    versionCode = 31
+    versionName = "2.0.21"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    ndk {
+      abiFilters += listOf("arm64-v8a")
+    }
   }
 
   signingConfigs {
@@ -45,6 +48,12 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+  }
+
+  packaging {
+    jniLibs {
+      pickFirsts += listOf("**/libc++_shared.so")
+    }
   }
 }
 
