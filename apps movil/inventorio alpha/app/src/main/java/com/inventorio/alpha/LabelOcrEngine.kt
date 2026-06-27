@@ -100,7 +100,7 @@ class LabelOcrEngine(
             try {
                 val result = analyzeLocal(bitmap)
                 if (result != null) return@withContext result
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w(TAG, "Inferencia local falló, usando servidor. Causa: ${e.message}")
             }
         } else if (isModelReady && !MnnLlmBridge.isAvailable) {
@@ -111,7 +111,7 @@ class LabelOcrEngine(
                 try {
                     val result = analyzeLocal(bitmap)
                     if (result != null) return@withContext result
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     Log.w(TAG, "Inferencia local falló tras carga tardía: ${e.message}")
                 }
             }

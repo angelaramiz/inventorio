@@ -174,15 +174,12 @@ fun MainAppScreen() {
 
     var isCheckingUpdate by remember { mutableStateOf(false) }
 
-    // OCR Engine — inicializa modelo local Qwen2.5-VL si está disponible
+    // OCR Engine — inicializa modelo local Qwen2.5-VL bajo demanda
     val ocrEngine = remember {
-        LabelOcrEngine(context, client, serverUrl).also { engine ->
-            if (engine.isModelReady) {
-                engine.initNativeModel()
-            }
-        }
+        LabelOcrEngine(context, client, serverUrl)
     }
     var showOcrDownloadDialog by remember { mutableStateOf(false) }
+    var showAiStatusDialog by remember { mutableStateOf(false) }
 
     val checkForUpdate: (Boolean) -> Unit = { manual ->
         if (manual) isCheckingUpdate = true
@@ -544,19 +541,41 @@ fun MainAppScreen() {
                                 color = Color(0xFF0F172A)
                             )
                             
-                            // Display the Android version from BuildConfig (which updates via build.gradle)
-                            Box(
-                                modifier = Modifier
-                                    .padding(end = 8.dp)
-                                    .background(Color(0xFFF1F5F9), shape = RoundedCornerShape(100.dp))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(end = 8.dp)
                             ) {
-                                Text(
-                                    text = "v${BuildConfig.VERSION_NAME}",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF64748B)
-                                )
+                                val isLocalAi = MnnLlmBridge.isAvailable
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (isLocalAi) Color(0xFFDCFCE7) else Color(0xFFF1F5F9),
+                                            shape = RoundedCornerShape(100.dp)
+                                        )
+                                        .clickable { showAiStatusDialog = true }
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isLocalAi) "IA Local" else "IA Nube",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isLocalAi) Color(0xFF166534) else Color(0xFF64748B)
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFFF1F5F9), shape = RoundedCornerShape(100.dp))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "v${BuildConfig.VERSION_NAME}",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF64748B)
+                                    )
+                                }
                             }
                         }
                     },
@@ -708,6 +727,75 @@ fun MainAppScreen() {
                 onModelReady = {
                     showOcrDownloadDialog = false
                     Toast.makeText(context, "Modelo IA listo para usarse localmente", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+
+        if (showAiStatusDialog) {
+            val isLocalAi = MnnLlmBridge.isAvailable
+            val err = MnnLlmBridge.lastInitError
+            AlertDialog(
+                onDismissRequest = { showAiStatusDialog = false },
+                title = { Text(if (isLocalAi) "IA Local Activa" else "IA Nube Activa") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            if (isLocalAi) "El motor nativo de IA local (Qwen2.5-VL-2B via MNN-LLM) se ha cargado e inicializado correctamente."
+                            else "Se está utilizando la API en la nube como fallback para las tareas de OCR."
+                        )
+                        if (err != null) {
+                            Text("Detalle del último error:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(
+                                text = err,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier
+                                    .background(Color(0xFFFEF2F2), shape = RoundedCornerShape(8.dp))
+                                    .padding(8.dp)
+                            )
+                        } else if (!isLocalAi && !ocrEngine.isModelReady) {
+                            Text(
+                                "El modelo local de IA no está descargado. Puedes descargarlo en Configuración.",
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (!isLocalAi && ocrEngine.isModelReady) {
+                            var initializing by remember { mutableStateOf(false) }
+                            TextButton(
+                                enabled = !initializing,
+                                onClick = {
+                                    initializing = true
+                                    scope.launch(Dispatchers.IO) {
+                                        ocrEngine.initNativeModel()
+                                        withContext(Dispatchers.Main) {
+                                            initializing = false
+                                            if (MnnLlmBridge.isAvailable) {
+                                                Toast.makeText(context, "IA Local inicializada correctamente", Toast.LENGTH_SHORT).show()
+                                                showAiStatusDialog = false
+                                            } else {
+                                                Toast.makeText(context, "Fallo al inicializar IA Local", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            ) {
+                                Text(if (initializing) "Iniciando..." else "Inicializar Local")
+                            }
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        TextButton(onClick = { showAiStatusDialog = false }) {
+                            Text("Cerrar")
+                        }
+                    }
                 }
             )
         }

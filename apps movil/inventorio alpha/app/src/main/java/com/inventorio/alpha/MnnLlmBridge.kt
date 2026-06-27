@@ -25,6 +25,7 @@ object MnnLlmBridge {
     private const val TAG = "MnnLlmBridge"
     var isLoaded = false
     private var sessionHandle: Long = 0L
+    var lastInitError: String? = null
 
     // ─── Estado ──────────────────────────────────────────────────────────────
 
@@ -37,13 +38,16 @@ object MnnLlmBridge {
         if (isLoaded) return true
         return try {
             System.loadLibrary("MNN")
-            System.loadLibrary("MNN_Express")
-            System.loadLibrary("llm")
+            System.loadLibrary("mnnllmapp")
             isLoaded = true
             Log.i(TAG, "MNN-LLM nativo cargado correctamente.")
             true
         } catch (e: UnsatisfiedLinkError) {
+            lastInitError = "LinkError: ${e.message}"
             Log.w(TAG, "Librerías MNN no encontradas. OCR local no disponible. Causa: ${e.message}")
+            false
+        } catch (e: Throwable) {
+            lastInitError = "Carga fallida: ${e.message}"
             false
         }
     }
@@ -59,14 +63,19 @@ object MnnLlmBridge {
      */
     fun initModel(modelDir: String): Boolean {
         if (!isLoaded) {
+            lastInitError = "Error: Librerías no cargadas."
             Log.w(TAG, "initModel() llamado sin librerías cargadas.")
             return false
         }
         return try {
-            sessionHandle = nativeCreateSession(modelDir)
+            sessionHandle = com.alibaba.mnnllm.android.llm.LlmSession.initNative(modelDir, false)
+            if (sessionHandle == 0L) {
+                lastInitError = "Error: LlmSession.initNative devolvió handle nulo (0L)."
+            }
             sessionHandle != 0L
-        } catch (e: Exception) {
-            Log.e(TAG, "Error iniciando sesión MNN: ${e.message}")
+        } catch (e: Throwable) {
+            lastInitError = "Error JNI: ${e.message}\n${Log.getStackTraceString(e)}"
+            Log.e(TAG, "Error iniciando sesión MNN: ${e.message}", e)
             false
         }
     }
@@ -74,9 +83,9 @@ object MnnLlmBridge {
     fun destroyModel() {
         if (sessionHandle != 0L && isLoaded) {
             try {
-                nativeDestroySession(sessionHandle)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error destruyendo sesión: ${e.message}")
+                com.alibaba.mnnllm.android.llm.LlmSession.releaseNative(sessionHandle)
+            } catch (e: Throwable) {
+                Log.e(TAG, "Error destruyendo sesión: ${e.message}", e)
             }
             sessionHandle = 0L
         }
@@ -92,9 +101,9 @@ object MnnLlmBridge {
         if (!isAvailable) return null
         return try {
             val base64 = bitmapToBase64(bitmap)
-            nativeRunVisionInference(sessionHandle, base64, prompt)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error en inferencia: ${e.message}")
+            com.alibaba.mnnllm.android.llm.LlmSession.submitNative(sessionHandle, prompt, base64)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error en inferencia: ${e.message}", e)
             null
         }
     }
@@ -116,17 +125,4 @@ object MnnLlmBridge {
         scaled.compress(Bitmap.CompressFormat.JPEG, 85, output)
         return Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
     }
-
-    // ─── Declaraciones nativas (JNI) ─────────────────────────────────────────
-    // Estas funciones son implementadas en C++ por libllm.so
-    // El contrato coincide con la API de MNN-LLM para modelos VLM.
-
-    @JvmStatic
-    private external fun nativeCreateSession(modelPath: String): Long
-
-    @JvmStatic
-    private external fun nativeDestroySession(handle: Long)
-
-    @JvmStatic
-    private external fun nativeRunVisionInference(handle: Long, imageBase64: String, prompt: String): String
 }
