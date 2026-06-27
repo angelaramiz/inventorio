@@ -68,7 +68,12 @@ object MnnLlmBridge {
             return false
         }
         return try {
-            sessionHandle = com.alibaba.mnnllm.android.llm.LlmSession.initNative(modelDir, false)
+            sessionHandle = com.alibaba.mnnllm.android.llm.LlmSession.initNative(
+                modelDir, 
+                null, 
+                "{}", 
+                "{}"
+            )
             if (sessionHandle == 0L) {
                 lastInitError = "Error: LlmSession.initNative devolvió handle nulo (0L)."
             }
@@ -97,32 +102,46 @@ object MnnLlmBridge {
      * Ejecuta el modelo de visión con una imagen y un prompt de texto.
      * Devuelve la respuesta generada o null si falla.
      */
-    fun runVisionInference(bitmap: Bitmap, prompt: String): String? {
+    fun runVisionInference(context: android.content.Context, bitmap: Bitmap, prompt: String): String? {
         if (!isAvailable) return null
         return try {
-            val base64 = bitmapToBase64(bitmap)
-            com.alibaba.mnnllm.android.llm.LlmSession.submitNative(sessionHandle, prompt, base64)
+            // Guardar imagen temporalmente para que libmnnllmapp.so la cargue
+            val tempFile = java.io.File(context.cacheDir, "mnn_ocr_temp.jpg")
+            java.io.FileOutputStream(tempFile).use { out ->
+                // Qwen2.5-VL-2B funciona perfectamente con imágenes de tamaño medio
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            }
+            
+            // Construir el prompt con formato de etiqueta de imagen MNN Chat
+            val finalPrompt = "<img>${tempFile.absolutePath}</img>\n$prompt"
+            val outputBuilder = java.lang.StringBuilder()
+            
+            Log.d(TAG, "Iniciando inferencia local MNN. Prompt final: $finalPrompt")
+            
+            com.alibaba.mnnllm.android.llm.LlmSession.submitNative(
+                sessionHandle,
+                finalPrompt,
+                false,
+                object : com.alibaba.mnnllm.android.llm.GenerateProgressListener {
+                    override fun onProgress(progress: String?): Boolean {
+                        if (progress != null) {
+                            outputBuilder.append(progress)
+                        }
+                        return false // false para continuar generando
+                    }
+                }
+            )
+            
+            val result = outputBuilder.toString()
+            Log.d(TAG, "Inferencia local MNN completada. Resultado: $result")
+            
+            // Limpiar archivo temporal
+            try { tempFile.delete() } catch (ignored: Exception) {}
+            
+            result.ifEmpty { null }
         } catch (e: Throwable) {
             Log.e(TAG, "Error en inferencia: ${e.message}", e)
             null
         }
-    }
-
-    // ─── Utilidades ──────────────────────────────────────────────────────────
-
-    private fun bitmapToBase64(bitmap: Bitmap): String {
-        val output = ByteArrayOutputStream()
-        // Reducir a max 1024px para eficiencia en inferencia
-        val scaled = if (bitmap.width > 1024 || bitmap.height > 1024) {
-            val ratio = minOf(1024f / bitmap.width, 1024f / bitmap.height)
-            Bitmap.createScaledBitmap(
-                bitmap,
-                (bitmap.width * ratio).toInt(),
-                (bitmap.height * ratio).toInt(),
-                true
-            )
-        } else bitmap
-        scaled.compress(Bitmap.CompressFormat.JPEG, 85, output)
-        return Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
     }
 }

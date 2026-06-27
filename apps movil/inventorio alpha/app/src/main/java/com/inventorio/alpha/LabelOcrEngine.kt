@@ -124,7 +124,7 @@ class LabelOcrEngine(
     // ─── Inferencia local (MNN-LLM) ──────────────────────────────────────────
 
     private suspend fun analyzeLocal(bitmap: Bitmap): LabelOcrResult? = withContext(Dispatchers.IO) {
-        val raw = MnnLlmBridge.runVisionInference(bitmap, LABEL_EXTRACTION_PROMPT)
+        val raw = MnnLlmBridge.runVisionInference(context, bitmap, LABEL_EXTRACTION_PROMPT)
             ?: return@withContext null
 
         parseJsonResponse(raw, source = "local")
