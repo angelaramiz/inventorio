@@ -734,6 +734,9 @@ fun MainAppScreen() {
         if (showAiStatusDialog) {
             val isLocalAi = MnnLlmBridge.isAvailable
             val err = MnnLlmBridge.lastInitError
+            val modelValidation = remember(showAiStatusDialog) {
+                if (ocrEngine.isModelReady) MnnLlmBridge.validateModelFiles(ocrEngine.modelDir) else null
+            }
             AlertDialog(
                 onDismissRequest = { showAiStatusDialog = false },
                 title = { Text(if (isLocalAi) "IA Local Activa" else "IA Nube Activa") },
@@ -759,6 +762,15 @@ fun MainAppScreen() {
                                 "El modelo local de IA no está descargado. Puedes descargarlo en Configuración.",
                                 color = Color.Gray,
                                 fontSize = 12.sp
+                            )
+                        }
+                        if (modelValidation != null) {
+                            Text("Validación de archivos:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(
+                                text = modelValidation,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.error
                             )
                         }
                     }

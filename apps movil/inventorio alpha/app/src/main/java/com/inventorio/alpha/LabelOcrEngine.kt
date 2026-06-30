@@ -24,7 +24,7 @@ import java.net.URL
  *  2. Fallback: POST /api/ocr/extract-label en el servidor (requiere internet)
  *
  * El modelo se descarga on-demand (~1.2 GB) y se almacena en
- * getExternalFilesDir()/qwen_ocr_model/
+ * filesDir/qwen_ocr_model/ (accesible por código nativo en Android 11+).
  */
 class LabelOcrEngine(
     private val context: Context,
@@ -67,7 +67,14 @@ class LabelOcrEngine(
     // ─── Estado público ───────────────────────────────────────────────────────
 
     val modelDir: File
-        get() = File(context.getExternalFilesDir(null), MODEL_DIR_NAME)
+        get() {
+            val internal = File(context.filesDir, MODEL_DIR_NAME)
+            val legacyExternal = File(context.getExternalFilesDir(null), MODEL_DIR_NAME)
+            if (!File(internal, "config.json").exists() && File(legacyExternal, "config.json").exists()) {
+                migrateModelDir(legacyExternal, internal)
+            }
+            return internal
+        }
 
     val isModelReady: Boolean
         get() = File(modelDir, "config.json").exists() &&
@@ -106,8 +113,8 @@ class LabelOcrEngine(
         } else if (isModelReady && !MnnLlmBridge.isAvailable) {
             // Modelo descargado pero .so no cargadas: intentar cargar ahora
             MnnLlmBridge.tryLoadLibraries()
-            if (MnnLlmBridge.isAvailable) {
-                MnnLlmBridge.initModel(modelDir.absolutePath)
+            if (MnnLlmBridge.isLoaded) {
+                MnnLlmBridge.initModel(context, modelDir)
                 try {
                     val result = analyzeLocal(bitmap)
                     if (result != null) return@withContext result
@@ -276,11 +283,26 @@ class LabelOcrEngine(
      * Llamar después de que el modelo esté listo.
      */
     fun initNativeModel(): Boolean {
-        if (!isModelReady) return false
+        if (!isModelReady) {
+            MnnLlmBridge.lastInitError = "Modelo no descargado completamente."
+            return false
+        }
         MnnLlmBridge.tryLoadLibraries()
         return if (MnnLlmBridge.isLoaded) {
-            MnnLlmBridge.initModel(modelDir.absolutePath)
+            MnnLlmBridge.initModel(context, modelDir)
         } else false
+    }
+
+    private fun migrateModelDir(from: File, to: File) {
+        try {
+            to.mkdirs()
+            from.listFiles()?.forEach { file ->
+                file.copyRecursively(File(to, file.name), overwrite = true)
+            }
+            Log.i(TAG, "Modelo migrado de external a internal: ${to.absolutePath}")
+        } catch (e: Exception) {
+            Log.w(TAG, "No se pudo migrar modelo a internal storage: ${e.message}")
+        }
     }
 }
 

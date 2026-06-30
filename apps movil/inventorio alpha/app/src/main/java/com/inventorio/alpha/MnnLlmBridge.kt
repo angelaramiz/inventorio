@@ -1,9 +1,9 @@
 package com.inventorio.alpha
 
+import android.content.Context
 import android.graphics.Bitmap
-import android.util.Base64
 import android.util.Log
-import java.io.ByteArrayOutputStream
+import java.io.File
 
 /**
  * Wrapper JNI para las librerías nativas de MNN-LLM.
@@ -12,13 +12,8 @@ import java.io.ByteArrayOutputStream
  * desde el release oficial de MNN y colócalas en:
  *   app/src/main/jniLibs/arm64-v8a/
  *     - libMNN.so
- *     - libMNN_Express.so
- *     - libMNN_CL.so    (opcional, GPU backend)
- *     - libllm.so
- *
- * Repositorio de referencia:
- *   https://github.com/alibaba/MNN  (carpetas: project/android)
- *   https://github.com/DakeQQ/Native-LLM-for-Android
+ *     - libmnnllmapp.so
+ *     - libc++_shared.so
  */
 object MnnLlmBridge {
 
@@ -27,12 +22,18 @@ object MnnLlmBridge {
     private var sessionHandle: Long = 0L
     var lastInitError: String? = null
 
-    // ─── Estado ──────────────────────────────────────────────────────────────
+    private val REQUIRED_MODEL_FILES = listOf(
+        "config.json",
+        "llm.mnn",
+        "llm.mnn.weight",
+        "embeddings_bf16.bin",
+        "visual.mnn",
+        "visual.mnn.weight",
+        "tokenizer.txt"
+    )
 
     val isAvailable: Boolean
         get() = isLoaded && sessionHandle != 0L
-
-    // ─── Carga de librerías nativas ──────────────────────────────────────────
 
     fun tryLoadLibraries(): Boolean {
         if (isLoaded) return true
@@ -52,30 +53,64 @@ object MnnLlmBridge {
         }
     }
 
-    // ─── Ciclo de vida del modelo ────────────────────────────────────────────
+    /**
+     * Valida que todos los archivos del modelo existan y sean legibles.
+     * Debe llamarse antes de initNative para evitar SIGSEGV en el motor C++.
+     */
+    fun validateModelFiles(modelDir: File): String? {
+        val errors = mutableListOf<String>()
+        for (name in REQUIRED_MODEL_FILES) {
+            val file = File(modelDir, name)
+            when {
+                !file.exists() -> errors.add("Falta: $name")
+                !file.canRead() -> errors.add("Sin permiso de lectura: $name (${file.absolutePath})")
+                file.length() == 0L -> errors.add("Archivo vacío: $name")
+            }
+        }
+        return if (errors.isEmpty()) null else errors.joinToString("\n")
+    }
 
     /**
      * Inicializa el modelo desde el directorio dado.
      * Debe llamarse en un hilo de I/O (Dispatchers.IO).
-     *
-     * @param modelDir Ruta al directorio con config.json y archivos .mnn
-     * @return true si se inicializó correctamente
      */
-    fun initModel(modelDir: String): Boolean {
+    fun initModel(context: Context, modelDir: File): Boolean {
         if (!isLoaded) {
             lastInitError = "Error: Librerías no cargadas."
             Log.w(TAG, "initModel() llamado sin librerías cargadas.")
             return false
         }
+
+        val validationError = validateModelFiles(modelDir)
+        if (validationError != null) {
+            lastInitError = "Archivos del modelo inválidos:\n$validationError"
+            Log.e(TAG, lastInitError!!)
+            return false
+        }
+
+        val configFile = File(modelDir, "config.json")
         return try {
+            val mmapDir = File(context.cacheDir, "mnn_mmap").apply { mkdirs() }
+            val mergedConfig = configFile.readText()
+            val extraConfigJson = buildString {
+                append("{")
+                append("\"is_r1\":false,")
+                append("\"mmap_dir\":\"${mmapDir.absolutePath}\",")
+                append("\"keep_history\":false")
+                append("}")
+            }
+
+            Log.i(TAG, "initNative config=${configFile.absolutePath} mmap=${mmapDir.absolutePath}")
+
             sessionHandle = com.alibaba.mnnllm.android.llm.LlmSession.initNative(
-                modelDir, 
-                null, 
-                "{}", 
-                "{}"
+                configFile.absolutePath,
+                null,
+                mergedConfig,
+                extraConfigJson
             )
+
             if (sessionHandle == 0L) {
-                lastInitError = "Error: LlmSession.initNative devolvió handle nulo (0L)."
+                lastInitError = "Error: initNative devolvió handle nulo (0L). Revisa logcat nativo (MNN_DEBUG)."
             }
             sessionHandle != 0L
         } catch (e: Throwable) {
@@ -96,28 +131,19 @@ object MnnLlmBridge {
         }
     }
 
-    // ─── Inferencia ──────────────────────────────────────────────────────────
-
-    /**
-     * Ejecuta el modelo de visión con una imagen y un prompt de texto.
-     * Devuelve la respuesta generada o null si falla.
-     */
-    fun runVisionInference(context: android.content.Context, bitmap: Bitmap, prompt: String): String? {
+    fun runVisionInference(context: Context, bitmap: Bitmap, prompt: String): String? {
         if (!isAvailable) return null
         return try {
-            // Guardar imagen temporalmente para que libmnnllmapp.so la cargue
-            val tempFile = java.io.File(context.cacheDir, "mnn_ocr_temp.jpg")
+            val tempFile = File(context.cacheDir, "mnn_ocr_temp.jpg")
             java.io.FileOutputStream(tempFile).use { out ->
-                // Qwen2.5-VL-2B funciona perfectamente con imágenes de tamaño medio
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
             }
-            
-            // Construir el prompt con formato de etiqueta de imagen MNN Chat
+
             val finalPrompt = "<img>${tempFile.absolutePath}</img>\n$prompt"
             val outputBuilder = java.lang.StringBuilder()
-            
+
             Log.d(TAG, "Iniciando inferencia local MNN. Prompt final: $finalPrompt")
-            
+
             com.alibaba.mnnllm.android.llm.LlmSession.submitNative(
                 sessionHandle,
                 finalPrompt,
@@ -127,17 +153,16 @@ object MnnLlmBridge {
                         if (progress != null) {
                             outputBuilder.append(progress)
                         }
-                        return false // false para continuar generando
+                        return false
                     }
                 }
             )
-            
+
             val result = outputBuilder.toString()
             Log.d(TAG, "Inferencia local MNN completada. Resultado: $result")
-            
-            // Limpiar archivo temporal
-            try { tempFile.delete() } catch (ignored: Exception) {}
-            
+
+            try { tempFile.delete() } catch (_: Exception) {}
+
             result.ifEmpty { null }
         } catch (e: Throwable) {
             Log.e(TAG, "Error en inferencia: ${e.message}", e)
