@@ -2,13 +2,14 @@ import React, { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search, Package, Image as ImageIcon, Loader2, Calendar, Edit2, Trash2, SlidersHorizontal, X } from "lucide-react";
+import { Search, Package, Image as ImageIcon, Loader2, Calendar, Edit2, Trash2, SlidersHorizontal, X, Upload } from "lucide-react";
 import { Producto } from "../types";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import ProductEditModal from "./ProductEditModal";
 import ProductQuickRegister from "./ProductQuickRegister";
 import ProductGroupEditModal from "./ProductGroupEditModal";
+import ProductCSVImportModal from "./ProductCSVImportModal";
 import { fetchCatalogWithCache } from "../utils/pwaDb";
 
 const TALLAS_LETRA = ["SinTalla", "XS", "S", "M", "L", "XL", "XXL"];
@@ -44,6 +45,7 @@ export default function InventoryView() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showQuickRegister, setShowQuickRegister] = useState(false);
   const [showGroupEditModal, setShowGroupEditModal] = useState(false);
+  const [showCSVImport, setShowCSVImport] = useState(false);
   const [temporadasOpts, setTemporadasOpts] = useState<string[]>([]);
   const [marcasOpts, setMarcasOpts] = useState<string[]>([]);
   const [tiposOpts, setTiposOpts] = useState<string[]>([]);
@@ -117,7 +119,10 @@ export default function InventoryView() {
     const matchesSearch = !term ||
       (p.sku || "").toLowerCase().includes(term) ||
       (p.ean_13 || "").toLowerCase().includes(term) ||
-      (p.marca_sub || "").toLowerCase().includes(term);
+      (p.marca_sub || "").toLowerCase().includes(term) ||
+      (p.modelo_grupo || "").toLowerCase().includes(term) ||
+      ((p as any).codigo_color || "").toLowerCase().includes(term) ||
+      ((p as any).fecha_temporada || "").toLowerCase().includes(term);
     const matchesMarca = !filterMarca || (p.marca_sub || "").toLowerCase() === filterMarca.toLowerCase();
     const matchesTalla = !filterTalla || (p.talla || "").toLowerCase() === filterTalla.toLowerCase();
     const matchesTemporada = !filterTemporada || (p.temporada || "").toLowerCase() === filterTemporada.toLowerCase();
@@ -192,6 +197,13 @@ export default function InventoryView() {
           >
             <SlidersHorizontal size={16} />
             Editar Grupo
+          </Button>
+          <Button
+            onClick={() => setShowCSVImport(true)}
+            className="rounded-xl h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs uppercase tracking-wider px-5 shrink-0 flex items-center gap-1.5 shadow-md"
+          >
+            <Upload size={16} />
+            Importar CSV
           </Button>
           <div className="flex gap-3 bg-white p-1.5 rounded-2xl shadow-sm border border-neutral-100 flex-1 md:w-96 overflow-hidden focus-within:border-neutral-900 transition-colors">
             <div className="flex items-center pl-3 text-neutral-400">
@@ -363,7 +375,18 @@ export default function InventoryView() {
                         <Badge variant="outline" className="border-neutral-200 text-neutral-500 uppercase text-[9px] font-black py-0.5 px-2">{p.talla}</Badge>
                       </div>
                       <h3 className="font-black text-xl text-neutral-900 leading-none truncate tracking-tighter uppercase">{p.sku}</h3>
-                      <p className="text-[10px] text-neutral-400 font-mono mt-1 font-bold">{p.ean_13}</p>
+                      <p className="text-[10px] text-neutral-400 font-mono mt-1 font-bold flex flex-wrap gap-x-2 gap-y-0.5">
+                        <span>{p.ean_13}</span>
+                        {p.modelo_grupo && p.modelo_grupo !== "sin modelo" && (
+                          <span className="text-amber-600">MOD: {p.modelo_grupo}</span>
+                        )}
+                        {(p as any).codigo_color && (
+                          <span className="text-blue-600">COL: {(p as any).codigo_color}</span>
+                        )}
+                        {(p as any).fecha_temporada && (
+                          <span className="text-emerald-600">FECHA: {(p as any).fecha_temporada}</span>
+                        )}
+                      </p>
                     </div>
                   </div>
 
@@ -432,6 +455,16 @@ export default function InventoryView() {
           )}
           onClose={() => setShowGroupEditModal(false)}
           onSuccess={fetchProductos}
+        />
+      )}
+
+      {showCSVImport && (
+        <ProductCSVImportModal
+          onClose={() => setShowCSVImport(false)}
+          onSuccess={() => {
+            setShowCSVImport(false);
+            fetchProductos();
+          }}
         />
       )}
     </div>

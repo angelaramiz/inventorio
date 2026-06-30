@@ -36,7 +36,9 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
     temporada: product.temporada as Temporada,
     tipo: product.tipo as TipoProducto,
     marca_sub: product.marca_sub || "Guess",
-    modelo_grupo: (product as any).modelo_grupo || "sin modelo"
+    modelo_grupo: (product as any).modelo_grupo || "sin modelo",
+    codigo_color: (product as any).codigo_color || "",
+    fecha_temporada: (product as any).fecha_temporada || ""
   });
 
   const [temporadas, setTemporadas] = useState<string[]>([]);
@@ -77,6 +79,22 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
     setTallaValue(defaultVal);
   };
 
+  const handleModeloGrupoChange = (val: string) => {
+    if (val.includes("-")) {
+      const parts = val.split("-");
+      setFormData(prev => ({
+        ...prev,
+        modelo_grupo: parts[0].trim().toUpperCase(),
+        codigo_color: parts[parts.length - 1].trim().toUpperCase()
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        modelo_grupo: val
+      }));
+    }
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!formData.sku.trim()) return toast.error("El SKU es obligatorio");
@@ -93,7 +111,9 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
           temporada: formData.temporada,
           tipo: formData.tipo,
           marca_sub: formData.marca_sub.trim(),
-          modelo_grupo: formData.modelo_grupo.trim()
+          modelo_grupo: formData.modelo_grupo.trim(),
+          codigo_color: formData.codigo_color.trim(),
+          fecha_temporada: formData.fecha_temporada.trim()
         })
       });
 
@@ -166,8 +186,28 @@ export default function ProductEditModal({ product, onClose, onSuccess }: Props)
               <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Modelo de Grupo (Estilo/Color)</label>
               <Input 
                 value={formData.modelo_grupo} 
-                onChange={e => setFormData({...formData, modelo_grupo: e.target.value})}
+                onChange={e => handleModeloGrupoChange(e.target.value)}
                 placeholder="Ej: M12345 (sin modelo por defecto)"
+                className="rounded-xl bg-neutral-50 uppercase"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Código de Color</label>
+              <Input 
+                value={formData.codigo_color} 
+                onChange={e => setFormData({...formData, codigo_color: e.target.value})}
+                placeholder="Ej: F1PV, RED, black"
+                className="rounded-xl bg-neutral-50 uppercase"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Fecha de Temporada</label>
+              <Input 
+                value={formData.fecha_temporada} 
+                onChange={e => setFormData({...formData, fecha_temporada: e.target.value})}
+                placeholder="Ej: 2026-Q1, Verano 26"
                 className="rounded-xl bg-neutral-50"
               />
             </div>

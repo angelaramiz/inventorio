@@ -65,7 +65,9 @@ export default function ProductQuickRegister({
     temporada: (defaultTemporada || "todouso") as Temporada,
     tipo: (defaultTipo || "otro") as TipoProducto,
     marca_sub: "Guess",
-    modelo_grupo: ""
+    modelo_grupo: "",
+    codigo_color: "",
+    fecha_temporada: ""
   });
 
   // Variations for group mode
@@ -198,6 +200,8 @@ export default function ProductQuickRegister({
           setFormData(prev => ({
             ...prev,
             modelo_grupo: product.modelo_grupo || product.sku.split("-")[0] || prev.modelo_grupo || "",
+            codigo_color: product.codigo_color || (product.sku.includes("-") ? product.sku.split("-")[product.sku.split("-").length - 1] : "") || prev.codigo_color || "",
+            fecha_temporada: product.fecha_temporada || prev.fecha_temporada || "",
             marca_sub: product.marca_sub || prev.marca_sub,
             tipo: product.tipo || prev.tipo,
             temporada: product.temporada || prev.temporada,
@@ -232,6 +236,8 @@ export default function ProductQuickRegister({
             marca_sub: product.marca_sub || prev.marca_sub,
             tipo: product.tipo || prev.tipo,
             temporada: product.temporada || prev.temporada,
+            codigo_color: product.codigo_color || prev.codigo_color || "",
+            fecha_temporada: product.fecha_temporada || prev.fecha_temporada || "",
           }));
           if (product.has_foto && !photo) {
             setPhoto(`/api/productos/${product.id_producto}/image`);
@@ -499,6 +505,22 @@ export default function ProductQuickRegister({
     });
   };
 
+  const handleModeloGrupoChange = (val: string) => {
+    if (val.includes("-")) {
+      const parts = val.split("-");
+      setFormData(prev => ({
+        ...prev,
+        modelo_grupo: parts[0].trim().toUpperCase(),
+        codigo_color: parts[parts.length - 1].trim().toUpperCase()
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        modelo_grupo: val
+      }));
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -517,9 +539,12 @@ export default function ProductQuickRegister({
         fd.append("temporada", formData.temporada);
         fd.append("tipo", formData.tipo);
         fd.append("marca_sub", formData.marca_sub);
+        
         const sanitizedVariaciones = variaciones.map(v => ({
           ...v,
-          cantidad: v.cantidad === "" ? 1 : v.cantidad
+          cantidad: v.cantidad === "" ? 1 : v.cantidad,
+          codigo_color: (v as any).codigo_color || formData.codigo_color || "",
+          fecha_temporada: (v as any).fecha_temporada || formData.fecha_temporada || ""
         }));
         fd.append("variaciones", JSON.stringify(sanitizedVariaciones));
 
@@ -571,6 +596,12 @@ export default function ProductQuickRegister({
         fd.append("tipo", formData.tipo);
         fd.append("marca_sub", formData.marca_sub);
         fd.append("modelo_grupo", formData.modelo_grupo || "sin modelo");
+        if (formData.codigo_color) {
+          fd.append("codigo_color", formData.codigo_color);
+        }
+        if (formData.fecha_temporada) {
+          fd.append("fecha_temporada", formData.fecha_temporada);
+        }
         
         if (photo) {
           const res = await fetch(photo);
@@ -722,7 +753,7 @@ export default function ProductQuickRegister({
                 <div className="relative">
                   <Input 
                     value={formData.modelo_grupo} 
-                    onChange={e => setFormData({...formData, modelo_grupo: e.target.value})}
+                    onChange={e => handleModeloGrupoChange(e.target.value)}
                     onBlur={() => checkModelExists(formData.modelo_grupo)}
                     placeholder="Ej: M12345, ANA-PLAYERA"
                     className={`rounded-xl bg-white border-neutral-200 uppercase font-bold ${existingModel ? "pr-8 border-amber-500 bg-amber-50/20 text-amber-900" : ""}`}
@@ -752,7 +783,7 @@ export default function ProductQuickRegister({
                   <div className="relative">
                     <Input 
                       value={formData.modelo_grupo} 
-                      onChange={e => setFormData({...formData, modelo_grupo: e.target.value})}
+                      onChange={e => handleModeloGrupoChange(e.target.value)}
                       onBlur={() => checkModelExists(formData.modelo_grupo)}
                       placeholder="sin modelo"
                       className={`rounded-xl bg-white border-neutral-200 uppercase ${existingModel ? "pr-8 border-amber-500 bg-amber-50/20 text-amber-900" : ""}`}
@@ -820,6 +851,26 @@ export default function ProductQuickRegister({
                   <SelectItem value="numero">Números (38, 40, 42...)</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Código de Color</label>
+              <Input 
+                value={formData.codigo_color} 
+                onChange={e => setFormData({...formData, codigo_color: e.target.value})}
+                placeholder="Ej: F1PV, RED, black"
+                className="rounded-xl bg-white border-neutral-200 uppercase"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-neutral-400 px-1">Fecha de Temporada</label>
+              <Input 
+                value={formData.fecha_temporada} 
+                onChange={e => setFormData({...formData, fecha_temporada: e.target.value})}
+                placeholder="Ej: 2026-Q1, Verano 26"
+                className="rounded-xl bg-white border-neutral-200"
+              />
             </div>
           </div>
 

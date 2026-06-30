@@ -116,6 +116,8 @@ function getSupabase() {
 }
 
 let hasModeloGrupoColumn = false;
+let hasFechaTemporadaColumn = false;
+let hasCodigoColorColumn = false;
 let schemaDetected = false;
 
 async function detectSchema() {
@@ -125,15 +127,25 @@ async function detectSchema() {
     const { data } = await supabase.from("productos").select("*").limit(1);
     if (data && data.length > 0) {
       hasModeloGrupoColumn = "modelo_grupo" in data[0];
+      hasFechaTemporadaColumn = "fecha_temporada" in data[0];
+      hasCodigoColorColumn = "codigo_color" in data[0];
     } else {
-      const { error } = await supabase.from("productos").select("modelo_grupo").limit(1);
-      hasModeloGrupoColumn = !error;
+      const { error: error1 } = await supabase.from("productos").select("modelo_grupo").limit(1);
+      hasModeloGrupoColumn = !error1;
+      const { error: error2 } = await supabase.from("productos").select("fecha_temporada").limit(1);
+      hasFechaTemporadaColumn = !error2;
+      const { error: error3 } = await supabase.from("productos").select("codigo_color").limit(1);
+      hasCodigoColorColumn = !error3;
     }
     schemaDetected = true;
-    console.log("Schema detection: hasModeloGrupoColumn =", hasModeloGrupoColumn);
-  } catch (e) {
-    console.error("Schema detection failed, assuming false:", e);
+    console.log("Schema detection: hasModeloGrupoColumn =", hasModeloGrupoColumn, ", hasFechaTemporadaColumn =", hasFechaTemporadaColumn, ", hasCodigoColorColumn =", hasCodigoColorColumn);
+  } catch (err: any) {
+    console.error("Error detecting schema:", err);
   }
+}
+
+function getProductFields() {
+  return `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}${hasFechaTemporadaColumn ? ", fecha_temporada" : ""}${hasCodigoColorColumn ? ", codigo_color" : ""}`;
 }
 
 // --- HEALTH CHECK ---
@@ -194,7 +206,7 @@ app.get("/api/productos", async (req, res) => {
     const supabase = getSupabase();
     const { q, exactSku, marca, talla, temporada, tipo, modelo_grupo } = req.query as Record<string, string>;
     
-    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
+    const fields = getProductFields();
     let query = supabase
       .from("productos")
       .select(fields)
@@ -242,7 +254,7 @@ app.post("/api/productos", upload.single('foto'), async (req, res) => {
   try {
     await detectSchema();
     const supabase = getSupabase();
-    let { sku, ean_13, talla, temporada, tipo, marca_sub, modelo_grupo } = req.body;
+    let { sku, ean_13, talla, temporada, tipo, marca_sub, modelo_grupo, fecha_temporada, codigo_color } = req.body;
     
     sku = sanitizeIdentifier(sku, 100);
     if (!sku) {
@@ -270,8 +282,14 @@ app.post("/api/productos", upload.single('foto'), async (req, res) => {
     if (hasModeloGrupoColumn) {
       insertData.modelo_grupo = sanitizeIdentifier(modelo_grupo, 100) || "sin modelo";
     }
+    if (hasFechaTemporadaColumn && fecha_temporada) {
+      insertData.fecha_temporada = sanitizeIdentifier(fecha_temporada, 50);
+    }
+    if (hasCodigoColorColumn && codigo_color) {
+      insertData.codigo_color = sanitizeIdentifier(codigo_color, 50);
+    }
     
-    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
+    const fields = getProductFields();
     const { data, error } = await supabase
       .from("productos")
       .insert([insertData])
@@ -672,7 +690,7 @@ app.get("/api/verificar/:ean", async (req, res) => {
     const supabase = getSupabase();
     const { ean } = req.params;
     
-    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
+    const fields = getProductFields();
     
     // Layered search to find the product
     let foundProduct = null;
@@ -1088,6 +1106,259 @@ app.post("/api/productos/bulk-save", async (req, res) => {
   }
 });
 
+// POST /api/productos/bulk-csv - Register products imported from CSV
+app.post("/api/productos/bulk-csv", async (req, res) => {
+  try {
+    await detectSchema();
+    const supabase = getSupabase();
+    let { products, id_caja, id_zona_nivel, id_zona_seccion, id_zona_almacen } = req.body;
+
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ error: "No se proporcionaron productos para importar" });
+    }
+
+    // Sanitize and validate rows
+    const sanitizedProducts: any[] = [];
+    const skusToCheck: string[] = [];
+
+    for (const p of products) {
+      const sku = sanitizeIdentifier(p.sku || p.upc || p.ean_13 || p.codigo, 100);
+      if (!sku) continue; // Skip rows without SKU
+
+      const ean_13 = sanitizeIdentifier(p.ean_13 || p.ean || sku, 13);
+      const talla = sanitizeIdentifier(p.talla || p.size || "SinTalla", 50);
+      let baseModel = sanitizeIdentifier(p.modelo || p.modelo_grupo || p.grupo || "sin modelo", 100);
+      let color = sanitizeIdentifier(p.color || p.codigo_color || p.colour || "", 50);
+      
+      if (baseModel.includes("-") && !color) {
+        const parts = baseModel.split("-");
+        baseModel = parts[0];
+        color = parts[parts.length - 1]; // Use last part as color code
+      }
+
+      const fecha_temporada = sanitizeIdentifier(p.fecha_temporada || p.season_date || "", 50);
+      const marca_sub = sanitizeIdentifier(p.marca || p.marca_sub || p.brand || "Guess", 100);
+      const tipo = (sanitizeIdentifier(p.tipo || p.prenda || p.categoria || "otro", 100) || "otro").toLowerCase();
+      const temporada = (sanitizeIdentifier(p.temporada || p.season || "todouso", 100) || "todouso").toLowerCase();
+      const cantidad = parseInt(p.cantidad || p.qty || p.stock) || 0;
+
+      sanitizedProducts.push({
+        sku,
+        ean_13,
+        talla,
+        modelo_grupo: baseModel,
+        codigo_color: color,
+        fecha_temporada,
+        marca_sub,
+        tipo,
+        temporada,
+        cantidad
+      });
+
+      skusToCheck.push(sku);
+    }
+
+    if (sanitizedProducts.length === 0) {
+      return res.status(400).json({ error: "No hay productos válidos con SKU en el lote" });
+    }
+
+    const fields = getProductFields();
+
+    // Fetch existing products to avoid duplicate inserts
+    const { data: existingProds, error: fetchErr } = await supabase
+      .from("productos")
+      .select(fields)
+      .in("sku", skusToCheck);
+
+    if (fetchErr) throw fetchErr;
+
+    const existingSkuMap = new Map<string, any>();
+    if (existingProds) {
+      existingProds.forEach((p: any) => {
+        existingSkuMap.set(p.sku.toLowerCase(), p);
+      });
+    }
+
+    const newProductInserts: any[] = [];
+    const alreadyExistingProds: any[] = [];
+
+    for (const p of sanitizedProducts) {
+      const existing = existingSkuMap.get(p.sku.toLowerCase());
+      if (existing) {
+        alreadyExistingProds.push(existing);
+      } else {
+        const insertData: any = {
+          sku: p.sku,
+          ean_13: p.ean_13,
+          talla: p.talla,
+          temporada: p.temporada,
+          tipo: p.tipo,
+          marca_sub: p.marca_sub
+        };
+        if (hasModeloGrupoColumn) {
+          insertData.modelo_grupo = p.modelo_grupo;
+        }
+        if (hasFechaTemporadaColumn && p.fecha_temporada) {
+          insertData.fecha_temporada = p.fecha_temporada;
+        }
+        if (hasCodigoColorColumn && p.codigo_color) {
+          insertData.codigo_color = p.codigo_color;
+        }
+        newProductInserts.push(insertData);
+      }
+    }
+
+    let createdProducts: any[] = [];
+
+    if (newProductInserts.length > 0) {
+      const { data, error: pErr } = await supabase
+        .from("productos")
+        .insert(newProductInserts)
+        .select(fields);
+        
+      if (pErr) throw pErr;
+      if (data) createdProducts = data;
+    }
+
+    const allProducts = [...createdProducts, ...alreadyExistingProds];
+    const allProductsMap = new Map<string, any>();
+    allProducts.forEach(p => allProductsMap.set(p.sku.toLowerCase(), p));
+
+    // Resolve destination container targetCajaId
+    let targetCajaId = id_caja ? parseInt(id_caja) : null;
+    
+    if (!targetCajaId) {
+      if (id_zona_nivel) {
+        const lvlId = parseInt(id_zona_nivel);
+        if (!isNaN(lvlId)) {
+          const { data: lvlObj } = await supabase.from("zonas_nivel").select("nombre, id_zona_seccion").eq("id_zona_nivel", lvlId).maybeSingle();
+          if (lvlObj) {
+            const nameToMatch = `NIVEL: ${lvlObj.nombre.toUpperCase()}`;
+            const { data: existingCaja } = await supabase
+              .from("cajas")
+              .select("id_caja")
+              .eq("id_zona_nivel", lvlId)
+              .eq("numero_caja", nameToMatch)
+              .maybeSingle();
+              
+            if (existingCaja) {
+              targetCajaId = existingCaja.id_caja;
+            } else {
+              const { data: newCaja } = await supabase
+                .from("cajas")
+                .insert([{
+                  numero_caja: nameToMatch,
+                  id_zona_nivel: lvlId,
+                  id_zona_seccion: lvlObj.id_zona_seccion,
+                  estado: 'vacia',
+                  tags: { tipo_producto: "ropa", genero: "todos", marca: "Guess" }
+                }])
+                .select();
+              if (newCaja && newCaja[0]) {
+                targetCajaId = newCaja[0].id_caja;
+              }
+            }
+          }
+        }
+      } else if (id_zona_seccion) {
+        const secId = parseInt(id_zona_seccion);
+        if (!isNaN(secId)) {
+          const { data: secObj } = await supabase.from("zonas_seccion").select("nombre").eq("id_zona_seccion", secId).maybeSingle();
+          if (secObj) {
+            const nameToMatch = `SECCIÓN: ${secObj.nombre.toUpperCase()}`;
+            const { data: existingCaja } = await supabase
+              .from("cajas")
+              .select("id_caja")
+              .eq("id_zona_seccion", secId)
+              .eq("numero_caja", nameToMatch)
+              .maybeSingle();
+              
+            if (existingCaja) {
+              targetCajaId = existingCaja.id_caja;
+            } else {
+              const { data: newCaja } = await supabase
+                .from("cajas")
+                .insert([{
+                  numero_caja: nameToMatch,
+                  id_zona_seccion: secId,
+                  estado: 'vacia',
+                  tags: { tipo_producto: "ropa", genero: "todos", marca: "Guess" }
+                }])
+                .select();
+              if (newCaja && newCaja[0]) {
+                targetCajaId = newCaja[0].id_caja;
+              }
+            }
+          }
+        }
+      } else if (id_zona_almacen) {
+        const almId = parseInt(id_zona_almacen);
+        if (!isNaN(almId)) {
+          const { data: almObj } = await supabase.from("zonas_almacen").select("nombre").eq("id_zona_almacen", almId).maybeSingle();
+          if (almObj) {
+            const nameToMatch = `ALMACÉN: ${almObj.nombre.toUpperCase()}`;
+            const { data: existingCaja } = await supabase
+              .from("cajas")
+              .select("id_caja")
+              .eq("id_zona_almacen", almId)
+              .is("id_zona_seccion", null)
+              .eq("numero_caja", nameToMatch)
+              .maybeSingle();
+              
+            if (existingCaja) {
+              targetCajaId = existingCaja.id_caja;
+            } else {
+              const { data: newCaja } = await supabase
+                .from("cajas")
+                .insert([{
+                  numero_caja: nameToMatch,
+                  id_zona_almacen: almId,
+                  estado: 'vacia',
+                  tags: { tipo_producto: "ropa", genero: "todos", marca: "Guess" }
+                }])
+                .select();
+              if (newCaja && newCaja[0]) {
+                targetCajaId = newCaja[0].id_caja;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Associate to container if resolved AND product has cantidad > 0
+    if (targetCajaId) {
+      const associations: any[] = [];
+      for (const p of sanitizedProducts) {
+        if (p.cantidad > 0) {
+          const matchedProd = allProductsMap.get(p.sku.toLowerCase());
+          if (matchedProd) {
+            associations.push({
+              id_caja: targetCajaId,
+              id_producto: matchedProd.id_producto,
+              cantidad: p.cantidad
+            });
+          }
+        }
+      }
+
+      if (associations.length > 0) {
+        const { error: assocErr } = await supabase
+          .from("caja_productos")
+          .upsert(associations, { onConflict: "id_caja,id_producto" });
+          
+        if (assocErr) throw assocErr;
+        
+        await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", targetCajaId).eq("estado", "vacia");
+      }
+    }
+
+    res.json({ success: true, count: allProducts.length });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // PUT /api/productos/:id - Editing product info and/or photo
 app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
   try {
@@ -1097,7 +1368,7 @@ app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: "ID de producto inválido" });
     }
-    let { sku, ean_13, talla, temporada, tipo, marca_sub, delete_foto, modelo_grupo } = req.body;
+    let { sku, ean_13, talla, temporada, tipo, marca_sub, delete_foto, modelo_grupo, fecha_temporada, codigo_color } = req.body;
     
     const updateData: any = {};
     if (sku !== undefined) {
@@ -1124,6 +1395,12 @@ app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
     if (hasModeloGrupoColumn && modelo_grupo !== undefined) {
       updateData.modelo_grupo = sanitizeIdentifier(modelo_grupo, 100) || "sin modelo";
     }
+    if (hasFechaTemporadaColumn && fecha_temporada !== undefined) {
+      updateData.fecha_temporada = sanitizeIdentifier(fecha_temporada, 50);
+    }
+    if (hasCodigoColorColumn && codigo_color !== undefined) {
+      updateData.codigo_color = sanitizeIdentifier(codigo_color, 50);
+    }
     
     if (req.file) {
       updateData.foto = '\\x' + req.file.buffer.toString('hex');
@@ -1131,7 +1408,7 @@ app.put("/api/productos/:id", upload.single('foto'), async (req, res) => {
       updateData.foto = null;
     }
     
-    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
+    const fields = getProductFields();
     const { data, error } = await supabase
       .from("productos")
       .update(updateData)
@@ -1536,7 +1813,7 @@ app.get("/api/consultar-seccion/:query", async (req, res) => {
           id_caja,
           id_producto,
           cantidad,
-          productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto)
+          productos (${getProductFields()})
         `)
         .in("id_caja", boxIds);
         
@@ -1702,8 +1979,8 @@ app.get("/api/consultar-dinamico/:query", async (req, res) => {
     const { data: section } = await sectionQuery.maybeSingle();
     
     // Determine dynamic fields
-    const prodFields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
-    const prodFieldsWithActive = `${prodFields}, activo, created_at`;
+    const prodFields = getProductFields();
+    const prodFieldsWithActive = getProductFields();
     
     if (section) {
       // It is a Section! Fetch section boxes
@@ -3623,29 +3900,138 @@ app.post("/api/productos/batch-ocr", upload.array("fotos", 50), async (req, res)
           }
         }
         
-        // Validar si el modelo existe en la base de datos
-        let existeModelo = false;
-        if (modelo) {
-          const { data: extProd } = await supabase
+        // Registrar o actualizar producto en base de datos
+        const cleanSku = sanitizeIdentifier(rawData.sku || modelo, 100);
+        if (cleanSku) {
+          const fields = getProductFields();
+          const { data: existing } = await supabase
             .from("productos")
-            .select("id_producto")
-            .eq("sku", rawData.sku || modelo)
-            .limit(1);
-          existeModelo = !!(extProd && extProd.length > 0);
+            .select(fields)
+            .eq("sku", cleanSku)
+            .maybeSingle();
+
+          let productRecord = existing;
+
+          if (!productRecord) {
+            const insertData: any = {
+              sku: cleanSku,
+              ean_13: cleanSku,
+              talla: sanitizeIdentifier(rawData.talla || "SinTalla", 50),
+              temporada: "todouso",
+              tipo: (sanitizeIdentifier(rawData.tipo_producto || "otro", 100) || "otro").toLowerCase(),
+              marca_sub: sanitizeIdentifier(rawData.marca || "Guess", 100)
+            };
+            if (hasModeloGrupoColumn) {
+              insertData.modelo_grupo = modelo || "sin modelo";
+            }
+            if (hasCodigoColorColumn && colorCode) {
+              insertData.codigo_color = colorCode;
+            }
+            if (file) {
+              insertData.foto = '\\x' + file.buffer.toString('hex');
+            }
+            const { data: newProd, error: pErr } = await supabase
+              .from("productos")
+              .insert([insertData])
+              .select(fields);
+            
+            if (pErr) throw pErr;
+            if (newProd && newProd[0]) {
+              productRecord = newProd[0];
+            }
+          }
+
+          if (productRecord) {
+            parsedProducts.push({
+              modelo_grupo: modelo,
+              codigo_color: colorCode,
+              sku: productRecord.sku,
+              marca: productRecord.marca_sub,
+              talla: productRecord.talla,
+              tipo_producto: productRecord.tipo,
+              genero,
+              existeModelo: true,
+              id_producto: productRecord.id_producto
+            });
+          }
         }
-        
-        parsedProducts.push({
-          modelo_grupo: modelo,
-          codigo_color: colorCode,
-          sku: rawData.sku || null,
-          marca: rawData.marca || null,
-          talla: rawData.talla || null,
-          tipo_producto: rawData.tipo_producto || null,
-          genero,
-          existeModelo
-        });
       } catch (err: any) {
         console.error("Error parseando etiqueta en lote:", err);
+      }
+    }
+
+    // Resolver asociación de contenedor
+    let { id_caja, id_zona_nivel } = req.body;
+    let targetCajaId = id_caja ? parseInt(id_caja) : null;
+    
+    if (!targetCajaId && id_zona_nivel) {
+      const lvlId = parseInt(id_zona_nivel);
+      if (!isNaN(lvlId)) {
+        const { data: lvlObj } = await supabase.from("zonas_nivel").select("nombre, id_zona_seccion").eq("id_zona_nivel", lvlId).maybeSingle();
+        if (lvlObj) {
+          const nameToMatch = `NIVEL: ${lvlObj.nombre.toUpperCase()}`;
+          const { data: existingCaja } = await supabase
+            .from("cajas")
+            .select("id_caja")
+            .eq("id_zona_nivel", lvlId)
+            .eq("numero_caja", nameToMatch)
+            .maybeSingle();
+            
+          if (existingCaja) {
+            targetCajaId = existingCaja.id_caja;
+          } else {
+            const { data: newCaja } = await supabase
+              .from("cajas")
+              .insert([{
+                numero_caja: nameToMatch,
+                id_zona_nivel: lvlId,
+                id_zona_seccion: lvlObj.id_zona_seccion,
+                estado: 'vacia',
+                tags: { tipo_producto: "ropa", genero: "todos", marca: "Guess" }
+              }])
+              .select();
+            if (newCaja && newCaja[0]) {
+              targetCajaId = newCaja[0].id_caja;
+            }
+          }
+        }
+      }
+    }
+
+    if (targetCajaId && parsedProducts.length > 0) {
+      const { data: currentAssoc } = await supabase
+        .from("caja_productos")
+        .select("id_producto, cantidad")
+        .eq("id_caja", targetCajaId);
+
+      const assocMap = new Map<number, number>();
+      if (currentAssoc) {
+        currentAssoc.forEach((a: any) => assocMap.set(a.id_producto, a.cantidad));
+      }
+
+      const scanCounts = new Map<number, number>();
+      parsedProducts.forEach(p => {
+        if (p.id_producto) {
+          scanCounts.set(p.id_producto, (scanCounts.get(p.id_producto) || 0) + 1);
+        }
+      });
+
+      const associations = Array.from(scanCounts.entries()).map(([prodId, count]) => {
+        const currentQty = assocMap.get(prodId) || 0;
+        return {
+          id_caja: targetCajaId,
+          id_producto: prodId,
+          cantidad: currentQty + count
+        };
+      });
+
+      if (associations.length > 0) {
+        const { error: assocErr } = await supabase
+          .from("caja_productos")
+          .upsert(associations, { onConflict: "id_caja,id_producto" });
+          
+        if (assocErr) throw assocErr;
+        await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", targetCajaId).eq("estado", "vacia");
       }
     }
     
@@ -4239,9 +4625,10 @@ app.post("/api/productos/grupo", upload.single('foto'), async (req, res) => {
     
     // Fetch all existing products that match any of the input SKUs to separate inserts from existing ones
     const skusToCheck = parsedVariaciones.map((v: any) => sanitizeIdentifier(v.sku, 100)).filter(Boolean);
+    const fields = getProductFields();
     const { data: existingProds, error: fetchErr } = await supabase
       .from("productos")
-      .select(`id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`)
+      .select(fields)
       .in("sku", skusToCheck);
     
     if (fetchErr) throw fetchErr;
@@ -4259,6 +4646,16 @@ app.post("/api/productos/grupo", upload.single('foto'), async (req, res) => {
     parsedVariaciones.forEach((v: any) => {
       const cleanSku = sanitizeIdentifier(v.sku, 100);
       const cleanTalla = sanitizeIdentifier(v.talla, 50) || "SinTalla";
+      let baseModel = modelo_grupo;
+      let color = sanitizeIdentifier(v.codigo_color || v.color || "", 50);
+      
+      if (baseModel.includes("-") && !color) {
+        const parts = baseModel.split("-");
+        baseModel = parts[0];
+        color = parts[parts.length - 1];
+      }
+      
+      const fecha_temporada = sanitizeIdentifier(v.fecha_temporada || v.season_date || "", 50);
       const existing = existingSkuMap.get(cleanSku.toLowerCase());
 
       if (existing) {
@@ -4276,14 +4673,19 @@ app.post("/api/productos/grupo", upload.single('foto'), async (req, res) => {
           insertData.foto = '\\x' + req.file.buffer.toString('hex');
         }
         if (hasModeloGrupoColumn) {
-          insertData.modelo_grupo = modelo_grupo;
+          insertData.modelo_grupo = baseModel;
+        }
+        if (hasFechaTemporadaColumn && fecha_temporada) {
+          insertData.fecha_temporada = fecha_temporada;
+        }
+        if (hasCodigoColorColumn && color) {
+          insertData.codigo_color = color;
         }
         newProductInserts.push(insertData);
       }
     });
 
     let createdProducts: any[] = [];
-    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
 
     if (newProductInserts.length > 0) {
       const { data, error: pErr } = await supabase

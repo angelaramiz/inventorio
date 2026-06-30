@@ -91,6 +91,8 @@ data class ExitDetail(val sku: String, val cantidad: Int)
 
 data class OcrResult(
     val modelo_grupo: String?,
+    val codigo_color: String? = null,
+    val fecha_temporada: String? = null,
     val sku: String?,
     val marca: String?,
     val talla: String?,
@@ -108,7 +110,9 @@ data class Producto(
     val has_foto: Boolean,
     val activo: Boolean,
     val created_at: String?,
-    val modelo_grupo: String?
+    val modelo_grupo: String?,
+    val codigo_color: String? = null,
+    val fecha_temporada: String? = null
 )
 
 class MainActivity : ComponentActivity() {
@@ -668,7 +672,8 @@ fun MainAppScreen() {
                         BatchOcrView(
                             client = client,
                             serverUrl = serverUrl,
-                            ocrEngine = ocrEngine
+                            ocrEngine = ocrEngine,
+                            cajas = cajasList
                         )
                     }
                     "consulta" -> {
