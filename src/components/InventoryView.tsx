@@ -59,6 +59,37 @@ export default function InventoryView() {
   const [activeTasks, setActiveTasks] = useState<Record<number, { taskId: string; progress: number; status: string; error?: string }>>({});
   const [searchQueries, setSearchQueries] = useState<Record<number, string>>({});
 
+  // Bulk Image Search States
+  const [showNoPhotoSidebar, setShowNoPhotoSidebar] = useState(false);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkHistory, setBulkHistory] = useState<any[]>([]);
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
+  const [showProgressWindow, setShowProgressWindow] = useState(false);
+
+  useEffect(() => {
+    if ((window as any).bulkImageJob) {
+      const job = (window as any).bulkImageJob;
+      setBulkRunning(job.running);
+      setBulkHistory([...job.history]);
+      setBulkProgress({ current: job.current, total: job.total });
+      
+      job.onUpdate = () => {
+        const currentJob = (window as any).bulkImageJob;
+        if (currentJob) {
+          setBulkRunning(currentJob.running);
+          setBulkHistory([...currentJob.history]);
+          setBulkProgress({ current: currentJob.current, total: currentJob.total });
+        }
+      };
+    }
+    return () => {
+      const job = (window as any).bulkImageJob;
+      if (job) {
+        job.onUpdate = undefined;
+      }
+    };
+  }, []);
+
   const fetchCustomSources = async () => {
     try {
       const resp = await fetch("/api/settings/image-sources");
@@ -185,6 +216,133 @@ export default function InventoryView() {
         return copy;
       });
     }
+  };
+
+  const startBulkSearch = (productsToFetch: Producto[]) => {
+    if ((window as any).bulkImageJob?.running) {
+      toast.warning("Ya hay una búsqueda en lote en ejecución.");
+      return;
+    }
+
+    const queue = [...productsToFetch];
+    const total = queue.length;
+    const history = queue.map(p => ({
+      id_producto: p.id_producto,
+      sku: p.sku,
+      status: "pending" as const
+    }));
+
+    (window as any).bulkImageJob = {
+      running: true,
+      queue,
+      history,
+      current: 0,
+      total,
+      stop: () => {
+        const job = (window as any).bulkImageJob;
+        if (job) {
+          job.running = false;
+          job.queue = [];
+          if (job.onUpdate) job.onUpdate();
+        }
+      },
+      onUpdate: (window as any).bulkImageJob?.onUpdate
+    };
+
+    setBulkRunning(true);
+    setBulkHistory(history);
+    setBulkProgress({ current: 0, total });
+    setShowProgressWindow(true);
+
+    const processNext = async () => {
+      const job = (window as any).bulkImageJob;
+      if (!job || !job.running || job.queue.length === 0) {
+        if (job) {
+          job.running = false;
+          if (job.onUpdate) job.onUpdate();
+        }
+        toast.success("Búsqueda masiva de imágenes completada");
+        fetchProductos();
+        return;
+      }
+
+      const currentProduct = job.queue.shift();
+      job.current++;
+      
+      job.history = job.history.map((item: any) => 
+        item.id_producto === currentProduct.id_producto 
+          ? { ...item, status: "processing" as const }
+          : item
+      );
+      if (job.onUpdate) job.onUpdate();
+
+      try {
+        const query = currentProduct.modelo_grupo && currentProduct.modelo_grupo !== "sin modelo"
+          ? `${currentProduct.marca_sub} ${currentProduct.modelo_grupo}`
+          : currentProduct.sku;
+
+        const resp = await fetch("/api/productos/search-web-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ productoId: currentProduct.id_producto, query })
+        });
+
+        if (resp.ok) {
+          const { taskId } = await resp.json();
+          
+          let completed = false;
+          let retries = 0;
+          while (!completed && retries < 20) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            const taskResp = await fetch(`/api/image-tasks/${taskId}`);
+            if (taskResp.ok) {
+              const task = await taskResp.json();
+              if (task.status === "completed") {
+                completed = true;
+                job.history = job.history.map((item: any) => 
+                  item.id_producto === currentProduct.id_producto 
+                    ? { ...item, status: "completed" as const }
+                    : item
+                );
+              } else if (task.status === "failed") {
+                completed = true;
+                job.history = job.history.map((item: any) => 
+                  item.id_producto === currentProduct.id_producto 
+                    ? { ...item, status: "failed" as const, error: task.error }
+                    : item
+                );
+              }
+            }
+            retries++;
+          }
+          if (!completed) {
+            job.history = job.history.map((item: any) => 
+              item.id_producto === currentProduct.id_producto 
+                ? { ...item, status: "failed" as const, error: "Timeout esperando respuesta" }
+                : item
+            );
+          }
+        } else {
+          job.history = job.history.map((item: any) => 
+            item.id_producto === currentProduct.id_producto 
+              ? { ...item, status: "failed" as const, error: "Servidor rechazó petición" }
+              : item
+          );
+        }
+      } catch (err: any) {
+        job.history = job.history.map((item: any) => 
+          item.id_producto === currentProduct.id_producto 
+            ? { ...item, status: "failed" as const, error: err.message }
+            : item
+        );
+      }
+
+      if (job.onUpdate) job.onUpdate();
+      
+      setTimeout(processNext, 1000);
+    };
+
+    processNext();
   };
 
   useEffect(() => {
@@ -380,28 +538,55 @@ export default function InventoryView() {
       </div>
 
       {/* Subtab Switcher */}
-      <div className="flex border-b border-neutral-200 gap-6">
-        <button
-          onClick={() => setActiveSubTab("stock")}
-          className={`pb-3 text-sm font-black uppercase tracking-wider transition-all ${
-            activeSubTab === "stock"
-              ? "border-b-2 border-neutral-900 text-neutral-900"
-              : "text-neutral-400 hover:text-neutral-600"
-          }`}
-        >
-          Lista de Stock
-        </button>
-        <button
-          onClick={() => setActiveSubTab("sources")}
-          className={`pb-3 text-sm font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
-            activeSubTab === "sources"
-              ? "border-b-2 border-neutral-900 text-neutral-900"
-              : "text-neutral-400 hover:text-neutral-600"
-          }`}
-        >
-          <Globe size={14} />
-          Fuentes de Fotos
-        </button>
+      <div className="flex border-b border-neutral-200 justify-between items-center">
+        <div className="flex gap-6">
+          <button
+            onClick={() => setActiveSubTab("stock")}
+            className={`pb-3 text-sm font-black uppercase tracking-wider transition-all ${
+              activeSubTab === "stock"
+                ? "border-b-2 border-neutral-900 text-neutral-900"
+                : "text-neutral-400 hover:text-neutral-600"
+            }`}
+          >
+            Lista de Stock
+          </button>
+          <button
+            onClick={() => setActiveSubTab("sources")}
+            className={`pb-3 text-sm font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
+              activeSubTab === "sources"
+                ? "border-b-2 border-neutral-900 text-neutral-900"
+                : "text-neutral-400 hover:text-neutral-600"
+            }`}
+          >
+            <Globe size={14} />
+            Fuentes de Fotos
+          </button>
+        </div>
+
+        {activeSubTab === "stock" && (
+          <div className="flex items-center gap-2 pb-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowNoPhotoSidebar(!showNoPhotoSidebar)}
+              className={`rounded-xl h-9 px-3 border flex items-center gap-1.5 transition-all text-xs font-black uppercase ${
+                showNoPhotoSidebar ? "bg-amber-100 text-amber-800 border-amber-300" : "bg-white text-neutral-600"
+              }`}
+            >
+              <ImageIcon size={14} className="text-amber-500" />
+              Sin Foto ({productos.filter(p => !p.has_foto).length})
+            </Button>
+            
+            {bulkRunning && (
+              <Button
+                onClick={() => setShowProgressWindow(true)}
+                className="rounded-xl h-9 bg-neutral-900 hover:bg-neutral-800 text-white font-extrabold text-[10px] uppercase tracking-wider px-3 flex items-center gap-1.5 shadow-sm animate-pulse"
+              >
+                <RefreshCw size={12} className="animate-spin text-amber-400" />
+                Progreso ({bulkProgress.current}/{bulkProgress.total})
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {activeSubTab === "stock" ? (
@@ -472,112 +657,283 @@ export default function InventoryView() {
               </motion.div>
             )}
           </AnimatePresence>
-
-          <div className="space-y-4">
-            {loading ? (
-              <div className="py-20 flex flex-col items-center justify-center text-neutral-400">
-                <Loader2 className="animate-spin mb-4" size={40} />
-                <p className="font-semibold uppercase tracking-widest text-xs">Sincronizando base de datos...</p>
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="py-20 flex flex-col items-center justify-center text-neutral-400 border-2 border-dashed border-neutral-100 rounded-[2rem]">
-                <Search size={48} strokeWidth={1} className="mb-4 opacity-20" />
-                <p className="font-bold text-neutral-900">SIN RESULTADOS</p>
-                <p className="text-xs">Ajusta los filtros de búsqueda</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-1 gap-3">
-                <AnimatePresence mode="popLayout">
-                  {sortedFiltered.map((p) => (
-                    <motion.div
-                      layout
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      key={p.id_producto}
-                      className="relative bg-white p-4 rounded-3xl border border-neutral-100 shadow-sm flex flex-col sm:flex-row gap-4 hover:border-neutral-900 transition-all group overflow-hidden"
-                    >
-                      <div className="absolute top-3 right-3 flex gap-1 items-center md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => {
-                            setSelectedProduct(p);
-                            setShowEditModal(true);
-                          }}
-                          className="h-8 w-8 rounded-lg bg-neutral-50 hover:bg-neutral-900 hover:text-white border"
-                        >
-                          <Edit2 size={13} />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => handleDeleteProduct(p)}
-                          className="h-8 w-8 rounded-lg bg-neutral-50 hover:bg-rose-500 hover:text-white text-rose-500 border"
-                        >
-                          <Trash2 size={13} />
-                        </Button>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="relative">
-                          {p.has_foto ? (
-                            <img 
-                              src={`/api/productos/${p.id_producto}/image`}
-                              alt={p.sku} 
-                              loading="lazy"
-                              className="w-20 h-20 sm:w-20 sm:h-20 object-cover rounded-2xl shadow-md border-2 border-white group-hover:scale-105 transition-transform" 
-                            />
-                          ) : (
-                            <div className="w-20 h-20 sm:w-20 sm:h-20 bg-neutral-100 rounded-2xl flex items-center justify-center text-neutral-300 border">
-                              <ImageIcon size={32} strokeWidth={1} />
-                            </div>
-                          )}
-                          <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm ${
-                            p.temporada === 'verano' ? 'bg-amber-400' :
-                            p.temporada === 'invierno' ? 'bg-blue-500' :
-                            p.temporada === 'entretiempo' ? 'bg-emerald-500' : 'bg-neutral-500'
-                          }`} title={p.temporada} />
+                  <div className="flex gap-6 relative min-h-[500px] items-start">
+            <div className="flex-1 min-w-0 space-y-4">
+              {loading ? (
+                <div className="py-20 flex flex-col items-center justify-center text-neutral-400">
+                  <Loader2 className="animate-spin mb-4" size={40} />
+                  <p className="font-semibold uppercase tracking-widest text-xs">Sincronizando base de datos...</p>
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="py-20 flex flex-col items-center justify-center text-neutral-400 border-2 border-dashed border-neutral-100 rounded-[2rem]">
+                  <Search size={48} strokeWidth={1} className="mb-4 opacity-20" />
+                  <p className="font-bold text-neutral-900">SIN RESULTADOS</p>
+                  <p className="text-xs">Ajusta los filtros de búsqueda</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-1 gap-3">
+                  <AnimatePresence mode="popLayout">
+                    {sortedFiltered.map((p) => (
+                      <motion.div
+                        layout
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        transition={{ duration: 0.2 }}
+                        key={p.id_producto}
+                        className="group relative bg-white border border-neutral-100 rounded-3xl p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 hover:shadow-lg hover:border-neutral-250/60 transition-all"
+                      >
+                        <div className="absolute top-3 right-3 flex gap-1 items-center md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => {
+                              setSelectedProduct(p);
+                              setShowEditModal(true);
+                            }}
+                            className="h-8 w-8 rounded-lg bg-neutral-50 hover:bg-neutral-900 hover:text-white border"
+                          >
+                            <Edit2 size={13} />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => handleDeleteProduct(p)}
+                            className="h-8 w-8 rounded-lg bg-neutral-50 hover:bg-rose-500 hover:text-white text-rose-500 border"
+                          >
+                            <Trash2 size={13} />
+                          </Button>
                         </div>
-                        
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 mb-1">
-                            <Badge className="bg-neutral-950 border-none uppercase text-[9px] font-black py-0.5 px-2">{p.tipo}</Badge>
-                            <Badge variant="outline" className="border-neutral-200 text-neutral-500 uppercase text-[9px] font-black py-0.5 px-2">{p.talla}</Badge>
+                        <div className="flex items-center gap-4">
+                          <div className="relative">
+                            {p.has_foto ? (
+                              <img 
+                                src={`/api/productos/${p.id_producto}/image`}
+                                alt={p.sku} 
+                                loading="lazy"
+                                className="w-20 h-20 sm:w-20 sm:h-20 object-cover rounded-2xl shadow-md border-2 border-white group-hover:scale-105 transition-transform" 
+                              />
+                            ) : (
+                              <div className="w-20 h-20 sm:w-20 sm:h-20 bg-neutral-100 rounded-2xl flex items-center justify-center text-neutral-300 border">
+                                <ImageIcon size={32} strokeWidth={1} />
+                              </div>
+                            )}
+                            <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm ${
+                              p.temporada === 'verano' ? 'bg-amber-400' :
+                              p.temporada === 'invierno' ? 'bg-blue-500' :
+                              p.temporada === 'entretiempo' ? 'bg-emerald-500' : 'bg-neutral-500'
+                            }`} title={p.temporada} />
                           </div>
-                          <h3 className="font-black text-xl text-neutral-900 leading-none truncate tracking-tighter uppercase">{p.sku}</h3>
-                          <p className="text-[10px] text-neutral-400 font-mono mt-1 font-bold flex flex-wrap gap-x-2 gap-y-0.5">
-                            <span>{p.ean_13}</span>
-                            {p.modelo_grupo && p.modelo_grupo !== "sin modelo" && (
-                              <span className="text-amber-600">MOD: {p.modelo_grupo}</span>
-                            )}
-                            {(p as any).codigo_color && (
-                              <span className="text-blue-600">COL: {(p as any).codigo_color}</span>
-                            )}
-                            {(p as any).fecha_temporada && (
-                              <span className="text-emerald-600">FECHA: {(p as any).fecha_temporada}</span>
-                            )}
-                          </p>
+                          
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <Badge className="bg-neutral-950 border-none uppercase text-[9px] font-black py-0.5 px-2">{p.tipo}</Badge>
+                              <Badge variant="outline" className="border-neutral-200 text-neutral-500 uppercase text-[9px] font-black py-0.5 px-2">{p.talla}</Badge>
+                            </div>
+                            <h3 className="font-black text-xl text-neutral-900 leading-none truncate tracking-tighter uppercase">{p.sku}</h3>
+                            <p className="text-[10px] text-neutral-400 font-mono mt-1 font-bold flex flex-wrap gap-x-2 gap-y-0.5">
+                              <span>{p.ean_13}</span>
+                              {p.modelo_grupo && p.modelo_grupo !== "sin modelo" && (
+                                <span className="text-amber-600">MOD: {p.modelo_grupo}</span>
+                              )}
+                              {(p as any).codigo_color && (
+                                <span className="text-blue-600">COL: {(p as any).codigo_color}</span>
+                              )}
+                              {(p as any).fecha_temporada && (
+                                <span className="text-emerald-600">FECHA: {(p as any).fecha_temporada}</span>
+                              )}
+                            </p>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="sm:ml-auto flex items-end justify-between sm:flex-col sm:justify-between gap-2 pt-3 sm:pt-1 border-t sm:border-t-0 border-neutral-50">
-                        <div className="text-left sm:text-right w-full">
-                          <p className="text-[9px] uppercase font-black text-neutral-300 tracking-widest leading-none">Proveedor / Marca</p>
-                          <p className="text-sm font-bold text-neutral-600 truncate">{p.marca_sub}</p>
+                        <div className="sm:ml-auto flex items-end justify-between sm:flex-col sm:justify-between gap-2 pt-3 sm:pt-1 border-t sm:border-t-0 border-neutral-50">
+                          <div className="text-left sm:text-right w-full">
+                            <p className="text-[9px] uppercase font-black text-neutral-300 tracking-widest leading-none">Proveedor / Marca</p>
+                            <p className="text-sm font-bold text-neutral-600 truncate">{p.marca_sub}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-neutral-400 bg-neutral-50 px-2 py-1 rounded-lg border border-neutral-100 self-end">
+                            <Calendar size={12} />
+                            <span className="text-[10px] font-bold text-neutral-500">
+                              {new Date(p.created_at).toLocaleDateString()}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5 text-neutral-400 bg-neutral-50 px-2 py-1 rounded-lg border border-neutral-100 self-end">
-                          <Calendar size={12} />
-                          <span className="text-[10px] font-bold text-neutral-500">
-                            {new Date(p.created_at).toLocaleDateString()}
-                          </span>
-                        </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              )}
+            </div>
+
+            {/* Retractable Sidebar for products without photos */}
+            <AnimatePresence>
+              {showNoPhotoSidebar && (
+                <motion.div
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 350, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  className="hidden lg:flex flex-col border-l border-neutral-200 bg-white h-[calc(100vh-12rem)] sticky top-24 pl-6 shrink-0 overflow-hidden"
+                >
+                  <div className="flex items-center justify-between pb-4 border-b border-neutral-100">
+                    <div>
+                      <h3 className="font-black text-neutral-900 text-sm uppercase tracking-tight flex items-center gap-2">
+                        <ImageIcon size={16} className="text-amber-500" />
+                        Artículos Sin Foto
+                      </h3>
+                      <p className="text-[10px] text-neutral-400 font-bold uppercase">
+                        {productos.filter(p => !p.has_foto).length} productos pendientes
+                      </p>
+                    </div>
+                    <button 
+                      onClick={() => setShowNoPhotoSidebar(false)}
+                      className="p-1 hover:bg-neutral-100 rounded-lg text-neutral-400 hover:text-neutral-700 transition-colors"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto py-4 space-y-3 pr-2">
+                    {productos.filter(p => !p.has_foto).length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 text-center text-neutral-400">
+                        <ImageIcon size={40} className="stroke-1 opacity-30 mb-2" />
+                        <p className="text-xs font-bold uppercase tracking-wider">¡Todo completo!</p>
+                        <p className="text-[10px] text-neutral-500">Todos los artículos tienen foto</p>
                       </div>
-                    </motion.div>
+                    ) : (
+                      productos.filter(p => !p.has_foto).map(p => (
+                        <div key={p.id_producto} className="flex items-center gap-3 p-3 rounded-xl border hover:border-neutral-300 transition-colors bg-neutral-50/50">
+                          <div className="w-10 h-10 bg-neutral-100 rounded-lg flex items-center justify-center text-neutral-450 border">
+                            <ImageIcon size={18} strokeWidth={1} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-black text-xs text-neutral-900 truncate uppercase leading-none">{p.sku}</h4>
+                            <p className="text-[9px] font-bold text-neutral-400 font-mono mt-0.5 leading-none">EAN: {p.ean_13}</p>
+                            {p.modelo_grupo && p.modelo_grupo !== "sin modelo" && (
+                              <span className="text-[8px] font-black uppercase text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0 rounded-full mt-1 inline-block">
+                                MOD: {p.modelo_grupo}
+                              </span>
+                            )}
+                          </div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleStartWebSearch(p.id_producto, p.modelo_grupo && p.modelo_grupo !== "sin modelo" ? `${p.marca_sub} ${p.modelo_grupo}` : p.sku)}
+                            className="h-8 w-8 rounded-lg border hover:bg-neutral-900 hover:text-white animate-in fade-in"
+                            disabled={activeTasks[p.id_producto]?.status === "processing" || bulkRunning}
+                          >
+                            {activeTasks[p.id_producto]?.status === "processing" ? (
+                              <Loader2 className="animate-spin text-neutral-600" size={13} />
+                            ) : (
+                              <Globe size={13} className="text-neutral-550" />
+                            )}
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {productos.filter(p => !p.has_foto).length > 0 && (
+                    <div className="pt-4 border-t border-neutral-100 bg-white">
+                      <Button
+                        onClick={() => startBulkSearch(productos.filter(p => !p.has_foto))}
+                        disabled={bulkRunning}
+                        className="w-full rounded-xl h-11 bg-amber-500 hover:bg-amber-600 text-neutral-955 font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm"
+                      >
+                        {bulkRunning ? (
+                          <>
+                            <RefreshCw size={14} className="animate-spin" />
+                            Buscando ({bulkProgress.current}/{bulkProgress.total})...
+                          </>
+                        ) : (
+                          <>
+                            <Globe size={14} />
+                            Obtener Fotos Masivo
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Floating progress window that can be closed/opened without stopping the task */}
+          <AnimatePresence>
+            {showProgressWindow && (
+              <div className="fixed bottom-6 right-6 z-50 w-96 bg-white rounded-3xl border border-neutral-250 shadow-2xl overflow-hidden flex flex-col max-h-96">
+                <div className="bg-neutral-900 text-white p-4 flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw size={16} className={`text-amber-400 ${bulkRunning ? "animate-spin" : ""}`} />
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider leading-none">Búsqueda Masiva de Fotos</h4>
+                      <p className="text-[9px] text-neutral-400 mt-1 uppercase font-bold leading-none">
+                        {bulkRunning ? "Procesando en segundo plano" : "Proceso finalizado"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button 
+                      onClick={() => {
+                        const job = (window as any).bulkImageJob;
+                        if (job) job.stop();
+                      }}
+                      disabled={!bulkRunning}
+                      className="p-1.5 hover:bg-neutral-800 rounded-lg text-rose-400 hover:text-rose-300 text-[10px] font-black uppercase tracking-wider transition-colors disabled:opacity-30"
+                      title="Detener todo"
+                    >
+                      Detener
+                    </button>
+                    <button 
+                      onClick={() => setShowProgressWindow(false)}
+                      className="p-1 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-colors"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="px-4 py-2 bg-neutral-100 border-b border-neutral-200">
+                  <div className="w-full bg-neutral-200 h-2.5 rounded-full overflow-hidden">
+                    <div 
+                      className="bg-amber-500 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${bulkProgress.total > 0 ? (bulkProgress.current / bulkProgress.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center mt-1">
+                    <span className="text-[9px] font-black uppercase text-neutral-500">Progreso Global</span>
+                    <span className="text-[10px] font-black text-neutral-700">{bulkProgress.current} / {bulkProgress.total}</span>
+                  </div>
+                </div>
+
+                {/* History list */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                  {bulkHistory.map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-xs py-1.5 border-b border-neutral-100 last:border-0">
+                      <span className="font-bold text-neutral-800 uppercase">{item.sku}</span>
+                      <div className="flex items-center gap-2">
+                        {item.status === "pending" && (
+                          <span className="text-[8px] font-black uppercase text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-full">Pendiente</span>
+                        )}
+                        {item.status === "processing" && (
+                          <span className="text-[8px] font-black uppercase text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                            <Loader2 size={10} className="animate-spin" /> Buscando
+                          </span>
+                        )}
+                        {item.status === "completed" && (
+                          <span className="text-[8px] font-black uppercase text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Descargada</span>
+                        )}
+                        {item.status === "failed" && (
+                          <span className="text-[8px] font-black uppercase text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full" title={item.error}>Falló</span>
+                        )}
+                      </div>
+                    </div>
                   ))}
-                </AnimatePresence>
+                </div>
               </div>
             )}
-          </div>
+          </AnimatePresence>
         </>
       ) : (
         <div className="space-y-6 animate-in fade-in-50 duration-250">

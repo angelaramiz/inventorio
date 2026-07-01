@@ -689,7 +689,8 @@ fun MainAppScreen() {
                     "consulta" -> {
                         ConsultaView(
                             client = client,
-                            serverUrl = serverUrl
+                            serverUrl = serverUrl,
+                            ocrEngine = ocrEngine
                         )
                     }
                     "productos" -> {
