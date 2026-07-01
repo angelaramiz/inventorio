@@ -11,7 +11,7 @@ android {
     applicationId = "com.inventorio.alpha"
     minSdk = 24
     targetSdk = 36
-    versionCode = 36
+    versionCode = 38
     versionName = "2.0.26"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
