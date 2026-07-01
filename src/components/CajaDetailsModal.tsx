@@ -590,7 +590,7 @@ export default function CajaDetailsModal({ caja, onClose, openedViaQuickFind }: 
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent showCloseButton={false} className="max-w-3xl w-[95vw] sm:max-w-3xl gap-0 h-[90vh] md:h-[80vh] flex flex-col p-0 border-none rounded-2xl overflow-hidden shadow-2xl">
+      <DialogContent showCloseButton={false} className="max-w-3xl w-[95vw] sm:max-w-3xl gap-0 h-[90vh] md:h-[80vh] flex flex-col p-0 border-none rounded-2xl overflow-y-auto md:overflow-hidden shadow-2xl">
         <DialogHeader className="bg-neutral-900 text-white p-5 shrink-0 relative">
           <button 
             type="button" 
@@ -659,7 +659,7 @@ export default function CajaDetailsModal({ caja, onClose, openedViaQuickFind }: 
           </div>
         </DialogHeader>
 
-        <div className="flex-1 flex flex-col md:grid md:grid-cols-3 overflow-hidden bg-white min-h-0">
+        <div className="flex-1 flex flex-col md:grid md:grid-cols-3 overflow-y-auto md:overflow-hidden bg-white min-h-0">
           {/* COLUMNA IZQUIERDA: Detalles (1) y Asociación (3) */}
           <div className="md:col-span-1 border-b md:border-b-0 md:border-r bg-neutral-50/50 p-5 flex flex-col gap-5 overflow-y-auto shrink-0 md:shrink min-h-0">
             

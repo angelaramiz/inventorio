@@ -632,7 +632,7 @@ export default function ProductQuickRegister({
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent showCloseButton={false} className="max-w-2xl sm:max-w-2xl gap-0 w-[95vw] rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl flex flex-col max-h-[90vh]">
+      <DialogContent showCloseButton={false} className="max-w-2xl sm:max-w-2xl gap-0 w-[95vw] rounded-[2.5rem] p-0 overflow-y-auto md:overflow-hidden border-none shadow-2xl flex flex-col max-h-[90vh]">
         <DialogHeader className="bg-neutral-955 text-white p-6 shrink-0 flex flex-row items-center justify-between relative">
           <button 
             type="button" 
