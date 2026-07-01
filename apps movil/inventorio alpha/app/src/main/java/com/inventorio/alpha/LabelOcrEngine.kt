@@ -59,7 +59,9 @@ class LabelOcrEngine(
               "marca": "nombre de la marca o null",
               "talla": "talla (XS/S/M/L/XL/número) o null",
               "sku": "código SKU o referencia del producto o null",
-              "modelo_grupo": "nombre del modelo o colección o null"
+              "modelo_grupo": "nombre del modelo o colección o null",
+              "codigo_color": "código de color o null",
+              "fecha_temporada": "fecha o temporada o null"
             }
         """.trimIndent()
     }
@@ -186,11 +188,38 @@ class LabelOcrEngine(
             } else raw
 
             val json = JSONObject(jsonStr)
+            
+            var modelo = (json.optString("modelo_grupo").takeIf { it != "null" && it.isNotBlank() }
+                ?: json.optString("modelo").takeIf { it != "null" && it.isNotBlank() }
+                ?: json.optString("model").takeIf { it != "null" && it.isNotBlank() }
+                ?: json.optString("collection").takeIf { it != "null" && it.isNotBlank() }
+                ?: json.optString("modeloGrupo").takeIf { it != "null" && it.isNotBlank() })
+            
+            var color = (json.optString("codigo_color").takeIf { it != "null" && it.isNotBlank() }
+                ?: json.optString("color").takeIf { it != "null" && it.isNotBlank() }
+                ?: json.optString("color_code").takeIf { it != "null" && it.isNotBlank() }
+                ?: json.optString("codigoColor").takeIf { it != "null" && it.isNotBlank() })
+
+            val fecha = (json.optString("fecha_temporada").takeIf { it != "null" && it.isNotBlank() }
+                ?: json.optString("temporada").takeIf { it != "null" && it.isNotBlank() }
+                ?: json.optString("season").takeIf { it != "null" && it.isNotBlank() }
+                ?: json.optString("fechaTemporada").takeIf { it != "null" && it.isNotBlank() })
+
+            if (modelo != null && modelo.contains("-")) {
+                val parts = modelo.split("-")
+                modelo = parts[0].trim()
+                if (color == null && parts.size > 1) {
+                    color = parts[1].trim()
+                }
+            }
+
             LabelOcrResult(
                 marca = json.optString("marca").takeIf { it != "null" && it.isNotBlank() },
                 talla = json.optString("talla").takeIf { it != "null" && it.isNotBlank() },
                 sku = json.optString("sku").takeIf { it != "null" && it.isNotBlank() },
-                modeloGrupo = json.optString("modelo_grupo").takeIf { it != "null" && it.isNotBlank() },
+                modeloGrupo = modelo,
+                codigoColor = color,
+                fechaTemporada = fecha,
                 source = source
             )
         } catch (e: Exception) {
@@ -313,11 +342,13 @@ data class LabelOcrResult(
     val talla: String?,
     val sku: String?,
     val modeloGrupo: String?,
+    val codigoColor: String? = null,
+    val fechaTemporada: String? = null,
     /** "local" | "servidor" | "error" */
     val source: String
 ) {
     val hasAnyData: Boolean
-        get() = marca != null || talla != null || sku != null || modeloGrupo != null
+        get() = marca != null || talla != null || sku != null || modeloGrupo != null || codigoColor != null || fechaTemporada != null
 
     companion object {
         fun empty(source: String) = LabelOcrResult(
@@ -325,6 +356,8 @@ data class LabelOcrResult(
             talla = null,
             sku = null,
             modeloGrupo = null,
+            codigoColor = null,
+            fechaTemporada = null,
             source = source
         )
     }

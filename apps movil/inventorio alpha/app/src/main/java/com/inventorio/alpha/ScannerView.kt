@@ -114,6 +114,7 @@ fun ScannerView(
     var qrTipo by remember { mutableStateOf("") }
     var qrModelGroup by remember { mutableStateOf("") }
     var isRegistering by remember { mutableStateOf(false) }
+    var activeScanRowIndex by remember { mutableStateOf<Int?>(null) }
 
     var scanTargetMode by remember { mutableStateOf("product") } // "product" or "box"
     var brandsList by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -1254,7 +1255,19 @@ fun ScannerView(
                                     },
                                     label = { Text("SKU") },
                                     singleLine = true,
-                                    modifier = Modifier.weight(1.5f).onFocusChanged { state -> if (!state.isFocused) checkSkuExists(item.sku) }
+                                    modifier = Modifier.weight(1.5f).onFocusChanged { state -> if (!state.isFocused) checkSkuExists(item.sku) },
+                                    trailingIcon = {
+                                        IconButton(
+                                            onClick = { activeScanRowIndex = index },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CenterFocusWeak,
+                                                contentDescription = "Scan",
+                                                tint = Color.Gray
+                                            )
+                                        }
+                                    }
                                 )
                                 OutlinedTextField(
                                     value = item.talla,
@@ -1328,6 +1341,95 @@ fun ScannerView(
                                 Text("Registrar", fontWeight = FontWeight.Bold)
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    if (activeScanRowIndex != null) {
+        Dialog(onDismissRequest = { activeScanRowIndex = null }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(450.dp)
+                    .padding(10.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp).fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        "Escanear Código de Barras",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = Color(0xFF0F172A)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(2.dp, Color(0xFFF59E0B), RoundedCornerShape(12.dp))
+                    ) {
+                        AndroidView(
+                            factory = { ctx ->
+                                val previewView = PreviewView(ctx).apply {
+                                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                                }
+                                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                                cameraProviderFuture.addListener({
+                                    val cameraProvider = cameraProviderFuture.get()
+                                    val preview = Preview.Builder().build().also {
+                                        it.setSurfaceProvider(previewView.surfaceProvider)
+                                    }
+
+                                    val imageAnalysis = ImageAnalysis.Builder()
+                                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                        .build()
+                                        .also {
+                                            it.setAnalyzer(
+                                                ContextCompat.getMainExecutor(ctx),
+                                                BarcodeAnalyzer { code ->
+                                                    val rowIdx = activeScanRowIndex
+                                                    if (rowIdx != null) {
+                                                        variations = variations.toMutableList().apply {
+                                                            this[rowIdx] = this[rowIdx].copy(sku = code)
+                                                        }
+                                                        checkSkuExists(code)
+                                                        activeScanRowIndex = null
+                                                    }
+                                                }
+                                            )
+                                        }
+
+                                    try {
+                                        cameraProvider.unbindAll()
+                                        cameraProvider.bindToLifecycle(
+                                            lifecycleOwner,
+                                            CameraSelector.DEFAULT_BACK_CAMERA,
+                                            preview,
+                                            imageAnalysis
+                                        )
+                                    } catch (exc: Exception) {
+                                        Log.e("CameraScanner", "Use case binding failed", exc)
+                                    }
+                                }, ContextCompat.getMainExecutor(ctx))
+                                previewView
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    Button(
+                        onClick = { activeScanRowIndex = null },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF475569)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Cancelar", fontWeight = FontWeight.Bold)
                     }
                 }
             }

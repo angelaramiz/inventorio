@@ -182,6 +182,16 @@ fun MainAppScreen() {
     val ocrEngine = remember {
         LabelOcrEngine(context, client, serverUrl)
     }
+
+    // Auto-inicializar la IA local al arrancar si el modelo ya está listo y descargado
+    LaunchedEffect(ocrEngine) {
+        if (ocrEngine.isModelReady && !MnnLlmBridge.isAvailable) {
+            kotlinx.coroutines.withContext(Dispatchers.IO) {
+                ocrEngine.initNativeModel()
+            }
+        }
+    }
+
     var showOcrDownloadDialog by remember { mutableStateOf(false) }
     var showAiStatusDialog by remember { mutableStateOf(false) }
 

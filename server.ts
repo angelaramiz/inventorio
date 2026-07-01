@@ -3538,7 +3538,9 @@ app.post("/api/ocr/extract-label", ocrRateLimiter, upload.single("foto"), async 
     const prompt = `
       Analiza detenidamente la foto de esta etiqueta de ropa. Identifica y extrae la información relevante.
       Devuelve los datos estrictamente en formato JSON adaptando la respuesta a esta estructura:
-      - modelo_grupo: Código de modelo, estilo o referencia de la prenda (ej: GMSIROCCO-N, gmYUJEN2, gwVALICE).
+      - modelo_grupo: Código de modelo base, estilo o referencia de la prenda (ej: GMSIROCCO, gmYUJEN2, gwVALICE). NO incluyas el código de color aquí si está separado por un guion.
+      - codigo_color: Código de color si está presente o si viene después de un guion en el modelo (ej: N, F1PV, BLK).
+      - fecha_temporada: Fecha, año o mes de temporada si está impreso en la etiqueta (ej: 2026-05, SP26, FA26).
       - sku: Código de barras numérico impreso en la etiqueta (típicamente UPC o EAN-13 de 12 o 13 dígitos, ej: 199593307730) si se encuentra. Si no se encuentra un código de barras numérico, omítelo.
       - marca: Marca identificada (GUESS, MARCIANO, etc.).
       - talla: Talla de la prenda (ej: S, M, L, XL, 32, 34).
@@ -3553,6 +3555,8 @@ app.post("/api/ocr/extract-label", ocrRateLimiter, upload.single("foto"), async 
           type: SchemaType.OBJECT,
           properties: {
             modelo_grupo: { type: SchemaType.STRING },
+            codigo_color: { type: SchemaType.STRING },
+            fecha_temporada: { type: SchemaType.STRING },
             sku: { type: SchemaType.STRING },
             marca: { type: SchemaType.STRING },
             talla: { type: SchemaType.STRING },
@@ -3567,6 +3571,20 @@ app.post("/api/ocr/extract-label", ocrRateLimiter, upload.single("foto"), async 
     const responseText = result.response.text();
     
     const extractedData = JSON.parse(responseText);
+    
+    // Parse modelo y codigo_color si contiene un guion "-"
+    let modelo = extractedData.modelo_grupo || "";
+    let color = extractedData.codigo_color || "";
+    if (modelo.includes("-")) {
+      const parts = modelo.split("-");
+      modelo = parts[0].trim();
+      if (!color) {
+        color = parts[1].trim();
+      }
+    }
+    extractedData.modelo_grupo = modelo;
+    extractedData.codigo_color = color;
+    
     res.json(extractedData);
   } catch (error: any) {
     console.error("Error al procesar etiqueta con Gemini:", error);
@@ -3841,7 +3859,9 @@ app.post("/api/productos/batch-ocr", upload.array("fotos", 50), async (req, res)
         const prompt = `
           Analiza detenidamente la foto de esta etiqueta de ropa. Identifica y extrae la información relevante.
           Devuelve los datos estrictamente en formato JSON adaptando la respuesta a esta estructura:
-          - modelo_grupo: Código de modelo, estilo o referencia de la prenda (ej: W6YK53Z1031 - F1PV, GMSIROCCO-N).
+          - modelo_grupo: Código de modelo base, estilo o referencia de la prenda (ej: W6YK53Z1031, GMSIROCCO). NO incluyas el código de color si viene separado por un guion en la etiqueta.
+          - codigo_color: Código de color de la prenda (ej: F1PV, N, BLK).
+          - fecha_temporada: Fecha, año o mes de temporada si está impreso (ej: 2026-05, SP26, SU26, FA26).
           - sku: Código de barras numérico impreso en la etiqueta (ej: 199593307730) si se encuentra.
           - marca: Marca identificada (GUESS, etc.).
           - talla: Talla de la prenda (ej: S, M, L, XL).
@@ -3856,6 +3876,8 @@ app.post("/api/productos/batch-ocr", upload.array("fotos", 50), async (req, res)
               type: SchemaType.OBJECT,
               properties: {
                 modelo_grupo: { type: SchemaType.STRING },
+                codigo_color: { type: SchemaType.STRING },
+                fecha_temporada: { type: SchemaType.STRING },
                 sku: { type: SchemaType.STRING },
                 marca: { type: SchemaType.STRING },
                 talla: { type: SchemaType.STRING },
@@ -3871,13 +3893,15 @@ app.post("/api/productos/batch-ocr", upload.array("fotos", 50), async (req, res)
         const rawData = JSON.parse(responseText);
         
         let modelo = rawData.modelo_grupo || "";
-        let colorCode = "";
+        let colorCode = rawData.codigo_color || "";
         
         // Parse modelo y codigo_color si contiene un guion "-"
         if (modelo.includes("-")) {
           const parts = modelo.split("-");
           modelo = parts[0].trim();
-          colorCode = parts[1].trim();
+          if (!colorCode) {
+            colorCode = parts[1].trim();
+          }
         }
         
         // Lógica inteligente de género
@@ -3926,6 +3950,9 @@ app.post("/api/productos/batch-ocr", upload.array("fotos", 50), async (req, res)
             }
             if (hasCodigoColorColumn && colorCode) {
               insertData.codigo_color = colorCode;
+            }
+            if (hasFechaTemporadaColumn && rawData.fecha_temporada) {
+              insertData.fecha_temporada = sanitizeIdentifier(rawData.fecha_temporada, 50);
             }
             if (file) {
               insertData.foto = '\\x' + file.buffer.toString('hex');
@@ -4035,6 +4062,193 @@ app.post("/api/productos/batch-ocr", upload.array("fotos", 50), async (req, res)
       }
     }
     
+    res.json({ parsedProducts });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/productos/batch-register - Batch register products with metadata (without uploading files)
+app.post("/api/productos/batch-register", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { products, id_caja, id_zona_nivel } = req.body;
+
+    if (!Array.isArray(products)) {
+      return res.status(400).json({ error: "products debe ser un arreglo" });
+    }
+
+    const parsedProducts: any[] = [];
+
+    for (const item of products) {
+      try {
+        let modelo = item.modelo_grupo || "";
+        let colorCode = item.codigo_color || "";
+
+        // Parse modelo y codigo_color si contiene un guion "-"
+        if (modelo.includes("-")) {
+          const parts = modelo.split("-");
+          modelo = parts[0].trim();
+          if (!colorCode) {
+            colorCode = parts[1].trim();
+          }
+        }
+
+        // Lógica inteligente de género
+        let genero = "unisex";
+        if (modelo.length > 0) {
+          const firstChar = modelo.charAt(0).toUpperCase();
+          const secondChar = modelo.length > 1 ? modelo.charAt(1).toUpperCase() : "";
+
+          const isCalzado = item.tipo_producto?.toLowerCase().includes("calzado") ||
+                            item.tipo_producto?.toLowerCase().includes("tenis") ||
+                            item.tipo_producto?.toLowerCase().includes("zapato") ||
+                            firstChar === "G";
+
+          if (isCalzado && secondChar) {
+            if (secondChar === "W") genero = "mujer";
+            else if (secondChar === "M") genero = "hombre";
+          } else {
+            if (firstChar === "W") genero = "mujer";
+            else if (firstChar === "M") genero = "hombre";
+          }
+        }
+
+        // Registrar o actualizar producto en base de datos
+        const cleanSku = sanitizeIdentifier(item.sku || modelo, 100);
+        if (cleanSku) {
+          const fields = getProductFields();
+          const { data: existing } = await supabase
+            .from("productos")
+            .select(fields)
+            .eq("sku", cleanSku)
+            .maybeSingle();
+
+          let productRecord = existing;
+
+          if (!productRecord) {
+            const insertData: any = {
+              sku: cleanSku,
+              ean_13: cleanSku,
+              talla: sanitizeIdentifier(item.talla || "SinTalla", 50),
+              temporada: "todouso",
+              tipo: (sanitizeIdentifier(item.tipo_producto || "otro", 100) || "otro").toLowerCase(),
+              marca_sub: sanitizeIdentifier(item.marca || "Guess", 100)
+            };
+            if (hasModeloGrupoColumn) {
+              insertData.modelo_grupo = modelo || "sin modelo";
+            }
+            if (hasCodigoColorColumn && colorCode) {
+              insertData.codigo_color = colorCode;
+            }
+            if (hasFechaTemporadaColumn && item.fecha_temporada) {
+              insertData.fecha_temporada = sanitizeIdentifier(item.fecha_temporada, 50);
+            }
+
+            const { data: newProd, error: pErr } = await supabase
+              .from("productos")
+              .insert([insertData])
+              .select(fields);
+
+            if (pErr) throw pErr;
+            if (newProd && newProd[0]) {
+              productRecord = newProd[0];
+            }
+          }
+
+          if (productRecord) {
+            parsedProducts.push({
+              modelo_grupo: modelo,
+              codigo_color: colorCode,
+              sku: productRecord.sku,
+              marca: productRecord.marca_sub,
+              talla: productRecord.talla,
+              tipo_producto: productRecord.tipo,
+              genero,
+              existeModelo: true,
+              id_producto: productRecord.id_producto
+            });
+          }
+        }
+      } catch (err: any) {
+        console.error("Error al registrar producto en lote:", err);
+      }
+    }
+
+    // Resolver asociación de contenedor
+    let targetCajaId = id_caja ? parseInt(id_caja) : null;
+
+    if (!targetCajaId && id_zona_nivel) {
+      const lvlId = parseInt(id_zona_nivel);
+      if (!isNaN(lvlId)) {
+        const { data: lvlObj } = await supabase.from("zonas_nivel").select("nombre, id_zona_seccion").eq("id_zona_nivel", lvlId).maybeSingle();
+        if (lvlObj) {
+          const nameToMatch = `NIVEL: ${lvlObj.nombre.toUpperCase()}`;
+          const { data: existingCaja } = await supabase
+            .from("cajas")
+            .select("id_caja")
+            .eq("id_zona_nivel", lvlId)
+            .eq("numero_caja", nameToMatch)
+            .maybeSingle();
+
+          if (existingCaja) {
+            targetCajaId = existingCaja.id_caja;
+          } else {
+            const { data: newCaja } = await supabase
+              .from("cajas")
+              .insert([{
+                numero_caja: nameToMatch,
+                id_zona_nivel: lvlId,
+                id_zona_seccion: lvlObj.id_zona_seccion,
+                estado: 'vacia',
+                tags: { tipo_producto: "ropa", genero: "todos", marca: "Guess" }
+              }])
+              .select();
+            if (newCaja && newCaja[0]) {
+              targetCajaId = newCaja[0].id_caja;
+            }
+          }
+        }
+      }
+    }
+
+    if (targetCajaId && parsedProducts.length > 0) {
+      const { data: currentAssoc } = await supabase
+        .from("caja_productos")
+        .select("id_producto, cantidad")
+        .eq("id_caja", targetCajaId);
+
+      const assocMap = new Map<number, number>();
+      if (currentAssoc) {
+        currentAssoc.forEach((a: any) => assocMap.set(a.id_producto, a.cantidad));
+      }
+
+      const scanCounts = new Map<number, number>();
+      parsedProducts.forEach(p => {
+        if (p.id_producto) {
+          scanCounts.set(p.id_producto, (scanCounts.get(p.id_producto) || 0) + 1);
+        }
+      });
+
+      const associations = Array.from(scanCounts.entries()).map(([prodId, count]) => {
+        const currentQty = assocMap.get(prodId) || 0;
+        return {
+          id_caja: targetCajaId,
+          id_producto: prodId,
+          cantidad: currentQty + count
+        };
+      });
+
+      if (associations.length > 0) {
+        const { error: assocErr } = await supabase
+          .from("caja_productos")
+          .upsert(associations, { onConflict: "id_caja,id_producto" });
+
+        if (assocErr) throw assocErr;
+        await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", targetCajaId).eq("estado", "vacia");
+      }
+    }
+
     res.json({ parsedProducts });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
