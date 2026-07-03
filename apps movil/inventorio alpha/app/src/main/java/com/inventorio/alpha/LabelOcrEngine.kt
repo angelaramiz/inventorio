@@ -104,31 +104,57 @@ class LabelOcrEngine(
      *         si fue "local" o "servidor".
      */
     suspend fun analyze(bitmap: Bitmap): LabelOcrResult = withContext(Dispatchers.IO) {
+        AppLogger.i("OCR", "=== analyze() iniciado ===")
+        AppLogger.i("OCR", "isModelReady=${isModelReady} | isLoaded=${MnnLlmBridge.isLoaded} | isAvailable=${MnnLlmBridge.isAvailable}")
+
         // Intento 1: modelo local
         if (isModelReady && MnnLlmBridge.isAvailable) {
+            AppLogger.i("OCR", "→ Intentando inferencia LOCAL ⚡")
             try {
                 val result = analyzeLocal(bitmap)
-                if (result != null) return@withContext result
+                if (result != null) {
+                    AppLogger.i("OCR", "✅ Resultado LOCAL obtenido. Datos: marca=${result.marca} talla=${result.talla} sku=${result.sku} modelo=${result.modeloGrupo}")
+                    return@withContext result
+                } else {
+                    AppLogger.w("OCR", "⚠️ analyzeLocal devolvió null (MNN no generó respuesta). Intentando servidor.")
+                }
             } catch (e: Throwable) {
+                AppLogger.e("OCR", "❌ Inferencia LOCAL falló: ${e.message}. Usando servidor como fallback.")
                 Log.w(TAG, "Inferencia local falló, usando servidor. Causa: ${e.message}")
             }
         } else if (isModelReady && !MnnLlmBridge.isAvailable) {
             // Modelo descargado pero .so no cargadas: intentar cargar ahora
+            AppLogger.w("OCR", "⚠️ Modelo listo pero isAvailable=false. Intentando carga tardía de librerías MNN...")
             MnnLlmBridge.tryLoadLibraries()
             if (MnnLlmBridge.isLoaded) {
+                AppLogger.i("OCR", "Librerías cargadas en carga tardía. Iniciando sesión MNN...")
                 MnnLlmBridge.initModel(context, modelDir)
-                try {
-                    val result = analyzeLocal(bitmap)
-                    if (result != null) return@withContext result
-                } catch (e: Throwable) {
-                    Log.w(TAG, "Inferencia local falló tras carga tardía: ${e.message}")
+                if (MnnLlmBridge.isAvailable) {
+                    try {
+                        val result = analyzeLocal(bitmap)
+                        if (result != null) {
+                            AppLogger.i("OCR", "✅ Resultado LOCAL (carga tardía) obtenido.")
+                            return@withContext result
+                        }
+                    } catch (e: Throwable) {
+                        AppLogger.e("OCR", "❌ Inferencia LOCAL falló tras carga tardía: ${e.message}")
+                        Log.w(TAG, "Inferencia local falló tras carga tardía: ${e.message}")
+                    }
+                } else {
+                    AppLogger.e("OCR", "❌ Carga tardía no pudo inicializar sesión MNN. lastInitError=${MnnLlmBridge.lastInitError}")
                 }
+            } else {
+                AppLogger.e("OCR", "❌ tryLoadLibraries() falló en carga tardía. OCR local no disponible.")
             }
+        } else {
+            AppLogger.w("OCR", "⚠️ Modelo NO descargado (isModelReady=false). Usando servidor directamente.")
         }
 
         // Intento 2: fallback al servidor
+        AppLogger.i("OCR", "→ Intentando inferencia en SERVIDOR ☁️ (${serverUrl.trimEnd('/')}/api/ocr/extract-label)")
         return@withContext analyzeRemote(bitmap)
     }
+
 
     // ─── Inferencia local (MNN-LLM) ──────────────────────────────────────────
 

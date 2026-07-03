@@ -36,19 +36,25 @@ object MnnLlmBridge {
         get() = isLoaded && sessionHandle != 0L
 
     fun tryLoadLibraries(): Boolean {
-        if (isLoaded) return true
+        if (isLoaded) {
+            AppLogger.i("MNN", "Librerías MNN ya cargadas previamente.")
+            return true
+        }
         return try {
             System.loadLibrary("MNN")
             System.loadLibrary("mnnllmapp")
             isLoaded = true
+            AppLogger.i("MNN", "✅ Librerías MNN (.so) cargadas correctamente.")
             Log.i(TAG, "MNN-LLM nativo cargado correctamente.")
             true
         } catch (e: UnsatisfiedLinkError) {
             lastInitError = "LinkError: ${e.message}"
+            AppLogger.e("MNN", "❌ Librerías MNN no encontradas. OCR local NO disponible.\nCausa: ${e.message}")
             Log.w(TAG, "Librerías MNN no encontradas. OCR local no disponible. Causa: ${e.message}")
             false
         } catch (e: Throwable) {
             lastInitError = "Carga fallida: ${e.message}"
+            AppLogger.e("MNN", "❌ Error inesperado cargando librerías MNN: ${e.message}")
             false
         }
     }
@@ -77,6 +83,7 @@ object MnnLlmBridge {
     fun initModel(context: Context, modelDir: File): Boolean {
         if (!isLoaded) {
             lastInitError = "Error: Librerías no cargadas."
+            AppLogger.e("MNN", "❌ initModel() llamado sin librerías cargadas. Carga las .so primero.")
             Log.w(TAG, "initModel() llamado sin librerías cargadas.")
             return false
         }
@@ -84,9 +91,12 @@ object MnnLlmBridge {
         val validationError = validateModelFiles(modelDir)
         if (validationError != null) {
             lastInitError = "Archivos del modelo inválidos:\n$validationError"
+            AppLogger.e("MNN", "❌ Archivos del modelo inválidos:\n$validationError")
             Log.e(TAG, lastInitError!!)
             return false
         }
+
+        AppLogger.i("MNN", "Iniciando sesión MNN...\nDir: ${modelDir.absolutePath}")
 
         val configFile = File(modelDir, "config.json")
         return try {
@@ -111,10 +121,14 @@ object MnnLlmBridge {
 
             if (sessionHandle == 0L) {
                 lastInitError = "Error: initNative devolvió handle nulo (0L). Revisa logcat nativo (MNN_DEBUG)."
+                AppLogger.e("MNN", "❌ initNative devolvió handle=0. La sesión MNN NO está activa.\nEl OCR usará la NUBE como fallback.")
+            } else {
+                AppLogger.i("MNN", "✅ Sesión MNN activa. Handle=$sessionHandle\nOCR LOCAL ⚡ disponible desde ahora.")
             }
             sessionHandle != 0L
         } catch (e: Throwable) {
             lastInitError = "Error JNI: ${e.message}\n${Log.getStackTraceString(e)}"
+            AppLogger.e("MNN", "❌ Error JNI al iniciar sesión MNN:\n${e.message}")
             Log.e(TAG, "Error iniciando sesión MNN: ${e.message}", e)
             false
         }
@@ -132,25 +146,49 @@ object MnnLlmBridge {
     }
 
     fun runVisionInference(context: Context, bitmap: Bitmap, prompt: String): String? {
-        if (!isAvailable) return null
+        if (!isAvailable) {
+            AppLogger.w("MNN", "runVisionInference() llamado pero isAvailable=false (handle=$sessionHandle, loaded=$isLoaded). Sin inferencia local.")
+            return null
+        }
         return try {
-            val tempFile = File(context.cacheDir, "mnn_ocr_temp.jpg")
+            val tempFile = File.createTempFile("mnn_ocr_", ".jpg", context.cacheDir)
             java.io.FileOutputStream(tempFile).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
             }
 
             val finalPrompt = "<img>${tempFile.absolutePath}</img>\n$prompt"
             val outputBuilder = java.lang.StringBuilder()
+            var callbackCount = 0
+            var terminalCallbackCount = 0
+            var nonEmptyChunkCount = 0
+            var emptyChunkCount = 0
+            var completionReceived = false
 
+            AppLogger.i(
+                "MNN",
+                "⚡ Iniciando inferencia LOCAL MNN...\n" +
+                    "Temp image: ${tempFile.absolutePath} | exists=${tempFile.exists()} | bytes=${tempFile.length()}"
+            )
             Log.d(TAG, "Iniciando inferencia local MNN. Prompt final: $finalPrompt")
 
-            com.alibaba.mnnllm.android.llm.LlmSession.submitNative(
+            val startMs = System.currentTimeMillis()
+
+            val submitResult = com.alibaba.mnnllm.android.llm.LlmSession.submitNative(
                 sessionHandle,
                 finalPrompt,
                 false,
                 object : com.alibaba.mnnllm.android.llm.GenerateProgressListener {
                     override fun onProgress(progress: String?): Boolean {
-                        if (progress != null) {
+                        callbackCount += 1
+                        if (progress == null) {
+                            terminalCallbackCount += 1
+                            completionReceived = true
+                        } else {
+                            if (progress.isEmpty()) {
+                                emptyChunkCount += 1
+                            } else {
+                                nonEmptyChunkCount += 1
+                            }
                             outputBuilder.append(progress)
                         }
                         return false
@@ -159,12 +197,31 @@ object MnnLlmBridge {
             )
 
             val result = outputBuilder.toString()
+            val elapsed = System.currentTimeMillis() - startMs
+            val submitSummary = submitResult.entries.joinToString(", ") { (key, value) -> "$key=$value" }
+            AppLogger.i(
+                "MNN",
+                "✅ Inferencia LOCAL completada en ${elapsed}ms.\n" +
+                    "Callbacks=$callbackCount | terminales=$terminalCallbackCount | chunks=$nonEmptyChunkCount | vacios=$emptyChunkCount | completed=$completionReceived\n" +
+                    "submitNative=$submitSummary\n" +
+                    "Respuesta: ${result.take(200)}${if (result.length > 200) "..." else ""}"
+            )
+            if (result.isEmpty()) {
+                AppLogger.w(
+                    "MNN",
+                    "⚠️ submitNative terminó sin texto. " +
+                        "Temp image exists=${tempFile.exists()} bytes=${tempFile.length()} | " +
+                        "callbacks=$callbackCount terminales=$terminalCallbackCount completed=$completionReceived | " +
+                        "meta=$submitSummary"
+                )
+            }
             Log.d(TAG, "Inferencia local MNN completada. Resultado: $result")
 
             try { tempFile.delete() } catch (_: Exception) {}
 
             result.ifEmpty { null }
         } catch (e: Throwable) {
+            AppLogger.e("MNN", "❌ Error en inferencia local: ${e.message}")
             Log.e(TAG, "Error en inferencia: ${e.message}", e)
             null
         }

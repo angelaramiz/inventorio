@@ -68,8 +68,10 @@ export async function getHistory(): Promise<CajaHistorial[]> {
     
     request.onsuccess = () => {
       const result = request.result as CajaHistorial[];
-      result.sort((a, b) => new Date(b.consultado_at).getTime() - new Date(a.consultado_at).getTime());
-      resolve(result);
+      // Filtrar registros con fechas inválidas '0000-00-00' y ordenar por fecha válida
+      const validRecords = result.filter(r => r.consultado_at && !r.consultado_at.startsWith('0000'));
+      validRecords.sort((a, b) => new Date(b.consultado_at).getTime() - new Date(a.consultado_at).getTime());
+      resolve(validRecords);
     };
     request.onerror = () => reject(request.error);
   });

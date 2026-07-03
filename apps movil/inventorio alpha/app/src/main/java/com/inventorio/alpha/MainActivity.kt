@@ -185,12 +185,21 @@ fun MainAppScreen() {
 
     // Auto-inicializar la IA local al arrancar si el modelo ya está listo y descargado
     LaunchedEffect(ocrEngine) {
+        AppLogger.i("MAIN", "=== App iniciada. Verificando estado de IA local... ===")
+        AppLogger.i("MAIN", "isModelReady=${ocrEngine.isModelReady} | isLoaded=${MnnLlmBridge.isLoaded} | isAvailable=${MnnLlmBridge.isAvailable}")
         if (ocrEngine.isModelReady && !MnnLlmBridge.isAvailable) {
+            AppLogger.i("MAIN", "Modelo descargado y sesión inactiva. Iniciando initNativeModel()...")
             kotlinx.coroutines.withContext(Dispatchers.IO) {
-                ocrEngine.initNativeModel()
+                val ok = ocrEngine.initNativeModel()
+                AppLogger.i("MAIN", if (ok) "✅ initNativeModel() exitoso. IA LOCAL lista." else "❌ initNativeModel() falló. lastInitError=${MnnLlmBridge.lastInitError}")
             }
+        } else if (!ocrEngine.isModelReady) {
+            AppLogger.w("MAIN", "⚠️ Modelo NO descargado. OCR usará servidor (nube). Descarga el modelo desde el Drawer > IA Model.")
+        } else if (MnnLlmBridge.isAvailable) {
+            AppLogger.i("MAIN", "✅ IA LOCAL ya activa al iniciar. Listo para OCR offline.")
         }
     }
+
 
     var showOcrDownloadDialog by remember { mutableStateOf(false) }
     var showAiStatusDialog by remember { mutableStateOf(false) }
@@ -359,6 +368,7 @@ fun MainAppScreen() {
                     Triple("cajas", Icons.Default.Inbox, "Contenedores (Cajas)"),
                     Triple("conceptos", Icons.Default.LocalOffer, "Conceptos Catálogo"),
                     Triple("almacen", Icons.Default.Warehouse, "Layout Almacén"),
+                    Triple("logs", Icons.Default.BugReport, "Diagnóstico / Logs"),
                     Triple("config", Icons.Default.Settings, "Configuración")
                 ).forEach { (tabName, icon, label) ->
                     val isSelected = activeTab == tabName
@@ -731,6 +741,9 @@ fun MainAppScreen() {
                             },
                             client = client
                         )
+                    }
+                    "logs" -> {
+                        LogsView(ocrEngine = ocrEngine)
                     }
                 }
             }
