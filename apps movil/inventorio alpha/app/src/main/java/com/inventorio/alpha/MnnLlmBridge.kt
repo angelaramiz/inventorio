@@ -151,9 +151,20 @@ object MnnLlmBridge {
             return null
         }
         return try {
+            val originalWidth = bitmap.width
+            val originalHeight = bitmap.height
+            val resizedBitmap = scaleBitmap(bitmap, 512)
+            val finalWidth = resizedBitmap.width
+            val finalHeight = resizedBitmap.height
+
             val tempFile = File.createTempFile("mnn_ocr_", ".jpg", context.cacheDir)
             java.io.FileOutputStream(tempFile).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            }
+
+            // Si creamos un bitmap escalado nuevo, lo liberamos para ahorrar memoria
+            if (resizedBitmap !== bitmap) {
+                try { resizedBitmap.recycle() } catch (_: Throwable) {}
             }
 
             val finalPrompt = "<img>${tempFile.absolutePath}</img>\n$prompt"
@@ -167,6 +178,7 @@ object MnnLlmBridge {
             AppLogger.i(
                 "MNN",
                 "⚡ Iniciando inferencia LOCAL MNN...\n" +
+                    "Resolución: ${originalWidth}x${originalHeight} -> ${finalWidth}x${finalHeight}\n" +
                     "Temp image: ${tempFile.absolutePath} | exists=${tempFile.exists()} | bytes=${tempFile.length()}"
             )
             Log.d(TAG, "Iniciando inferencia local MNN. Prompt final: $finalPrompt")
@@ -224,6 +236,30 @@ object MnnLlmBridge {
             AppLogger.e("MNN", "❌ Error en inferencia local: ${e.message}")
             Log.e(TAG, "Error en inferencia: ${e.message}", e)
             null
+        }
+    }
+
+    private fun scaleBitmap(bitmap: Bitmap, maxDimension: Int): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        if (width <= maxDimension && height <= maxDimension) {
+            return bitmap
+        }
+        val ratio = width.toFloat() / height.toFloat()
+        val newWidth: Int
+        val newHeight: Int
+        if (width > height) {
+            newWidth = maxDimension
+            newHeight = (maxDimension / ratio).toInt()
+        } else {
+            newHeight = maxDimension
+            newWidth = (maxDimension * ratio).toInt()
+        }
+        return try {
+            Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+        } catch (e: Throwable) {
+            AppLogger.e("MNN", "⚠️ Error escalando bitmap: ${e.message}. Usando original.")
+            bitmap
         }
     }
 }
