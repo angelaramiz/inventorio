@@ -101,7 +101,20 @@ object MnnLlmBridge {
         val configFile = File(modelDir, "config.json")
         return try {
             val mmapDir = File(context.cacheDir, "mnn_mmap").apply { mkdirs() }
-            val mergedConfig = configFile.readText()
+            var mergedConfig = configFile.readText()
+            try {
+                val json = org.json.JSONObject(mergedConfig)
+                if (!json.has("visual_model")) {
+                    json.put("visual_model", "visual.mnn")
+                }
+                if (!json.has("visual_weight")) {
+                    json.put("visual_weight", "visual.mnn.weight")
+                }
+                mergedConfig = json.toString()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error inyectando visual_model/visual_weight: ${e.message}")
+            }
+
             val extraConfigJson = buildString {
                 append("{")
                 append("\"is_r1\":false,")
