@@ -36,9 +36,9 @@ class LabelOcrEngine(
         private const val MODEL_DIR_NAME = "qwen_ocr_model"
 
         // URL de descarga del modelo MNN pre-convertido
-        // Fuente: MNN/Qwen2-VL-2B-Instruct-MNN en ModelScope
+        // Fuente: MNN/Qwen2.5-VL-3B-Instruct-MNN en ModelScope
         private const val MODEL_BASE_URL =
-            "https://modelscope.cn/api/v1/models/MNN/Qwen2-VL-2B-Instruct-MNN/repo?FilePath="
+            "https://modelscope.cn/api/v1/models/MNN/Qwen2.5-VL-3B-Instruct-MNN/repo?FilePath="
 
         // Archivos que componen el modelo (en orden de descarga)
         private val MODEL_FILES = listOf(

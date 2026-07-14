@@ -33,7 +33,7 @@ object MnnLlmBridge {
     )
 
     val isAvailable: Boolean
-        get() = isLoaded && sessionHandle != 0L
+        get() = isLoaded && sessionHandle > 0L
 
     fun tryLoadLibraries(): Boolean {
         if (isLoaded) {
@@ -102,6 +102,7 @@ object MnnLlmBridge {
         return try {
             val mmapDir = File(context.cacheDir, "mnn_mmap").apply { mkdirs() }
             var mergedConfig = configFile.readText()
+            Log.d(TAG, "config.json raw (primeros 800 chars): ${mergedConfig.take(800)}")
             try {
                 val json = org.json.JSONObject(mergedConfig)
                 if (!json.has("visual_model")) {
@@ -132,13 +133,13 @@ object MnnLlmBridge {
                 extraConfigJson
             )
 
-            if (sessionHandle == 0L) {
-                lastInitError = "Error: initNative devolvió handle nulo (0L). Revisa logcat nativo (MNN_DEBUG)."
-                AppLogger.e("MNN", "❌ initNative devolvió handle=0. La sesión MNN NO está activa.\nEl OCR usará la NUBE como fallback.")
+            if (sessionHandle == 0L || sessionHandle < 0L) {
+                lastInitError = "Error: initNative devolvió handle inválido ($sessionHandle). Revisa logcat nativo (MNN_DEBUG)."
+                AppLogger.e("MNN", "❌ initNative devolvió handle=$sessionHandle. La sesión MNN NO está activa.\nEl OCR usará la NUBE como fallback.")
             } else {
                 AppLogger.i("MNN", "✅ Sesión MNN activa. Handle=$sessionHandle\nOCR LOCAL ⚡ disponible desde ahora.")
             }
-            sessionHandle != 0L
+            sessionHandle > 0L
         } catch (e: Throwable) {
             lastInitError = "Error JNI: ${e.message}\n${Log.getStackTraceString(e)}"
             AppLogger.e("MNN", "❌ Error JNI al iniciar sesión MNN:\n${e.message}")
@@ -148,7 +149,7 @@ object MnnLlmBridge {
     }
 
     fun destroyModel() {
-        if (sessionHandle != 0L && isLoaded) {
+        if (sessionHandle > 0L && isLoaded) {
             try {
                 com.alibaba.mnnllm.android.llm.LlmSession.releaseNative(sessionHandle)
             } catch (e: Throwable) {
@@ -166,13 +167,13 @@ object MnnLlmBridge {
         return try {
             val originalWidth = bitmap.width
             val originalHeight = bitmap.height
-            val resizedBitmap = scaleBitmap(bitmap, 512)
+            val resizedBitmap = scaleBitmap(bitmap, 1024)
             val finalWidth = resizedBitmap.width
             val finalHeight = resizedBitmap.height
 
-            val tempFile = File.createTempFile("mnn_ocr_", ".jpg", context.cacheDir)
+            val tempFile = File.createTempFile("mnn_ocr_", ".png", context.cacheDir)
             java.io.FileOutputStream(tempFile).use { out ->
-                resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                resizedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
 
             // Si creamos un bitmap escalado nuevo, lo liberamos para ahorrar memoria
@@ -220,6 +221,14 @@ object MnnLlmBridge {
                     }
                 }
             )
+
+            // Verificar errores en el HashMap de retorno de submitNative
+            val errorCode = (submitResult["errorCode"] as? Number)?.toLong() ?: 0L
+            if (errorCode != 0L) {
+                val errorMsg = submitResult["errorMsg"] as? String ?: "desconocido"
+                AppLogger.e("MNN", "❌ submitNative devolvió errorCode=$errorCode: $errorMsg")
+                Log.e(TAG, "submitNative error: code=$errorCode msg=$errorMsg")
+            }
 
             val result = outputBuilder.toString()
             val elapsed = System.currentTimeMillis() - startMs

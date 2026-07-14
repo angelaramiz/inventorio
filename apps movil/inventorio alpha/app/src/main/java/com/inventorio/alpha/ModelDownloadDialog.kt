@@ -118,13 +118,13 @@ fun ModelDownloadDialog(
                 Text(
                     text = when {
                         downloadComplete ->
-                            "Qwen2.5-VL-2B está listo. Ahora puedes leer etiquetas sin conexión a internet."
+                            "Qwen2.5-VL-3B está listo. Ahora puedes leer etiquetas sin conexión a internet."
                         downloadFailed ->
                             "No se pudo descargar el modelo.\nDetalle: ${downloadErrorMessage.ifEmpty { "Verifica tu conexión WiFi e intenta de nuevo." }}"
                         isDownloading ->
                             "Descargando modelo de visión IA... No cierres la app."
                         else ->
-                            "Para leer etiquetas sin internet, necesitas descargar el modelo Qwen2.5-VL (~1.2 GB).\n\nSolo se descarga una vez. Requiere WiFi."
+                            "Para leer etiquetas sin internet, necesitas descargar el modelo Qwen2.5-VL-3B (~2 GB).\n\nSolo se descarga una vez. Requiere WiFi."
                     },
                     color = Color(0xFF94A3B8),
                     fontSize = 13.sp,
@@ -164,7 +164,7 @@ fun ModelDownloadDialog(
                                 fontSize = 12.sp
                             )
                             Text(
-                                text = "~1.2 GB total",
+                                text = "~2 GB total",
                                 color = Color(0xFF475569),
                                 fontSize = 12.sp
                             )
@@ -208,9 +208,9 @@ fun ModelDownloadDialog(
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        ModelInfoChip("Modelo", "Qwen2.5-VL-2B")
+                        ModelInfoChip("Modelo", "Qwen2.5-VL-3B")
                         ModelInfoChip("Formato", "Q4 MNN")
-                        ModelInfoChip("Tamaño", "~1.2 GB")
+                        ModelInfoChip("Tamaño", "~2 GB")
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                 }
