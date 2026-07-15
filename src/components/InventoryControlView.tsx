@@ -2169,7 +2169,7 @@ export default function InventoryControlView({ userRole }: Props) {
                     </div>
                   );
                 })()
-              )}
+              }
                 </CardContent>
               </Card>
 
