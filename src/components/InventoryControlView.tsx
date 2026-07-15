@@ -250,6 +250,7 @@ export default function InventoryControlView({ userRole }: Props) {
   const [countRequests, setCountRequests] = useState<any[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [approvingRequestId, setApprovingRequestId] = useState<number | null>(null);
+  const [showCompleted, setShowCompleted] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [reports, setReports] = useState<any[]>([]);
   const [loadingReport, setLoadingReport] = useState(false);
@@ -2054,22 +2055,41 @@ export default function InventoryControlView({ userRole }: Props) {
               {/* Bandeja de Aprobación */}
               <Card className="border-none shadow-lg rounded-3xl bg-white overflow-hidden">
                 <CardHeader className="bg-neutral-50 border-b pb-4">
-                  <CardTitle className="text-sm font-bold flex items-center gap-1.5 uppercase text-neutral-800">
-                    <ShieldCheck size={16} /> Bandeja de Aprobación de Conteos Físicos
-                  </CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-bold flex items-center gap-1.5 uppercase text-neutral-800">
+                      <ShieldCheck size={16} /> Bandeja de Aprobación de Conteos Físicos
+                    </CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowCompleted(!showCompleted)}
+                      className="h-7 text-[10px] rounded-lg px-2 font-bold text-neutral-500 hover:text-neutral-900"
+                    >
+                      {showCompleted ? "Ocultar completados" : "Ver completados"}
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent className="pt-4">
                   {loadingRequests ? (
                     <div className="py-12 flex justify-center text-neutral-400">
                       <Loader2 className="animate-spin" />
                     </div>
-                  ) : countRequests.length === 0 ? (
-                    <div className="py-12 text-center text-neutral-400 text-sm font-semibold">
-                      No hay solicitudes de conteo físico pendientes de validación.
-                    </div>
-                  ) : (
+                  ) : (() => {
+                    const filteredRequests = showCompleted
+                      ? countRequests
+                      : countRequests.filter(r => r.estado === "pendiente");
+                    if (filteredRequests.length === 0) {
+                      return (
+                        <div className="py-12 text-center text-neutral-400 text-sm font-semibold">
+                          {showCompleted
+                            ? "No hay solicitudes de conteo registradas."
+                            : "No hay solicitudes de conteo físico pendientes de validación."}
+                        </div>
+                      );
+                    }
+                    return (
                     <div className="space-y-3">
-                      {countRequests.map((req) => (
+                      {filteredRequests.map((req) => (
                         <div key={req.id} className="border border-neutral-100 p-4 rounded-2xl space-y-3 bg-neutral-50/30">
                           <div className="flex justify-between items-start">
                             <div>
@@ -2147,7 +2167,9 @@ export default function InventoryControlView({ userRole }: Props) {
                         </div>
                       ))}
                     </div>
-                  )}
+                  );
+                })()
+              )}
                 </CardContent>
               </Card>
 
@@ -2175,6 +2197,15 @@ export default function InventoryControlView({ userRole }: Props) {
                             <Download size={12} className="mr-1" /> Descargar PDF
                           </>
                         )}
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => setReports([])}
+                        disabled={reports.length === 0}
+                        className="h-8 rounded-xl text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
+                      >
+                        <X size={12} className="mr-1" /> Limpiar
                       </Button>
                       <Button 
                         variant="outline" 
