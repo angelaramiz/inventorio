@@ -3567,6 +3567,18 @@ app.get("/api/inventory/reports", async (req, res) => {
   }
 });
 
+// DELETE /api/inventory/reports - Clear all finalized reports
+app.delete("/api/inventory/reports", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { error } = await supabase.from("counts").delete().neq("id", 0);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Specific rate limiter for AI OCR to prevent abuse
 const ocrIpLimits = new Map<string, { count: number, resetTime: number }>();
 const OCR_LIMIT_WINDOW = 60 * 1000; // 1 minute

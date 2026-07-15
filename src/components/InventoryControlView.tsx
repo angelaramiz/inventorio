@@ -2201,7 +2201,17 @@ export default function InventoryControlView({ userRole }: Props) {
                       <Button 
                         variant="outline" 
                         size="sm" 
-                        onClick={() => setReports([])}
+                        onClick={async () => {
+                          if (!window.confirm("¿Eliminar permanentemente todos los reportes finalizados? Esta acción no se puede deshacer.")) return;
+                          try {
+                            const res = await fetch("/api/inventory/reports", { method: "DELETE" });
+                            if (!res.ok) throw new Error(await res.text());
+                            setReports([]);
+                            toast.success("Reportes eliminados permanentemente");
+                          } catch (err: any) {
+                            toast.error("Error al limpiar reportes: " + err.message);
+                          }
+                        }}
                         disabled={reports.length === 0}
                         className="h-8 rounded-xl text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
                       >
