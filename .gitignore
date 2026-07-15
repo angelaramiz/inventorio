@@ -32,7 +32,7 @@ Thumbs.db
 .vs/
 .vscode/
 *.code-workspace
-agent_memory/
+.agent/
 
 # Optional npm cache directory
 .npm

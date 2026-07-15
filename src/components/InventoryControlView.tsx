@@ -229,6 +229,7 @@ export default function InventoryControlView({ userRole }: Props) {
   const [boxProducts, setBoxProducts] = useState<any[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [countedQuantities, setCountedQuantities] = useState<Record<number, number | "">>({}); // id_producto -> qty
+  const [pendingDeletions, setPendingDeletions] = useState<Set<number>>(new Set()); // products marked for deletion
   const [sendingCount, setSendingCount] = useState(false);
 
   // New Operator barcode scanning states
@@ -1039,6 +1040,7 @@ export default function InventoryControlView({ userRole }: Props) {
     setSelectedZone(box);
     setBoxProducts([]);
     setCountedQuantities({});
+    setPendingDeletions(new Set());
     setLoadingProducts(true);
 
     const zoneName = box.numero_caja.toUpperCase().startsWith("NIVEL:")
@@ -1163,9 +1165,14 @@ export default function InventoryControlView({ userRole }: Props) {
     try {
       const finalQuantities: Record<number, number | any> = {};
       const tempSkus: Record<string, string> = {};
+      const eliminaciones: number[] = [];
 
       for (const [key, val] of Object.entries(countedQuantities)) {
         const prodId = Number(key);
+        if (pendingDeletions.has(prodId)) {
+          eliminaciones.push(prodId);
+          continue;
+        }
         const finalVal = val === "" ? 0 : (val as number);
         finalQuantities[prodId] = finalVal;
         
@@ -1189,7 +1196,8 @@ export default function InventoryControlView({ userRole }: Props) {
           operator_id: operatorId,
           zone_id: selectedZone.id_caja,
           zone_name: zoneName,
-          cantidades: finalQuantities
+          cantidades: finalQuantities,
+          eliminaciones
         })
       });
 
@@ -1198,6 +1206,7 @@ export default function InventoryControlView({ userRole }: Props) {
         setSelectedZone(null);
         setBoxProducts([]);
         setCountedQuantities({});
+        setPendingDeletions(new Set());
       } else {
         toast.error("Error al enviar el conteo físico");
       }
@@ -1207,9 +1216,14 @@ export default function InventoryControlView({ userRole }: Props) {
         const { offlineFetch } = await import("../utils/pwaDb");
         const finalQuantities: Record<number, number | any> = {};
         const tempSkus: Record<string, string> = {};
+        const eliminaciones: number[] = [];
 
         for (const [key, val] of Object.entries(countedQuantities)) {
           const prodId = Number(key);
+          if (pendingDeletions.has(prodId)) {
+            eliminaciones.push(prodId);
+            continue;
+          }
           const finalVal = val === "" ? 0 : (val as number);
           finalQuantities[prodId] = finalVal;
           
@@ -1233,7 +1247,8 @@ export default function InventoryControlView({ userRole }: Props) {
             operator_id: operatorId,
             zone_id: selectedZone.id_caja,
             zone_name: zoneName,
-            cantidades: finalQuantities
+            cantidades: finalQuantities,
+            eliminaciones
           })
         });
 
@@ -1241,6 +1256,7 @@ export default function InventoryControlView({ userRole }: Props) {
           setSelectedZone(null);
           setBoxProducts([]);
           setCountedQuantities({});
+          setPendingDeletions(new Set());
         }
       } catch (err) {
         toast.error("Error al guardar conteo en cola offline");
@@ -1503,7 +1519,7 @@ export default function InventoryControlView({ userRole }: Props) {
                                   (() => {
                                     const req = countRequests.find((r: any) => r.zone_id === box.id_caja && r.event_id === activeEvent?.id);
                                     if (!req) return <Badge className={`${selectedZone?.id_caja === box.id_caja ? "bg-amber-400 text-black border-none" : "bg-neutral-100 text-neutral-700"}`}>PENDIENTE</Badge>;
-                                    if (req.estado === "pendiente") return <Badge className="bg-amber-200 text-amber-900 border-none">ENVIADO</Badge>;
+                                    if (req.estado === "pendiente") return <Badge className="bg-amber-200 text-amber-900 border-none">EN REVISIÓN</Badge>;
                                     if (req.estado === "aprobado") return <Badge className="bg-emerald-200 text-emerald-900 border-none">APROBADO</Badge>;
                                     if (req.estado === "rechazado") return <Badge className="bg-rose-200 text-rose-900 border-none">RECHAZADO</Badge>;
                                     return <Badge className={`${selectedZone?.id_caja === box.id_caja ? "bg-amber-400 text-black border-none" : "bg-neutral-100 text-neutral-700"}`}>PENDIENTE</Badge>;
@@ -1635,13 +1651,35 @@ export default function InventoryControlView({ userRole }: Props) {
                                         </TableCell>
                                       </TableRow>
                                       {group.items.map((item: any) => (
-                                        <TableRow key={item.id_producto} className="hover:bg-neutral-50/30">
+                                        <TableRow key={item.id_producto} className={`hover:bg-neutral-50/30 ${pendingDeletions.has(item.id_producto) ? "bg-rose-50/50" : ""}`}>
                                           <TableCell className="pl-6 py-2.5">
-                                            <div className="flex flex-col">
-                                              <span className="font-extrabold text-neutral-900 text-xs">{item.productos.sku}</span>
-                                              <span className="text-[9px] text-neutral-400 font-mono mt-0.5">
-                                                Talla: {item.productos.talla} | Temporada: {item.productos.temporada} | Marca: {item.productos.marca_sub}
-                                              </span>
+                                            <div className="flex items-center gap-2">
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  const newSet = new Set(pendingDeletions);
+                                                  if (newSet.has(item.id_producto)) {
+                                                    newSet.delete(item.id_producto);
+                                                  } else {
+                                                    newSet.add(item.id_producto);
+                                                  }
+                                                  setPendingDeletions(newSet);
+                                                }}
+                                                className={`shrink-0 w-7 h-7 rounded-md flex items-center justify-center transition-all ${
+                                                  pendingDeletions.has(item.id_producto)
+                                                    ? "bg-rose-500 text-white"
+                                                    : "bg-neutral-100 text-neutral-400 hover:bg-rose-100 hover:text-rose-500"
+                                                }`}
+                                                title={pendingDeletions.has(item.id_producto) ? "Cancelar eliminación" : "Solicitar eliminación"}
+                                              >
+                                                <X size={13} />
+                                              </button>
+                                              <div className="flex flex-col">
+                                                <span className="font-extrabold text-neutral-900 text-xs">{item.productos.sku}</span>
+                                                <span className="text-[9px] text-neutral-400 font-mono mt-0.5">
+                                                  Talla: {item.productos.talla} | Temporada: {item.productos.temporada} | Marca: {item.productos.marca_sub}
+                                                </span>
+                                              </div>
                                             </div>
                                           </TableCell>
                                           <TableCell className="text-right pr-4 py-2.5 w-[160px] shrink-0">
@@ -2036,26 +2074,33 @@ export default function InventoryControlView({ userRole }: Props) {
                           <div className="flex justify-between items-start">
                             <div>
                               <p className="text-xs text-neutral-400 font-bold uppercase">Operador: {req.operator_id}</p>
-                              <p className="font-extrabold text-sm text-neutral-900 mt-0.5">Zona/Caja ID: {req.zone_id}</p>
+                              <p className="font-extrabold text-sm text-neutral-900 mt-0.5">{req.zone_name_display || `Zona/Caja ID: ${req.zone_id}`}</p>
                             </div>
                             <Badge className={`capitalize border ${
                               req.estado === "pendiente" ? "bg-amber-50 text-amber-600 border-amber-100" :
                               req.estado === "aprobado" ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
                               "bg-rose-50 text-rose-600 border-rose-100"
                             }`}>
-                              {req.estado}
+                              {req.estado === "pendiente" ? "EN REVISIÓN" : req.estado}
                             </Badge>
                           </div>
 
                           <div className="bg-white border rounded-xl p-3 text-xs space-y-1">
                             <span className="font-bold text-neutral-500 uppercase block text-[9px] mb-1">Cantidades físicas declaradas:</span>
-                            {Object.entries(req.cantidades)
-                              .filter(([key]) => key !== "temp_skus")
+                            {Object.entries(req.cantidades || {})
+                              .filter(([key]) => key !== "temp_skus" && key !== "eliminaciones" && key !== "zone_name")
                               .map(([prodId, qty]) => {
                                 const tempSkus = (req.cantidades as any).temp_skus || {};
-                                const displayName = Number(prodId) < 0 && tempSkus[prodId]
-                                  ? tempSkus[prodId]
-                                  : `Producto ID: ${prodId}`;
+                                const prodMap = (req as any).productos_map || {};
+                                const numId = Number(prodId);
+                                let displayName: string;
+                                if (numId < 0 && tempSkus[prodId]) {
+                                  displayName = tempSkus[prodId];
+                                } else if (prodMap[numId]) {
+                                  displayName = `${prodMap[numId].sku} (${prodMap[numId].talla || ""} ${prodMap[numId].marca_sub || ""})`;
+                                } else {
+                                  displayName = `Producto ID: ${prodId}`;
+                                }
                                 return (
                                   <div key={prodId} className="flex justify-between border-b last:border-0 pb-1 last:pb-0 mb-1 last:mb-0">
                                     <span className="font-mono">{displayName}</span>
@@ -2063,6 +2108,22 @@ export default function InventoryControlView({ userRole }: Props) {
                                   </div>
                                 );
                               })}
+                            {(req.cantidades as any)?.eliminaciones?.length > 0 && (
+                              <div className="mt-2 pt-2 border-t border-rose-200">
+                                <span className="font-bold text-rose-600 uppercase block text-[9px] mb-1">🗑️ Solicitudes de eliminación:</span>
+                                {((req.cantidades as any).eliminaciones as string[]).map((elimId: string) => {
+                                  const prodMap = (req as any).productos_map || {};
+                                  const numId = parseInt(elimId);
+                                  const displayName = prodMap[numId] ? prodMap[numId].sku : `Producto ID: ${elimId}`;
+                                  return (
+                                    <div key={elimId} className="flex justify-between text-rose-700">
+                                      <span className="font-mono">{displayName}</span>
+                                      <span className="font-bold">ELIMINAR</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
 
                           {req.estado === "pendiente" && (

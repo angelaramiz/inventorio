@@ -55,6 +55,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '1mb' })); // Reduced limit as images go through multipart
+app.use(express.urlencoded({ extended: true })); // Mobile app sends FormBody (x-www-form-urlencoded)
 
 // Security headers
 app.use((req, res, next) => {
@@ -3238,14 +3239,27 @@ app.post("/api/inventory/count-request", async (req, res) => {
     const zone_name = req.body.zone_name || req.body.zona_name;
     
     let cantidades = req.body.cantidades;
+    let eliminaciones = req.body.eliminaciones || [];
     if (!cantidades && req.body.detalles && Array.isArray(req.body.detalles)) {
       cantidades = {};
+      eliminaciones = [];
       for (const item of req.body.detalles) {
-        if (item.producto_id !== undefined && item.cantidad_contada !== undefined) {
-          cantidades[item.producto_id] = item.cantidad_contada;
+        if (item.producto_id !== undefined) {
+          const isDelete = item.eliminar === true || item.cantidad_contada === "DELETE";
+          if (isDelete) {
+            eliminaciones.push(String(item.producto_id));
+          } else if (item.cantidad_contada !== undefined) {
+            cantidades[item.producto_id] = item.cantidad_contada;
+          }
         }
       }
     }
+    
+    if (eliminaciones.length > 0) {
+      (cantidades as any).eliminaciones = eliminaciones;
+    }
+    // Store zone_name inside cantidades JSON since the table may not have a dedicated column
+    (cantidades as any).zone_name = zone_name || `Zona ${zone_id}`;
     
     const { data, error } = await supabase
       .from("count_requests")
@@ -3293,7 +3307,7 @@ app.post("/api/inventory/operator-active", (req, res) => {
   res.json({ success: true });
 });
 
-// GET /api/inventory/count-requests - List all count requests
+// GET /api/inventory/count-requests - List all count requests with enriched data
 app.get("/api/inventory/count-requests", async (req, res) => {
   try {
     const supabase = getSupabase();
@@ -3303,7 +3317,53 @@ app.get("/api/inventory/count-requests", async (req, res) => {
       .order("created_at", { ascending: false });
       
     if (error) throw error;
-    res.json(data);
+    
+    // Enrich with zone names and product SKUs
+    const enriched = [];
+    for (const req of data || []) {
+      const cantidadesZoneName = (req.cantidades as any)?.zone_name || "";
+      const enrichedReq = { ...req, zone_name_display: cantidadesZoneName || `Zona ${req.zone_id}` };
+      
+      // Resolve box/caja name if not available from cantidades
+      if (!cantidadesZoneName && req.zone_id) {
+        const { data: caja } = await supabase
+          .from("cajas")
+          .select("numero_caja, almacen_nombre, seccion_nombre")
+          .eq("id_caja", req.zone_id)
+          .maybeSingle();
+        if (caja) {
+          enrichedReq.zone_name_display = `${caja.numero_caja} (${caja.almacen_nombre || ""}${caja.seccion_nombre ? " - " + caja.seccion_nombre : ""})`;
+        }
+      }
+      
+      // Resolve product SKUs from cantidades
+      const productIds: number[] = [];
+      const cantidades = req.cantidades || {};
+      for (const key of Object.keys(cantidades)) {
+        if (key !== "temp_skus" && key !== "eliminaciones") {
+          const pid = parseInt(key);
+          if (!isNaN(pid) && pid > 0) productIds.push(pid);
+        }
+      }
+      
+      if (productIds.length > 0) {
+        const { data: productos } = await supabase
+          .from("productos")
+          .select("id_producto, sku, ean_13, talla, tipo, marca_sub, modelo_grupo")
+          .in("id_producto", productIds);
+        
+        if (productos) {
+          (enrichedReq as any).productos_map = {};
+          for (const p of productos) {
+            (enrichedReq as any).productos_map[p.id_producto] = p;
+          }
+        }
+      }
+      
+      enriched.push(enrichedReq);
+    }
+    
+    res.json(enriched);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -3334,18 +3394,18 @@ app.post("/api/inventory/approvals", async (req, res) => {
     if (status === "aprobado" && request) {
       const cantidades = request.cantidades || {};
       const tempSkus = cantidades.temp_skus || {};
+      const eliminaciones: string[] = cantidades.eliminaciones || [];
       const event_id = request.event_id;
       const zone_id = request.zone_id;
       
       for (const [prodIdStr, qty] of Object.entries(cantidades)) {
-        if (prodIdStr === "temp_skus") continue;
+        if (prodIdStr === "temp_skus" || prodIdStr === "eliminaciones") continue;
         let prodId = parseInt(prodIdStr);
         const quantity = parseInt(qty as any);
         
         if (prodId < 0) {
           const tempSku = tempSkus[prodIdStr];
           if (tempSku) {
-            // Check if product exists in Supabase products
             const { data: existingProd } = await supabase
               .from("productos")
               .select("id_producto")
@@ -3353,7 +3413,6 @@ app.post("/api/inventory/approvals", async (req, res) => {
               .maybeSingle();
               
             if (!existingProd) {
-              // Create a default placeholder product for this level
               const { data: newProd, error: pErr } = await supabase
                 .from("productos")
                 .insert([{
@@ -3372,7 +3431,6 @@ app.post("/api/inventory/approvals", async (req, res) => {
               prodId = existingProd.id_producto;
             }
           } else {
-            // No SKU provided for negative ID, skip to avoid database error
             continue;
           }
         }
@@ -3386,7 +3444,6 @@ app.post("/api/inventory/approvals", async (req, res) => {
             cantidad_final: quantity
           }]);
           
-        // 4. Update actual stock inside the zone/box
         const { data: box } = await supabase.from("cajas").select("id_caja").eq("id_caja", zone_id).maybeSingle();
         if (box) {
           if (quantity === 0) {
@@ -3399,6 +3456,29 @@ app.post("/api/inventory/approvals", async (req, res) => {
             }, { onConflict: "id_caja,id_producto" });
           }
         }
+      }
+      
+      // Handle elimination requests (delete products entirely from system)
+      for (const prodIdStr of eliminaciones) {
+        const elimProdId = parseInt(prodIdStr);
+        if (isNaN(elimProdId)) continue;
+        
+        await supabase.from("caja_productos").delete().eq("id_caja", zone_id).eq("id_producto", elimProdId);
+        await supabase.from("productos").delete().eq("id_producto", elimProdId);
+        
+        await supabase
+          .from("counts")
+          .insert([{
+            event_id,
+            producto_id: elimProdId,
+            zona_id: zone_id,
+            cantidad_final: 0
+          }]);
+          
+        emitDomainEvent("producto:deleted", {
+          id_producto: elimProdId,
+          zone_id: zone_id
+        });
       }
       
       // Update actual box/level state based on total remaining units inside it
