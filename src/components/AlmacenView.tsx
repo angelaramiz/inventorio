@@ -169,8 +169,8 @@ export default function AlmacenView() {
   const [downloadingPDF, setDownloadingPDF] = useState(false);
   const [reportLoadingStage, setReportLoadingStage] = useState<"idle" | "fetching" | "grouping" | "rendering">("idle");
   const [reportProgress, setReportProgress] = useState(0);
-  const [reportType, setReportType] = useState<"detailed" | "summary">("detailed");
-  const [summaryGrouping, setSummaryGrouping] = useState<"cajas" | "secciones">("cajas");
+  const [reportType, setReportType] = useState<"detailed" | "summary" | "ultra">("detailed");
+  const [summaryGrouping, setSummaryGrouping] = useState<"cajas" | "secciones" | "niveles">("cajas");
   const [excludeLevels, setExcludeLevels] = useState(false);
 
   const groupedReportData = React.useMemo(() => {
@@ -2094,29 +2094,31 @@ export default function AlmacenView() {
                   <select
                     value={reportType}
                     onChange={(e) => {
-                      setReportType(e.target.value as "detailed" | "summary");
+                      setReportType(e.target.value as "detailed" | "summary" | "ultra");
                       setShowPreview(false);
                     }}
                     className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
                   >
                     <option value="detailed">📋 DETALLADO (PRODUCTOS Y DETALLES)</option>
                     <option value="summary">📊 RESUMIDO (SOLO CANTIDADES TOTALES)</option>
+                    <option value="ultra">🏢 ULTRA RESUMIDO (POR ALMACÉN)</option>
                   </select>
                 </div>
 
-                {reportType === "summary" && (
+                {reportType !== "detailed" && (
                   <div className="space-y-1.5">
                     <label className="text-[10px] uppercase font-black tracking-wider text-neutral-400">Resumir por</label>
                     <select
                       value={summaryGrouping}
                       onChange={(e) => {
-                        setSummaryGrouping(e.target.value as "cajas" | "secciones");
+                        setSummaryGrouping(e.target.value as "cajas" | "secciones" | "niveles");
                         setShowPreview(false);
                       }}
                       className="w-full rounded-xl h-11 px-3 bg-neutral-50 border border-neutral-200 text-sm font-semibold outline-none focus:ring-1 focus:ring-neutral-900"
                     >
                       <option value="cajas">📦 CONTENEDORES (CAJAS)</option>
                       <option value="secciones">📍 SECCIONES FÍSICAS</option>
+                      <option value="niveles">🏗️ NIVELES</option>
                     </select>
                   </div>
                 )}

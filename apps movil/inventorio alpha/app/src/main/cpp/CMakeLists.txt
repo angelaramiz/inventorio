@@ -8,9 +8,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Priority: 1) env var LLAMA_CPP_DIR  2) local clone  3) FetchContent
 if(DEFINED ENV{LLAMA_CPP_DIR})
     set(LLAMA_CPP_DIR "$ENV{LLAMA_CPP_DIR}")
+    file(TO_CMAKE_PATH "${LLAMA_CPP_DIR}" LLAMA_CPP_DIR)
     message(STATUS "Using llama.cpp from env LLAMA_CPP_DIR: ${LLAMA_CPP_DIR}")
 elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp/CMakeLists.txt")
     set(LLAMA_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp")
+    file(TO_CMAKE_PATH "${LLAMA_CPP_DIR}" LLAMA_CPP_DIR)
     message(STATUS "Using local llama.cpp clone: ${LLAMA_CPP_DIR}")
 else()
     message(STATUS "llama.cpp not found locally. Downloading via FetchContent...")
@@ -46,12 +48,20 @@ if(NOT LLAMA_CPP_ADDED)
 endif()
 
 # ── Our JNI shared library ────────────────────────────────────────
-add_library(llama_jni SHARED llama_jni.cpp)
+add_library(llama_jni SHARED
+    llama_jni.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/clip.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/mtmd-image.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/mtmd.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/mtmd-audio.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/deprecation-warning.cpp
+)
 
 target_include_directories(llama_jni PRIVATE
     ${LLAMA_CPP_DIR}/include
     ${LLAMA_CPP_DIR}/ggml/include
     ${LLAMA_CPP_DIR}/vendor/stb
+    ${LLAMA_CPP_DIR}/tools/mtmd
 )
 
 # Link: ggml (static) + llama (static) + log
@@ -61,6 +71,11 @@ target_link_libraries(llama_jni
     ggml
     llama
     ${log-lib}
+)
+
+# Clip graph vtables use inline virtuals; allow unresolved
+set_target_properties(llama_jni PROPERTIES
+    LINK_FLAGS "-Wl,-z,undefs"
 )
 
 # Strip symbols in release

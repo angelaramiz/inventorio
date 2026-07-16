@@ -3238,20 +3238,40 @@ app.post("/api/inventory/count-request", async (req, res) => {
     const zone_id = req.body.zone_id || req.body.zona_id;
     const zone_name = req.body.zone_name || req.body.zona_name;
     
+    // ── Block duplicate submissions for same zone+event ──────────
+    const { data: existing } = await supabase
+      .from("count_requests")
+      .select("id, estado")
+      .eq("zone_id", parseInt(zone_id))
+      .eq("event_id", parseInt(event_id))
+      .eq("estado", "pendiente")
+      .maybeSingle();
+    
+    if (existing) {
+      return res.status(409).json({ 
+        error: "Este contenedor/nivel ya fue enviado a revisión y está pendiente de aprobación.",
+        existing_request_id: existing.id
+      });
+    }
+    
     let cantidades = req.body.cantidades;
     let eliminaciones = req.body.eliminaciones || [];
     if (!cantidades && req.body.detalles && Array.isArray(req.body.detalles)) {
       cantidades = {};
-      eliminaciones = [];
+      const detalleElims: string[] = [];
       for (const item of req.body.detalles) {
         if (item.producto_id !== undefined) {
           const isDelete = item.eliminar === true || item.cantidad_contada === "DELETE";
           if (isDelete) {
-            eliminaciones.push(String(item.producto_id));
+            detalleElims.push(String(item.producto_id));
           } else if (item.cantidad_contada !== undefined) {
             cantidades[item.producto_id] = item.cantidad_contada;
           }
         }
+      }
+      // Merge with top-level eliminaciones (from mobile app)
+      for (const e of detalleElims) {
+        if (!eliminaciones.includes(e)) eliminaciones.push(e);
       }
     }
     
@@ -3324,15 +3344,38 @@ app.get("/api/inventory/count-requests", async (req, res) => {
       const cantidadesZoneName = (req.cantidades as any)?.zone_name || "";
       const enrichedReq = { ...req, zone_name_display: cantidadesZoneName || `Zona ${req.zone_id}` };
       
-      // Resolve box/caja name if not available from cantidades
+      // Resolve box/caja/nivel/seccion name if not available from cantidades
       if (!cantidadesZoneName && req.zone_id) {
-        const { data: caja } = await supabase
+        // Try cajas first
+        let { data: caja } = await supabase
           .from("cajas")
-          .select("numero_caja, almacen_nombre, seccion_nombre")
+          .select("numero_caja, almacen_nombre, seccion_nombre, pasillo_nombre")
           .eq("id_caja", req.zone_id)
           .maybeSingle();
         if (caja) {
-          enrichedReq.zone_name_display = `${caja.numero_caja} (${caja.almacen_nombre || ""}${caja.seccion_nombre ? " - " + caja.seccion_nombre : ""})`;
+          enrichedReq.zone_name_display = `${caja.numero_caja} (${caja.almacen_nombre || "Sin almacén"}${caja.pasillo_nombre ? " | " + caja.pasillo_nombre : ""}${caja.seccion_nombre ? " | " + caja.seccion_nombre : ""})`;
+        } else {
+          // Try niveles
+          const { data: nivel } = await supabase
+            .from("zonas_niveles")
+            .select("nombre, almacen_nombre, pasillo_nombre, seccion_nombre")
+            .eq("id_zona_nivel", req.zone_id)
+            .maybeSingle();
+          if (nivel) {
+            enrichedReq.zone_name_display = `Nivel ${nivel.nombre} (${nivel.almacen_nombre || "Sin almacén"}${nivel.pasillo_nombre ? " | " + nivel.pasillo_nombre : ""}${nivel.seccion_nombre ? " | " + nivel.seccion_nombre : ""})`;
+          } else {
+            // Try secciones
+            const { data: seccion } = await supabase
+              .from("zonas_secciones")
+              .select("nombre, almacen_nombre, pasillo_nombre")
+              .eq("id_zona_seccion", req.zone_id)
+              .maybeSingle();
+            if (seccion) {
+              enrichedReq.zone_name_display = `Sección ${seccion.nombre} (${seccion.almacen_nombre || "Sin almacén"}${seccion.pasillo_nombre ? " | " + seccion.pasillo_nombre : ""})`;
+            } else {
+              enrichedReq.zone_name_display = `Zona ${req.zone_id}`;
+            }
+          }
         }
       }
       
@@ -3369,6 +3412,85 @@ app.get("/api/inventory/count-requests", async (req, res) => {
   }
 });
 
+// GET /api/inventory/pending-summary?event_id=X — Box/level status for counting workflow
+app.get("/api/inventory/pending-summary", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const eventId = parseInt(req.query.event_id as string);
+    if (isNaN(eventId)) return res.status(400).json({ error: "event_id requerido" });
+    
+    // Get all count requests for this event
+    const { data: requests } = await supabase
+      .from("count_requests")
+      .select("zone_id, estado")
+      .eq("event_id", eventId);
+    
+    // Map zone_id -> status
+    const zoneStatus: Record<number, string> = {};
+    for (const r of (requests || [])) {
+      if (r.estado === "pendiente") zoneStatus[r.zone_id] = "revision";
+      else if (r.estado === "aprobado") zoneStatus[r.zone_id] = "contado";
+    }
+    
+    // Get all boxes and levels
+    const [{ data: cajas }, { data: niveles }] = await Promise.all([
+      supabase.from("cajas").select("id_caja, numero_caja, almacen_nombre, seccion_nombre, pasillo_nombre, estado"),
+      supabase.from("zonas_niveles").select("id_zona_nivel, nombre, almacen_nombre, seccion_nombre, pasillo_nombre")
+    ]);
+    
+    const items: any[] = [];
+    for (const c of (cajas || [])) {
+      if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) continue; // skip nivel-boxes
+      const ws = zoneStatus[c.id_caja];
+      items.push({
+        type: "caja",
+        id: c.id_caja,
+        name: c.numero_caja,
+        almacen: c.almacen_nombre || "",
+        seccion: c.seccion_nombre || "",
+        pasillo: c.pasillo_nombre || "",
+        status: ws || "pendiente"
+      });
+    }
+    for (const n of (niveles || [])) {
+      const ws = zoneStatus[n.id_zona_nivel];
+      items.push({
+        type: "nivel",
+        id: n.id_zona_nivel,
+        name: n.nombre,
+        almacen: n.almacen_nombre || "",
+        seccion: n.seccion_nombre || "",
+        pasillo: n.pasillo_nombre || "",
+        status: ws || "pendiente"
+      });
+    }
+    
+    res.json(items);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/cajas/:id — Remove box and its product associations (keeps products)
+app.delete("/api/cajas/:id", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const boxId = parseInt(req.params.id);
+    if (isNaN(boxId)) return res.status(400).json({ error: "ID inválido" });
+    
+    // Delete product associations first
+    await supabase.from("caja_productos").delete().eq("id_caja", boxId);
+    // Delete the box itself
+    const { error } = await supabase.from("cajas").delete().eq("id_caja", boxId);
+    if (error) throw error;
+    
+    emitDomainEvent("caja:deleted", { id_caja: boxId });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // POST /api/inventory/approvals - Manager approves/rejects counts
 app.post("/api/inventory/approvals", async (req, res) => {
   try {
@@ -3397,6 +3519,13 @@ app.post("/api/inventory/approvals", async (req, res) => {
       const eliminaciones: string[] = cantidades.eliminaciones || [];
       const event_id = request.event_id;
       const zone_id = request.zone_id;
+      
+      // Pre-check: is this a valid box? (once, not per product)
+      const { data: box } = await supabase.from("cajas").select("id_caja").eq("id_caja", zone_id).maybeSingle();
+      
+      const countRows: any[] = [];
+      const boxProductUpserts: any[] = [];
+      const boxProductDeletes: { id_caja: number, id_producto: number }[] = [];
       
       for (const [prodIdStr, qty] of Object.entries(cantidades)) {
         if (prodIdStr === "temp_skus" || prodIdStr === "eliminaciones") continue;
@@ -3435,27 +3564,31 @@ app.post("/api/inventory/approvals", async (req, res) => {
           }
         }
         
-        await supabase
-          .from("counts")
-          .insert([{
-            event_id,
-            producto_id: prodId,
-            zona_id: zone_id,
-            cantidad_final: quantity
-          }]);
-          
-        const { data: box } = await supabase.from("cajas").select("id_caja").eq("id_caja", zone_id).maybeSingle();
+        countRows.push({
+          event_id,
+          producto_id: prodId,
+          zona_id: zone_id,
+          cantidad_final: quantity
+        });
+        
         if (box) {
           if (quantity === 0) {
-            await supabase.from("caja_productos").delete().eq("id_caja", zone_id).eq("id_producto", prodId);
+            boxProductDeletes.push({ id_caja: zone_id, id_producto: prodId });
           } else {
-            await supabase.from("caja_productos").upsert({
-              id_caja: zone_id,
-              id_producto: prodId,
-              cantidad: quantity
-            }, { onConflict: "id_caja,id_producto" });
+            boxProductUpserts.push({ id_caja: zone_id, id_producto: prodId, cantidad: quantity });
           }
         }
+      }
+      
+      // ── Batch execute all DB operations ─────────────────────
+      if (countRows.length > 0) {
+        await supabase.from("counts").insert(countRows);
+      }
+      for (const del of boxProductDeletes) {
+        await supabase.from("caja_productos").delete().eq("id_caja", del.id_caja).eq("id_producto", del.id_producto);
+      }
+      if (boxProductUpserts.length > 0) {
+        await supabase.from("caja_productos").upsert(boxProductUpserts, { onConflict: "id_caja,id_producto" });
       }
       
       // Handle elimination requests (delete products entirely from system)

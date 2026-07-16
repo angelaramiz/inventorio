@@ -14,6 +14,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.TimeUnit
 
 /**
  * Motor de OCR para etiquetas de ropa — llama.cpp edition.
@@ -198,6 +199,13 @@ class LabelOcrEngine(
     // ─── Gestión del modelo ──────────────────────────────────────
 
     fun downloadModel(onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
+        // Cliente dedicado para descarga — timeouts extendidos (hasta 30 min sin datos)
+        val downloadClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.SECONDS)   // sin timeout de lectura
+            .writeTimeout(0, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .build()
         try {
             modelDir.mkdirs()
             val totalFiles = MODEL_FILES.size
@@ -209,7 +217,7 @@ class LabelOcrEngine(
 
                 // HEAD check for file size
                 try {
-                    val headResp = client.newCall(Request.Builder().url(fileUrl).head().build()).execute()
+                    val headResp = downloadClient.newCall(Request.Builder().url(fileUrl).head().build()).execute()
                     expectedSize = headResp.body?.contentLength() ?: -1
                     headResp.close()
                 } catch (_: Exception) {}
@@ -230,7 +238,7 @@ class LabelOcrEngine(
                 Log.i(TAG, "Descargando $fileName (${if (expectedSize > 0) "%.0f MB".format(expectedSize / 1_000_000.0) else "?"})")
                 val request = Request.Builder().url(fileUrl).build()
 
-                client.newCall(request).execute().use { response ->
+                downloadClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         throw java.io.IOException("Error ${response.code} al descargar $fileName")
                     }

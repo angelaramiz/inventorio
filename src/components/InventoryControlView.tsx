@@ -257,6 +257,30 @@ export default function InventoryControlView({ userRole }: Props) {
   const [simulatingCount, setSimulatingCount] = useState(false);
   const [downloadingPDF, setDownloadingPDF] = useState(false);
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
+  const [pendingItems, setPendingItems] = useState<any[]>([]);
+  const [pendingTab, setPendingTab] = useState<"cajas" | "niveles">("cajas");
+  const [loadingPending, setLoadingPending] = useState(false);
+
+  const handleDeleteBox = async (boxId: number, boxName: string) => {
+    if (!confirm(`¿Eliminar la caja "${boxName}"? Se borrará de caja_productos (los productos se conservan).`)) return;
+    try {
+      const res = await fetch(`/api/cajas/${boxId}`, { method: "DELETE" });
+      if (res.ok) { toast.success(`Caja "${boxName}" eliminada`); fetchPending(); }
+      else toast.error("Error al eliminar");
+    } catch (_) { toast.error("Error de red"); }
+  };
+  const fetchPending = async () => {
+    if (!activeEvent?.id) return;
+    setLoadingPending(true);
+    try {
+      const res = await fetch(`/api/inventory/pending-summary?event_id=${activeEvent.id}`);
+      if (res.ok) setPendingItems(await res.json());
+    } catch (_) {}
+    setLoadingPending(false);
+  };
+  useEffect(() => {
+    if (activeEvent?.id) { fetchPending(); }
+  }, [activeEvent?.id]);
 
   const groupedReportTree = React.useMemo(() => {
     const tree: Record<string, {
@@ -2052,6 +2076,67 @@ export default function InventoryControlView({ userRole }: Props) {
 
             {/* Right Panel: Approvals and final reports */}
             <div className="lg:col-span-3 space-y-6">
+              {/* Pendientes a contar */}
+              {activeEvent && (
+                <Card className="border-none shadow-lg rounded-3xl bg-white overflow-hidden">
+                  <CardHeader className="bg-neutral-50 border-b pb-4">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-bold flex items-center gap-1.5 uppercase text-neutral-800">
+                        <ClipboardList size={16} /> Pendientes a Contar
+                      </CardTitle>
+                      <button onClick={fetchPending} disabled={loadingPending}
+                        className="h-7 w-7 flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-700">
+                        <RefreshCw size={14} className={loadingPending ? "animate-spin" : ""} />
+                      </button>
+                    </div>
+                    <div className="flex gap-1 bg-neutral-100 p-1 rounded-lg w-fit mt-2">
+                      {(["cajas","niveles"] as const).map(t => (
+                        <button key={t} onClick={() => setPendingTab(t)}
+                          className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all uppercase ${
+                            pendingTab===t ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"
+                          }`}>
+                          {t} ({pendingItems.filter(i => i.type===t).length})
+                        </button>
+                      ))}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-0 max-h-[320px] overflow-y-auto">
+                    {loadingPending ? (
+                      <div className="py-8 flex justify-center"><Loader2 className="animate-spin text-neutral-300" /></div>
+                    ) : (
+                      <div className="divide-y divide-neutral-100">
+                        {pendingItems.filter(i => i.type===pendingTab).map((item: any) => (
+                          <div key={`${item.type}-${item.id}`} className="flex items-center justify-between px-4 py-2.5 hover:bg-neutral-50">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold text-neutral-800 truncate">{item.name}</p>
+                              <p className="text-[10px] text-neutral-400 truncate">{item.almacen}{item.seccion ? ` · ${item.seccion}` : ""}</p>
+                            </div>
+                            <div className="flex items-center gap-2 ml-2 shrink-0">
+                              <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                item.status==="pendiente" ? "bg-amber-100 text-amber-700" :
+                                item.status==="revision" ? "bg-blue-100 text-blue-700" :
+                                "bg-emerald-100 text-emerald-700"
+                              }`}>
+                                {item.status}
+                              </span>
+                              {item.type==="caja" && item.status==="pendiente" && (
+                                <button onClick={() => handleDeleteBox(item.id, item.name)}
+                                  className="text-rose-400 hover:text-rose-600 p-1" title="Eliminar caja">
+                                  <X size={12} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        {pendingItems.filter(i => i.type===pendingTab).length===0 && (
+                          <p className="py-6 text-center text-neutral-400 text-xs">No hay {pendingTab} pendientes</p>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Bandeja de Aprobación */}
               <Card className="border-none shadow-lg rounded-3xl bg-white overflow-hidden">
                 <CardHeader className="bg-neutral-50 border-b pb-4">
@@ -2059,14 +2144,24 @@ export default function InventoryControlView({ userRole }: Props) {
                     <CardTitle className="text-sm font-bold flex items-center gap-1.5 uppercase text-neutral-800">
                       <ShieldCheck size={16} /> Bandeja de Aprobación de Conteos Físicos
                     </CardTitle>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowCompleted(!showCompleted)}
-                      className="h-7 text-[10px] rounded-lg px-2 font-bold text-neutral-500 hover:text-neutral-900"
-                    >
-                      {showCompleted ? "Ocultar completados" : "Ver completados"}
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => fetchCountRequests()}
+                        disabled={loadingRequests}
+                        className="h-7 w-7 flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"
+                        title="Refrescar solicitudes"
+                      >
+                        <RefreshCw size={14} className={loadingRequests ? "animate-spin" : ""} />
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowCompleted(!showCompleted)}
+                        className="h-7 text-[10px] rounded-lg px-2 font-bold text-neutral-500 hover:text-neutral-900"
+                      >
+                        {showCompleted ? "Ocultar completados" : "Ver completados"}
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="pt-4">
