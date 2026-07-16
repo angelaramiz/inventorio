@@ -28,6 +28,8 @@ interface CJXContainer {
 export default function CajasView() {
   const [activeSubTab, setActiveSubTab] = useState<"standard" | "cjx" | "niveles">("standard");
   const [filterAlmacen, setFilterAlmacen] = useState<string>("todos");
+  const [filterPasillo, setFilterPasillo] = useState<string>("todos");
+  const [filterSeccion, setFilterSeccion] = useState<string>("todos");
 
   // Legacy cajas state
   const [cajas, setCajas] = useState<Caja[]>([]);
@@ -712,13 +714,41 @@ export default function CajasView() {
           <div className="flex items-center">
             <select
               value={filterAlmacen}
-              onChange={e => setFilterAlmacen(e.target.value)}
+              onChange={e => { setFilterAlmacen(e.target.value); setFilterPasillo("todos"); setFilterSeccion("todos"); }}
               className="h-9 px-3 rounded-xl bg-neutral-50 border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 truncate max-w-[140px]"
             >
               <option value="todos">Todas las zonas</option>
               <option value="sin_asignar">Sin asignar</option>
               {zones.map((z: any) => (
                 <option key={z.id_zona_almacen} value={z.nombre}>{z.nombre.toUpperCase()}</option>
+              ))}
+            </select>
+          </div>
+          {/* Pasillo Filter */}
+          <div className="flex items-center">
+            <select
+              value={filterPasillo}
+              onChange={e => { setFilterPasillo(e.target.value); setFilterSeccion("todos"); }}
+              className="h-9 px-3 rounded-xl bg-neutral-50 border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 truncate max-w-[140px]"
+            >
+              <option value="todos">Todos los pasillos</option>
+              <option value="Sin pasillo">Sin pasillo</option>
+              {[...new Set(cajas.map((c: any) => c.pasillo_nombre).filter(Boolean))].sort().map((p: any) => (
+                <option key={p} value={p}>{p.toUpperCase()}</option>
+              ))}
+            </select>
+          </div>
+          {/* Seccion Filter */}
+          <div className="flex items-center">
+            <select
+              value={filterSeccion}
+              onChange={e => setFilterSeccion(e.target.value)}
+              className="h-9 px-3 rounded-xl bg-neutral-50 border border-neutral-200 text-xs font-semibold outline-none focus:ring-1 focus:ring-neutral-900 truncate max-w-[140px]"
+            >
+              <option value="todos">Todas las secciones</option>
+              <option value="Sin sección">Sin sección</option>
+              {[...new Set(cajas.map((c: any) => c.seccion_nombre).filter(Boolean))].sort().map((s: any) => (
+                <option key={s} value={s}>{s.toUpperCase()}</option>
               ))}
             </select>
           </div>
@@ -742,7 +772,9 @@ export default function CajasView() {
             ) : cajas.filter((c: any) => {
               if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) return false;
               if (filterAlmacen === "sin_asignar") return !c.almacen_nombre;
-              if (filterAlmacen !== "todos") return c.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+              if (filterAlmacen !== "todos" && c.almacen_nombre?.toLowerCase() !== filterAlmacen.toLowerCase()) return false;
+              if (filterPasillo !== "todos" && (c.pasillo_nombre || "Sin pasillo") !== filterPasillo) return false;
+              if (filterSeccion !== "todos" && (c.seccion_nombre || "Sin sección") !== filterSeccion) return false;
               if (quickFindQuery.trim()) {
                 if (isSkuSearch && skuMatchingBoxIds) {
                   return skuMatchingBoxIds.includes(c.id_caja);
@@ -763,7 +795,9 @@ export default function CajasView() {
             ) : cajas.filter((c: any) => {
               if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) return false;
               if (filterAlmacen === "sin_asignar") return !c.almacen_nombre;
-              if (filterAlmacen !== "todos") return c.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+              if (filterAlmacen !== "todos" && c.almacen_nombre?.toLowerCase() !== filterAlmacen.toLowerCase()) return false;
+              if (filterPasillo !== "todos" && (c.pasillo_nombre || "Sin pasillo") !== filterPasillo) return false;
+              if (filterSeccion !== "todos" && (c.seccion_nombre || "Sin sección") !== filterSeccion) return false;
               if (quickFindQuery.trim()) {
                 if (isSkuSearch && skuMatchingBoxIds) {
                   return skuMatchingBoxIds.includes(c.id_caja);
@@ -944,7 +978,9 @@ export default function CajasView() {
               ))
             ) : niveles.filter((nivel: any) => {
               if (filterAlmacen === "sin_asignar") return !nivel.almacen_nombre;
-              if (filterAlmacen !== "todos") return nivel.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+              if (filterAlmacen !== "todos" && nivel.almacen_nombre?.toLowerCase() !== filterAlmacen.toLowerCase()) return false;
+              if (filterPasillo !== "todos" && (nivel.pasillo_nombre || "Sin pasillo") !== filterPasillo) return false;
+              if (filterSeccion !== "todos" && (nivel.seccion_nombre || "Sin sección") !== filterSeccion) return false;
               if (quickFindQuery.trim()) {
                 if (isSkuSearch && skuMatchingBoxIds) {
                   const matchingCaja = cajas.find((c: any) => c.id_zona_nivel === nivel.id_zona_nivel);
@@ -967,7 +1003,9 @@ export default function CajasView() {
               </div>
             ) : niveles.filter((nivel: any) => {
               if (filterAlmacen === "sin_asignar") return !nivel.almacen_nombre;
-              if (filterAlmacen !== "todos") return nivel.almacen_nombre?.toLowerCase() === filterAlmacen.toLowerCase();
+              if (filterAlmacen !== "todos" && nivel.almacen_nombre?.toLowerCase() !== filterAlmacen.toLowerCase()) return false;
+              if (filterPasillo !== "todos" && (nivel.pasillo_nombre || "Sin pasillo") !== filterPasillo) return false;
+              if (filterSeccion !== "todos" && (nivel.seccion_nombre || "Sin sección") !== filterSeccion) return false;
               if (quickFindQuery.trim()) {
                 if (isSkuSearch && skuMatchingBoxIds) {
                   const matchingCaja = cajas.find((c: any) => c.id_zona_nivel === nivel.id_zona_nivel);
