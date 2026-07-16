@@ -315,7 +315,7 @@ fun ModelDownloadDialog(
                                                         downloadComplete = true
                                                         // Init native model in background
                                                         scope.launch(Dispatchers.IO) {
-                                                            ocrEngine.initNativeModel()
+                                                            ocrEngine.initLocalModel()
                                                         }
                                                     } else {
                                                         downloadFailed = true

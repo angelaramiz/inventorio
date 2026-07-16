@@ -51,6 +51,7 @@ add_library(llama_jni SHARED llama_jni.cpp)
 target_include_directories(llama_jni PRIVATE
     ${LLAMA_CPP_DIR}/include
     ${LLAMA_CPP_DIR}/ggml/include
+    ${LLAMA_CPP_DIR}/vendor/stb
 )
 
 # Link: ggml (static) + llama (static) + log

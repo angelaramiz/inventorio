@@ -188,10 +188,10 @@ fun MainAppScreen() {
         AppLogger.i("MAIN", "=== App iniciada. Verificando estado de IA local... ===")
         AppLogger.i("MAIN", "isModelReady=${ocrEngine.isModelReady} | isLoaded=${LlamacppBridge.isLoaded} | isAvailable=${LlamacppBridge.isAvailable}")
         if (ocrEngine.isModelReady && !LlamacppBridge.isAvailable) {
-            AppLogger.i("MAIN", "Modelo descargado y sesión inactiva. Iniciando initNativeModel()...")
+            AppLogger.i("MAIN", "Modelo descargado y sesión inactiva. Iniciando initLocalModel()...")
             kotlinx.coroutines.withContext(Dispatchers.IO) {
-                val ok = ocrEngine.initNativeModel()
-                AppLogger.i("MAIN", if (ok) "✅ initNativeModel() exitoso. IA LOCAL lista." else "❌ initNativeModel() falló. lastInitError=${LlamacppBridge.lastInitError}")
+                val ok = ocrEngine.initLocalModel()
+                AppLogger.i("MAIN", if (ok) "✅ initLocalModel() exitoso. IA LOCAL lista." else "❌ initLocalModel() falló. lastInitError=${LlamacppBridge.lastInitError}")
             }
         } else if (!ocrEngine.isModelReady) {
             AppLogger.w("MAIN", "⚠️ Modelo NO descargado. OCR usará servidor (nube). Descarga el modelo desde el Drawer > IA Model.")
@@ -820,7 +820,7 @@ fun MainAppScreen() {
                                 onClick = {
                                     initializing = true
                                     scope.launch(Dispatchers.IO) {
-                                        ocrEngine.initNativeModel()
+                                        ocrEngine.initLocalModel()
                                         withContext(Dispatchers.Main) {
                                             initializing = false
                                             if (LlamacppBridge.isAvailable) {

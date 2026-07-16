@@ -33,13 +33,13 @@ class LabelOcrEngine(
         private const val TAG = "LabelOcrEngine"
         private const val MODEL_DIR_NAME = "qwen_gguf_model"
 
-        // Qwen2.5-VL-3B-Instruct GGUF Q4_K_M (~2.4 GB)
+        // Qwen2.5-VL-3B-Instruct GGUF Q4_K_M (~2.3 GB + ~500 MB mmproj)
         private const val GGUF_FILE_NAME = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
-        private const val MMPROJ_FILE_NAME = "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf"
+        private const val MMPROJ_FILE_NAME = "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf"
 
-        // HuggingFace download URL (bartowski quantizations)
+        // ggml-org (llama.cpp official) — público, sin auth requerida
         private const val HF_BASE_URL =
-            "https://huggingface.co/bartowski/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main"
+            "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main"
 
         private val MODEL_FILES = listOf(GGUF_FILE_NAME, MMPROJ_FILE_NAME)
 
@@ -276,7 +276,7 @@ class LabelOcrEngine(
         }
     }
 
-    fun initNativeModel(): Boolean {
+    fun initLocalModel(): Boolean {
         if (!isModelReady) {
             LlamacppBridge.lastInitError = "Modelo no descargado completamente."
             return false
