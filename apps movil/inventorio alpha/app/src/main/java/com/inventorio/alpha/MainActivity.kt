@@ -186,16 +186,16 @@ fun MainAppScreen() {
     // Auto-inicializar la IA local al arrancar si el modelo ya está listo y descargado
     LaunchedEffect(ocrEngine) {
         AppLogger.i("MAIN", "=== App iniciada. Verificando estado de IA local... ===")
-        AppLogger.i("MAIN", "isModelReady=${ocrEngine.isModelReady} | isLoaded=${MnnLlmBridge.isLoaded} | isAvailable=${MnnLlmBridge.isAvailable}")
-        if (ocrEngine.isModelReady && !MnnLlmBridge.isAvailable) {
+        AppLogger.i("MAIN", "isModelReady=${ocrEngine.isModelReady} | isLoaded=${LlamacppBridge.isLoaded} | isAvailable=${LlamacppBridge.isAvailable}")
+        if (ocrEngine.isModelReady && !LlamacppBridge.isAvailable) {
             AppLogger.i("MAIN", "Modelo descargado y sesión inactiva. Iniciando initNativeModel()...")
             kotlinx.coroutines.withContext(Dispatchers.IO) {
                 val ok = ocrEngine.initNativeModel()
-                AppLogger.i("MAIN", if (ok) "✅ initNativeModel() exitoso. IA LOCAL lista." else "❌ initNativeModel() falló. lastInitError=${MnnLlmBridge.lastInitError}")
+                AppLogger.i("MAIN", if (ok) "✅ initNativeModel() exitoso. IA LOCAL lista." else "❌ initNativeModel() falló. lastInitError=${LlamacppBridge.lastInitError}")
             }
         } else if (!ocrEngine.isModelReady) {
             AppLogger.w("MAIN", "⚠️ Modelo NO descargado. OCR usará servidor (nube). Descarga el modelo desde el Drawer > IA Model.")
-        } else if (MnnLlmBridge.isAvailable) {
+        } else if (LlamacppBridge.isAvailable) {
             AppLogger.i("MAIN", "✅ IA LOCAL ya activa al iniciar. Listo para OCR offline.")
         }
     }
@@ -414,7 +414,7 @@ fun MainAppScreen() {
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            "Qwen2.5-VL-2B · Q4 MNN",
+                            "Qwen2.5-VL-3B · Q4_K_M GGUF",
                             fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF374151)
                         )
                         if (ocrEngine.isModelReady) {
@@ -570,7 +570,7 @@ fun MainAppScreen() {
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 modifier = Modifier.padding(end = 8.dp)
                             ) {
-                                val isLocalAi = MnnLlmBridge.isAvailable
+                                val isLocalAi = LlamacppBridge.isAvailable
                                 Box(
                                     modifier = Modifier
                                         .background(
@@ -761,10 +761,14 @@ fun MainAppScreen() {
         }
 
         if (showAiStatusDialog) {
-            val isLocalAi = MnnLlmBridge.isAvailable
-            val err = MnnLlmBridge.lastInitError
+            val isLocalAi = LlamacppBridge.isAvailable
+            val err = LlamacppBridge.lastInitError
             val modelValidation = remember(showAiStatusDialog) {
-                if (ocrEngine.isModelReady) MnnLlmBridge.validateModelFiles(ocrEngine.modelDir) else null
+                if (ocrEngine.isModelReady) {
+                    val ggufOk = ocrEngine.ggufFile.exists() && ocrEngine.ggufFile.length() > 0
+                    val mmprojOk = ocrEngine.mmprojFile.exists() && ocrEngine.mmprojFile.length() > 0
+                    if (!ggufOk || !mmprojOk) "Faltan archivos del modelo GGUF." else null
+                } else null
             }
             AlertDialog(
                 onDismissRequest = { showAiStatusDialog = false },
@@ -772,7 +776,7 @@ fun MainAppScreen() {
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            if (isLocalAi) "El motor nativo de IA local (Qwen2.5-VL-2B via MNN-LLM) se ha cargado e inicializado correctamente."
+                            if (isLocalAi) "El motor nativo de IA local (Qwen2.5-VL-3B via llama.cpp) se ha cargado e inicializado correctamente."
                             else "Se está utilizando la API en la nube como fallback para las tareas de OCR."
                         )
                         if (err != null) {
@@ -819,7 +823,7 @@ fun MainAppScreen() {
                                         ocrEngine.initNativeModel()
                                         withContext(Dispatchers.Main) {
                                             initializing = false
-                                            if (MnnLlmBridge.isAvailable) {
+                                            if (LlamacppBridge.isAvailable) {
                                                 Toast.makeText(context, "IA Local inicializada correctamente", Toast.LENGTH_SHORT).show()
                                                 showAiStatusDialog = false
                                             } else {

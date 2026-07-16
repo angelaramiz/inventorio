@@ -105,45 +105,37 @@ object MnnLlmBridge {
         }
 
         val configFile = File(modelDir, "config.json")
+        val originalConfig = configFile.readText()
+        AppLogger.i("MNN", "config.json original:\n${originalConfig.take(1200)}")
+
+        // Back up original
+        val backupFile = File(modelDir, "config.backup.json")
+        try { backupFile.writeText(originalConfig) } catch (_: Exception) {}
+
         return try {
-            val mmapDir = File(context.cacheDir, "mnn_mmap").apply { mkdirs() }
-            var mergedConfig = configFile.readText()
-            AppLogger.i("MNN", "config.json:\n${mergedConfig.take(1200)}")
-            try {
-                val json = org.json.JSONObject(mergedConfig)
-                val mllm = if (json.has("mllm")) {
-                    json.getJSONObject("mllm")
-                } else {
-                    org.json.JSONObject().also { json.put("mllm", it) }
-                }
-                if (!mllm.has("visual_model")) {
-                    mllm.put("visual_model", "visual.mnn")
-                }
-                if (!mllm.has("visual_weight")) {
-                    mllm.put("visual_weight", "visual.mnn.weight")
-                }
-                mergedConfig = json.toString()
-                AppLogger.i("MNN", "config.json inyectado (mllm.visual_model/visual_weight):\n${mergedConfig.take(1200)}")
-            } catch (e: Exception) {
-                AppLogger.e("MNN", "Error inyectando visual_model/visual_weight: ${e.message}")
+            val json = org.json.JSONObject(originalConfig)
+            val mllm = if (json.has("mllm")) {
+                json.getJSONObject("mllm")
+            } else {
+                org.json.JSONObject().also { json.put("mllm", it) }
             }
-
-            val extraConfigJson = buildString {
-                append("{")
-                append("\"is_r1\":false,")
-                append("\"mmap_dir\":\"${mmapDir.absolutePath}\",")
-                append("\"keep_history\":false")
-                append("}")
+            if (!mllm.has("visual_model")) {
+                mllm.put("visual_model", "visual.mnn")
             }
-            AppLogger.i("MNN", "extraConfigJson: $extraConfigJson")
+            if (!mllm.has("visual_weight")) {
+                mllm.put("visual_weight", "visual.mnn.weight")
+            }
+            val finalConfig = json.toString(2)
+            configFile.writeText(finalConfig)
+            AppLogger.i("MNN", "config.json final (escrito a disco):\n${finalConfig.take(1200)}")
 
-            AppLogger.i("MNN", "Llamando initNative(config.json)...")
+            AppLogger.i("MNN", "Llamando initNative(modelDir=${modelDir.absolutePath}) sin strings adicionales...")
 
             sessionHandle = com.alibaba.mnnllm.android.llm.LlmSession.initNative(
-                configFile.absolutePath,
+                modelDir.absolutePath,
                 null,
-                mergedConfig,
-                extraConfigJson
+                null,
+                null
             )
 
             if (sessionHandle == 0L || sessionHandle < 0L) {
@@ -156,10 +148,14 @@ object MnnLlmBridge {
             }
             sessionHandle > 0L
         } catch (e: Throwable) {
+            // Restore original config
+            try { backupFile.copyTo(configFile, overwrite = true) } catch (_: Exception) {}
             lastInitError = "Error JNI: ${e.message}\n${Log.getStackTraceString(e)}"
             AppLogger.e("MNN", "❌ Error JNI al iniciar sesión MNN:\n${e.message}")
             Log.e(TAG, "Error iniciando sesión MNN: ${e.message}", e)
             false
+        } finally {
+            try { backupFile.delete() } catch (_: Exception) {}
         }
     }
 

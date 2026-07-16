@@ -14,17 +14,15 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.net.URL
 
 /**
- * Motor de OCR para etiquetas de ropa.
+ * Motor de OCR para etiquetas de ropa — llama.cpp edition.
  *
  * Estrategia dual:
- *  1. Modelo local: Qwen2.5-VL-2B via MNN-LLM (offline, rápido)
+ *  1. Modelo local: Qwen2.5-VL-3B GGUF via llama.cpp (offline)
  *  2. Fallback: POST /api/ocr/extract-label en el servidor (requiere internet)
  *
- * El modelo se descarga on-demand (~1.2 GB) y se almacena en
- * filesDir/qwen_ocr_model/ (accesible por código nativo en Android 11+).
+ * El modelo GGUF (~2.3 GB Q4_K_M) se descarga de HuggingFace.
  */
 class LabelOcrEngine(
     private val context: Context,
@@ -33,25 +31,18 @@ class LabelOcrEngine(
 ) {
     companion object {
         private const val TAG = "LabelOcrEngine"
-        private const val MODEL_DIR_NAME = "qwen_ocr_model"
+        private const val MODEL_DIR_NAME = "qwen_gguf_model"
 
-        // URL de descarga del modelo MNN pre-convertido
-        // Fuente: MNN/Qwen2.5-VL-3B-Instruct-MNN en ModelScope
-        private const val MODEL_BASE_URL =
-            "https://modelscope.cn/api/v1/models/MNN/Qwen2.5-VL-3B-Instruct-MNN/repo?FilePath="
+        // Qwen2.5-VL-3B-Instruct GGUF Q4_K_M (~2.4 GB)
+        private const val GGUF_FILE_NAME = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
+        private const val MMPROJ_FILE_NAME = "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf"
 
-        // Archivos que componen el modelo (en orden de descarga)
-        private val MODEL_FILES = listOf(
-            "config.json",
-            "llm.mnn",
-            "llm.mnn.weight",
-            "embeddings_bf16.bin",
-            "visual.mnn",
-            "visual.mnn.weight",
-            "tokenizer.txt"
-        )
+        // HuggingFace download URL (bartowski quantizations)
+        private const val HF_BASE_URL =
+            "https://huggingface.co/bartowski/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main"
 
-        // Prompt para extracción estructurada de etiqueta
+        private val MODEL_FILES = listOf(GGUF_FILE_NAME, MMPROJ_FILE_NAME)
+
         private val LABEL_EXTRACTION_PROMPT = """
             Analiza la imagen de esta etiqueta de ropa y extrae los datos que puedas ver.
             Responde ÚNICAMENTE con un objeto JSON válido en este formato exacto, sin texto adicional:
@@ -66,21 +57,19 @@ class LabelOcrEngine(
         """.trimIndent()
     }
 
-    // ─── Estado público ───────────────────────────────────────────────────────
+    // ─── Estado público ──────────────────────────────────────────
 
     val modelDir: File
-        get() {
-            val internal = File(context.filesDir, MODEL_DIR_NAME)
-            val legacyExternal = File(context.getExternalFilesDir(null), MODEL_DIR_NAME)
-            if (!File(internal, "config.json").exists() && File(legacyExternal, "config.json").exists()) {
-                migrateModelDir(legacyExternal, internal)
-            }
-            return internal
-        }
+        get() = File(context.filesDir, MODEL_DIR_NAME)
+
+    val ggufFile: File
+        get() = File(modelDir, GGUF_FILE_NAME)
+
+    val mmprojFile: File
+        get() = File(modelDir, MMPROJ_FILE_NAME)
 
     val isModelReady: Boolean
-        get() = File(modelDir, "config.json").exists() &&
-                File(modelDir, "llm.mnn.weight").exists()
+        get() = ggufFile.exists() && ggufFile.length() > 1024 * 1024 * 100 // >100MB
 
     val modelSizeDescription: String
         get() {
@@ -94,149 +83,102 @@ class LabelOcrEngine(
             }
         }
 
-    // ─── Punto de entrada principal ──────────────────────────────────────────
+    // ─── Punto de entrada principal ──────────────────────────────
 
-    /**
-     * Analiza la imagen de una etiqueta y devuelve los datos extraídos.
-     * Intenta el modelo local primero, cae al servidor si falla.
-     *
-     * @return OcrResult con los campos encontrados y una fuente indicando
-     *         si fue "local" o "servidor".
-     */
     suspend fun analyze(bitmap: Bitmap): LabelOcrResult = withContext(Dispatchers.IO) {
         AppLogger.i("OCR", "=== analyze() iniciado ===")
-        AppLogger.i("OCR", "isModelReady=${isModelReady} | isLoaded=${MnnLlmBridge.isLoaded} | isAvailable=${MnnLlmBridge.isAvailable}")
+        AppLogger.i("OCR", "isModelReady=$isModelReady | isLoaded=${LlamacppBridge.isLoaded} | isAvailable=${LlamacppBridge.isAvailable}")
 
-        // Intento 1: modelo local
-        if (isModelReady && MnnLlmBridge.isAvailable) {
-            AppLogger.i("OCR", "→ Intentando inferencia LOCAL ⚡")
+        if (isModelReady && LlamacppBridge.isAvailable) {
+            AppLogger.i("OCR", "→ Intentando inferencia LOCAL ⚡ (llama.cpp)")
             try {
                 val result = analyzeLocal(bitmap)
                 if (result != null) {
-                    AppLogger.i("OCR", "✅ Resultado LOCAL obtenido. Datos: marca=${result.marca} talla=${result.talla} sku=${result.sku} modelo=${result.modeloGrupo}")
+                    AppLogger.i("OCR", "✅ Resultado LOCAL obtenido.")
                     return@withContext result
-                } else {
-                    AppLogger.w("OCR", "⚠️ analyzeLocal devolvió null (MNN no generó respuesta). Intentando servidor.")
                 }
+                AppLogger.w("OCR", "⚠️ analyzeLocal devolvió null. Intentando servidor.")
             } catch (e: Throwable) {
-                AppLogger.e("OCR", "❌ Inferencia LOCAL falló: ${e.message}. Usando servidor como fallback.")
-                Log.w(TAG, "Inferencia local falló, usando servidor. Causa: ${e.message}")
+                AppLogger.e("OCR", "❌ Inferencia LOCAL falló: ${e.message}")
             }
-        } else if (isModelReady && !MnnLlmBridge.isAvailable) {
-            // Modelo descargado pero .so no cargadas: intentar cargar ahora
-            AppLogger.w("OCR", "⚠️ Modelo listo pero isAvailable=false. Intentando carga tardía de librerías MNN...")
-            MnnLlmBridge.tryLoadLibraries()
-            if (MnnLlmBridge.isLoaded) {
-                AppLogger.i("OCR", "Librerías cargadas en carga tardía. Iniciando sesión MNN...")
-                MnnLlmBridge.initModel(context, modelDir)
-                if (MnnLlmBridge.isAvailable) {
-                    try {
-                        val result = analyzeLocal(bitmap)
-                        if (result != null) {
-                            AppLogger.i("OCR", "✅ Resultado LOCAL (carga tardía) obtenido.")
-                            return@withContext result
-                        }
-                    } catch (e: Throwable) {
-                        AppLogger.e("OCR", "❌ Inferencia LOCAL falló tras carga tardía: ${e.message}")
-                        Log.w(TAG, "Inferencia local falló tras carga tardía: ${e.message}")
-                    }
-                } else {
-                    AppLogger.e("OCR", "❌ Carga tardía no pudo inicializar sesión MNN. lastInitError=${MnnLlmBridge.lastInitError}")
+        } else if (isModelReady && !LlamacppBridge.isAvailable) {
+            AppLogger.w("OCR", "⚠️ Modelo listo pero sesión inactiva. Iniciando...")
+            LlamacppBridge.initModel(context, ggufFile, mmprojFile)
+            if (LlamacppBridge.isAvailable) {
+                try {
+                    val result = analyzeLocal(bitmap)
+                    if (result != null) return@withContext result
+                } catch (e: Throwable) {
+                    AppLogger.e("OCR", "❌ Inferencia falló tras carga tardía: ${e.message}")
                 }
-            } else {
-                AppLogger.e("OCR", "❌ tryLoadLibraries() falló en carga tardía. OCR local no disponible.")
             }
         } else {
-            AppLogger.w("OCR", "⚠️ Modelo NO descargado (isModelReady=false). Usando servidor directamente.")
+            AppLogger.w("OCR", "⚠️ Modelo NO descargado. Usando servidor.")
         }
 
-        // Intento 2: fallback al servidor
-        AppLogger.i("OCR", "→ Intentando inferencia en SERVIDOR ☁️ (${serverUrl.trimEnd('/')}/api/ocr/extract-label)")
+        AppLogger.i("OCR", "→ Fallback SERVIDOR ☁️")
         return@withContext analyzeRemote(bitmap)
     }
 
-
-    // ─── Inferencia local (MNN-LLM) ──────────────────────────────────────────
+    // ─── Inferencia local ────────────────────────────────────────
 
     private suspend fun analyzeLocal(bitmap: Bitmap): LabelOcrResult? = withContext(Dispatchers.IO) {
-        val raw = MnnLlmBridge.runVisionInference(context, bitmap, LABEL_EXTRACTION_PROMPT)
+        val raw = LlamacppBridge.runVisionInference(context, bitmap, LABEL_EXTRACTION_PROMPT)
             ?: return@withContext null
-
         parseJsonResponse(raw, source = "local")
     }
 
-    // ─── Fallback: servidor ───────────────────────────────────────────────────
+    // ─── Fallback: servidor ──────────────────────────────────────
 
     suspend fun analyzeRemote(bitmap: Bitmap): LabelOcrResult = withContext(Dispatchers.IO) {
         try {
             val bytes = ByteArrayOutputStream().also { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
             }.toByteArray()
-
             val body = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
-                .addFormDataPart(
-                    "foto",
-                    "label.jpg",
-                    bytes.toRequestBody("image/jpeg".toMediaType())
-                )
+                .addFormDataPart("foto", "label.jpg", bytes.toRequestBody("image/jpeg".toMediaType()))
                 .build()
-
             val request = Request.Builder()
                 .url("${serverUrl.trimEnd('/')}/api/ocr/extract-label")
                 .post(body)
                 .build()
-
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    val bodyText = response.body?.string() ?: "{}"
-                    parseJsonResponse(bodyText, source = "servidor")
+                    parseJsonResponse(response.body?.string() ?: "{}", source = "servidor")
                 } else {
-                    Log.e(TAG, "Error del servidor OCR: ${response.code}")
                     LabelOcrResult.empty(source = "servidor")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error contactando servidor OCR: ${e.message}")
             LabelOcrResult.empty(source = "error")
         }
     }
 
-    // ─── Parser de respuesta JSON ─────────────────────────────────────────────
+    // ─── Parser JSON ─────────────────────────────────────────────
 
     private fun parseJsonResponse(raw: String, source: String): LabelOcrResult {
         return try {
-            // Extraer el JSON del texto (el modelo a veces añade texto extra)
             val jsonStart = raw.indexOf('{')
             val jsonEnd = raw.lastIndexOf('}')
-            val jsonStr = if (jsonStart >= 0 && jsonEnd > jsonStart) {
-                raw.substring(jsonStart, jsonEnd + 1)
-            } else raw
+            val jsonStr = if (jsonStart >= 0 && jsonEnd > jsonStart)
+                raw.substring(jsonStart, jsonEnd + 1) else raw
 
             val json = JSONObject(jsonStr)
-            
-            var modelo = (json.optString("modelo_grupo").takeIf { it != "null" && it.isNotBlank() }
+            var modelo = json.optString("modelo_grupo").takeIf { it != "null" && it.isNotBlank() }
                 ?: json.optString("modelo").takeIf { it != "null" && it.isNotBlank() }
                 ?: json.optString("model").takeIf { it != "null" && it.isNotBlank() }
-                ?: json.optString("collection").takeIf { it != "null" && it.isNotBlank() }
-                ?: json.optString("modeloGrupo").takeIf { it != "null" && it.isNotBlank() })
-            
-            var color = (json.optString("codigo_color").takeIf { it != "null" && it.isNotBlank() }
+            var color = json.optString("codigo_color").takeIf { it != "null" && it.isNotBlank() }
                 ?: json.optString("color").takeIf { it != "null" && it.isNotBlank() }
                 ?: json.optString("color_code").takeIf { it != "null" && it.isNotBlank() }
-                ?: json.optString("codigoColor").takeIf { it != "null" && it.isNotBlank() })
-
-            val fecha = (json.optString("fecha_temporada").takeIf { it != "null" && it.isNotBlank() }
+            val fecha = json.optString("fecha_temporada").takeIf { it != "null" && it.isNotBlank() }
                 ?: json.optString("temporada").takeIf { it != "null" && it.isNotBlank() }
                 ?: json.optString("season").takeIf { it != "null" && it.isNotBlank() }
-                ?: json.optString("fechaTemporada").takeIf { it != "null" && it.isNotBlank() })
 
             if (modelo != null && modelo.contains("-")) {
                 val parts = modelo.split("-")
                 modelo = parts[0].trim()
-                if (color == null && parts.size > 1) {
-                    color = parts[1].trim()
-                }
+                if (color == null && parts.size > 1) color = parts[1].trim()
             }
 
             LabelOcrResult(
@@ -249,20 +191,12 @@ class LabelOcrEngine(
                 source = source
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Error parseando respuesta OCR: ${e.message} — raw: $raw")
             LabelOcrResult.empty(source = source)
         }
     }
 
-    // ─── Gestión del modelo ───────────────────────────────────────────────────
+    // ─── Gestión del modelo ──────────────────────────────────────
 
-    /**
-     * Descarga el modelo en background reportando progreso.
-     * Debe llamarse desde un hilo de I/O.
-     *
-     * @param onProgress Int del 0 al 100
-     * @param onDone (Boolean, String) -> Unit. El primer parámetro indica éxito, el segundo contiene el mensaje de error si falló.
-     */
     fun downloadModel(onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
         try {
             modelDir.mkdirs()
@@ -270,71 +204,57 @@ class LabelOcrEngine(
 
             MODEL_FILES.forEachIndexed { index, fileName ->
                 val dest = File(modelDir, fileName)
-                val fileUrl = MODEL_BASE_URL + fileName
+                val fileUrl = "$HF_BASE_URL/$fileName"
                 var expectedSize: Long = -1
 
-                // HEAD request to get expected content length
+                // HEAD check for file size
                 try {
                     val headResp = client.newCall(Request.Builder().url(fileUrl).head().build()).execute()
-                    if (headResp.isSuccessful) {
-                        expectedSize = headResp.body?.contentLength() ?: -1
-                    }
+                    expectedSize = headResp.body?.contentLength() ?: -1
                     headResp.close()
                 } catch (_: Exception) {}
 
                 if (dest.exists() && dest.length() > 0) {
                     if (expectedSize > 0 && dest.length() == expectedSize) {
-                        // Archivo ya descargado completo, saltar
                         onProgress(((index + 1) * 100) / totalFiles)
                         return@forEachIndexed
                     }
-                    if (expectedSize <= 0 && dest.length() > 1024) {
-                        // Sin referencia de tamaño, pero el archivo parece válido (>1KB)
+                    if (expectedSize <= 0 && dest.length() > 1024 * 1024) {
                         onProgress(((index + 1) * 100) / totalFiles)
                         return@forEachIndexed
                     }
-                    // Tamaño no coincide o archivo muy pequeño: re-descargar
-                    Log.w(TAG, "$fileName existente (${dest.length()} bytes) no coincide con servidor ($expectedSize bytes). Re-descargando...")
+                    Log.w(TAG, "$fileName: tamaño local=${dest.length()} vs esperado=$expectedSize. Re-descargando...")
                     dest.delete()
                 }
 
-                Log.i(TAG, "Descargando $fileName... (esperados ${if (expectedSize > 0) "$expectedSize bytes" else "tamaño desconocido"})")
+                Log.i(TAG, "Descargando $fileName (${if (expectedSize > 0) "%.0f MB".format(expectedSize / 1_000_000.0) else "?"})")
                 val request = Request.Builder().url(fileUrl).build()
 
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
-                        throw java.io.IOException("Error del servidor: ${response.code} al descargar $fileName")
+                        throw java.io.IOException("Error ${response.code} al descargar $fileName")
                     }
-
-                    val responseBody = response.body ?: throw java.io.IOException("Cuerpo de respuesta vacío para $fileName")
-                    val totalBytes = responseBody.contentLength()
+                    val body = response.body ?: throw java.io.IOException("Cuerpo vacío para $fileName")
+                    val total = body.contentLength()
                     var downloaded = 0L
-
-                    responseBody.byteStream().use { input ->
+                    body.byteStream().use { input ->
                         FileOutputStream(dest).use { output ->
-                            val buffer = ByteArray(16384)
-                            var bytesRead: Int
-                            while (input.read(buffer).also { bytesRead = it } != -1) {
-                                output.write(buffer, 0, bytesRead)
-                                downloaded += bytesRead
-
-                                val fileProgress = if (totalBytes > 0) {
-                                    (downloaded * 100 / totalBytes).toInt()
-                                } else 50
-
-                                val globalProgress = (index * 100 + fileProgress) / totalFiles
-                                onProgress(globalProgress.coerceIn(0, 99))
+                            val buffer = ByteArray(65536)
+                            var n: Int
+                            while (input.read(buffer).also { n = it } != -1) {
+                                output.write(buffer, 0, n)
+                                downloaded += n
+                                val fileProgress = if (total > 0) (downloaded * 100 / total).toInt() else 50
+                                onProgress(((index * 100 + fileProgress) / totalFiles).coerceIn(0, 99))
                             }
                         }
                     }
                 }
 
-                // Verificar integridad post-descarga
                 if (expectedSize > 0 && dest.length() != expectedSize) {
                     dest.delete()
-                    throw java.io.IOException("$fileName descargado incompleto: ${dest.length()} de $expectedSize bytes")
+                    throw java.io.IOException("$fileName incomplete: ${dest.length()} de $expectedSize bytes")
                 }
-
                 onProgress(((index + 1) * 100) / totalFiles)
             }
 
@@ -346,12 +266,9 @@ class LabelOcrEngine(
         }
     }
 
-    /**
-     * Elimina todos los archivos del modelo del almacenamiento.
-     */
     fun deleteModel(): Boolean {
         return try {
-            MnnLlmBridge.destroyModel()
+            LlamacppBridge.destroyModel()
             modelDir.deleteRecursively()
         } catch (e: Exception) {
             Log.e(TAG, "Error borrando modelo: ${e.message}")
@@ -359,35 +276,14 @@ class LabelOcrEngine(
         }
     }
 
-    /**
-     * Inicializa el bridge nativo con el modelo descargado.
-     * Llamar después de que el modelo esté listo.
-     */
     fun initNativeModel(): Boolean {
         if (!isModelReady) {
-            MnnLlmBridge.lastInitError = "Modelo no descargado completamente."
+            LlamacppBridge.lastInitError = "Modelo no descargado completamente."
             return false
         }
-        MnnLlmBridge.tryLoadLibraries()
-        return if (MnnLlmBridge.isLoaded) {
-            MnnLlmBridge.initModel(context, modelDir)
-        } else false
-    }
-
-    private fun migrateModelDir(from: File, to: File) {
-        try {
-            to.mkdirs()
-            from.listFiles()?.forEach { file ->
-                file.copyRecursively(File(to, file.name), overwrite = true)
-            }
-            Log.i(TAG, "Modelo migrado de external a internal: ${to.absolutePath}")
-        } catch (e: Exception) {
-            Log.w(TAG, "No se pudo migrar modelo a internal storage: ${e.message}")
-        }
+        return LlamacppBridge.initModel(context, ggufFile, mmprojFile)
     }
 }
-
-// ─── Modelo de datos de resultado ────────────────────────────────────────────
 
 data class LabelOcrResult(
     val marca: String?,
@@ -396,21 +292,12 @@ data class LabelOcrResult(
     val modeloGrupo: String?,
     val codigoColor: String? = null,
     val fechaTemporada: String? = null,
-    /** "local" | "servidor" | "error" */
     val source: String
 ) {
     val hasAnyData: Boolean
         get() = marca != null || talla != null || sku != null || modeloGrupo != null || codigoColor != null || fechaTemporada != null
 
     companion object {
-        fun empty(source: String) = LabelOcrResult(
-            marca = null,
-            talla = null,
-            sku = null,
-            modeloGrupo = null,
-            codigoColor = null,
-            fechaTemporada = null,
-            source = source
-        )
+        fun empty(source: String) = LabelOcrResult(null, null, null, null, null, null, source)
     }
 }

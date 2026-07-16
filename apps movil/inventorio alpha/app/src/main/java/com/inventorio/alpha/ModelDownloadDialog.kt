@@ -27,7 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Diálogo para descargar el modelo Qwen2.5-VL-2B on-demand.
+ * Diálogo para descargar el modelo Qwen2.5-VL-3B GGUF on-demand.
  * Se muestra automáticamente cuando el usuario toca "Leer Etiqueta"
  * y el modelo no está descargado.
  *
@@ -124,7 +124,7 @@ fun ModelDownloadDialog(
                         isDownloading ->
                             "Descargando modelo de visión IA... No cierres la app."
                         else ->
-                            "Para leer etiquetas sin internet, necesitas descargar el modelo Qwen2.5-VL-3B (~2 GB).\n\nSolo se descarga una vez. Requiere WiFi."
+                            "Para leer etiquetas sin internet, necesitas descargar el modelo Qwen2.5-VL-3B GGUF (~2.5 GB).\n\nSolo se descarga una vez. Requiere WiFi."
                     },
                     color = Color(0xFF94A3B8),
                     fontSize = 13.sp,
@@ -209,7 +209,7 @@ fun ModelDownloadDialog(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         ModelInfoChip("Modelo", "Qwen2.5-VL-3B")
-                        ModelInfoChip("Formato", "Q4 MNN")
+                        ModelInfoChip("Formato", "GGUF Q4_K_M")
                         ModelInfoChip("Tamaño", "~2 GB")
                     }
                     Spacer(modifier = Modifier.height(16.dp))
