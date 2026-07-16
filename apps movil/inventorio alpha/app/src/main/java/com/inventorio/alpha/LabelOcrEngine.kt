@@ -270,14 +270,35 @@ class LabelOcrEngine(
 
             MODEL_FILES.forEachIndexed { index, fileName ->
                 val dest = File(modelDir, fileName)
+                val fileUrl = MODEL_BASE_URL + fileName
+                var expectedSize: Long = -1
+
+                // HEAD request to get expected content length
+                try {
+                    val headResp = client.newCall(Request.Builder().url(fileUrl).head().build()).execute()
+                    if (headResp.isSuccessful) {
+                        expectedSize = headResp.body?.contentLength() ?: -1
+                    }
+                    headResp.close()
+                } catch (_: Exception) {}
+
                 if (dest.exists() && dest.length() > 0) {
-                    // Archivo ya descargado, saltar
-                    onProgress(((index + 1) * 100) / totalFiles)
-                    return@forEachIndexed
+                    if (expectedSize > 0 && dest.length() == expectedSize) {
+                        // Archivo ya descargado completo, saltar
+                        onProgress(((index + 1) * 100) / totalFiles)
+                        return@forEachIndexed
+                    }
+                    if (expectedSize <= 0 && dest.length() > 1024) {
+                        // Sin referencia de tamaño, pero el archivo parece válido (>1KB)
+                        onProgress(((index + 1) * 100) / totalFiles)
+                        return@forEachIndexed
+                    }
+                    // Tamaño no coincide o archivo muy pequeño: re-descargar
+                    Log.w(TAG, "$fileName existente (${dest.length()} bytes) no coincide con servidor ($expectedSize bytes). Re-descargando...")
+                    dest.delete()
                 }
 
-                Log.i(TAG, "Descargando $fileName...")
-                val fileUrl = MODEL_BASE_URL + fileName
+                Log.i(TAG, "Descargando $fileName... (esperados ${if (expectedSize > 0) "$expectedSize bytes" else "tamaño desconocido"})")
                 val request = Request.Builder().url(fileUrl).build()
 
                 client.newCall(request).execute().use { response ->
@@ -291,13 +312,12 @@ class LabelOcrEngine(
 
                     responseBody.byteStream().use { input ->
                         FileOutputStream(dest).use { output ->
-                            val buffer = ByteArray(16384) // Buffer más grande para mayor velocidad
+                            val buffer = ByteArray(16384)
                             var bytesRead: Int
                             while (input.read(buffer).also { bytesRead = it } != -1) {
                                 output.write(buffer, 0, bytesRead)
                                 downloaded += bytesRead
 
-                                // Progreso global: archivo actual + fracción del actual
                                 val fileProgress = if (totalBytes > 0) {
                                     (downloaded * 100 / totalBytes).toInt()
                                 } else 50
@@ -307,6 +327,12 @@ class LabelOcrEngine(
                             }
                         }
                     }
+                }
+
+                // Verificar integridad post-descarga
+                if (expectedSize > 0 && dest.length() != expectedSize) {
+                    dest.delete()
+                    throw java.io.IOException("$fileName descargado incompleto: ${dest.length()} de $expectedSize bytes")
                 }
 
                 onProgress(((index + 1) * 100) / totalFiles)

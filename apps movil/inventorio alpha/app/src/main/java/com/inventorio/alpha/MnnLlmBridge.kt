@@ -96,24 +96,36 @@ object MnnLlmBridge {
             return false
         }
 
+        // ─── Diagnostic dump ───────────────────────────────────
         AppLogger.i("MNN", "Iniciando sesión MNN...\nDir: ${modelDir.absolutePath}")
+        val fileNames = modelDir.list()?.joinToString(", ") ?: "vacio"
+        AppLogger.i("MNN", "Archivos: $fileNames")
+        modelDir.listFiles()?.forEach { f ->
+            AppLogger.i("MNN", "  ${f.name} -> ${f.length()} bytes")
+        }
 
         val configFile = File(modelDir, "config.json")
         return try {
             val mmapDir = File(context.cacheDir, "mnn_mmap").apply { mkdirs() }
             var mergedConfig = configFile.readText()
-            Log.d(TAG, "config.json raw (primeros 800 chars): ${mergedConfig.take(800)}")
+            AppLogger.i("MNN", "config.json:\n${mergedConfig.take(1200)}")
             try {
                 val json = org.json.JSONObject(mergedConfig)
-                if (!json.has("visual_model")) {
-                    json.put("visual_model", "visual.mnn")
+                val mllm = if (json.has("mllm")) {
+                    json.getJSONObject("mllm")
+                } else {
+                    org.json.JSONObject().also { json.put("mllm", it) }
                 }
-                if (!json.has("visual_weight")) {
-                    json.put("visual_weight", "visual.mnn.weight")
+                if (!mllm.has("visual_model")) {
+                    mllm.put("visual_model", "visual.mnn")
+                }
+                if (!mllm.has("visual_weight")) {
+                    mllm.put("visual_weight", "visual.mnn.weight")
                 }
                 mergedConfig = json.toString()
+                AppLogger.i("MNN", "config.json inyectado (mllm.visual_model/visual_weight):\n${mergedConfig.take(1200)}")
             } catch (e: Exception) {
-                Log.e(TAG, "Error inyectando visual_model/visual_weight: ${e.message}")
+                AppLogger.e("MNN", "Error inyectando visual_model/visual_weight: ${e.message}")
             }
 
             val extraConfigJson = buildString {
@@ -123,8 +135,9 @@ object MnnLlmBridge {
                 append("\"keep_history\":false")
                 append("}")
             }
+            AppLogger.i("MNN", "extraConfigJson: $extraConfigJson")
 
-            Log.i(TAG, "initNative config=${configFile.absolutePath} mmap=${mmapDir.absolutePath}")
+            AppLogger.i("MNN", "Llamando initNative(config.json)...")
 
             sessionHandle = com.alibaba.mnnllm.android.llm.LlmSession.initNative(
                 configFile.absolutePath,
@@ -134,7 +147,9 @@ object MnnLlmBridge {
             )
 
             if (sessionHandle == 0L || sessionHandle < 0L) {
-                lastInitError = "Error: initNative devolvió handle inválido ($sessionHandle). Revisa logcat nativo (MNN_DEBUG)."
+                lastInitError = "Error: initNative devolvió handle inválido ($sessionHandle). " +
+                    "El modelo descargado no es compatible con las librerías nativas MNN incluidas en la app. " +
+                    "Descarga las librerías MNN actualizadas desde github.com/alibaba/MNN/releases."
                 AppLogger.e("MNN", "❌ initNative devolvió handle=$sessionHandle. La sesión MNN NO está activa.\nEl OCR usará la NUBE como fallback.")
             } else {
                 AppLogger.i("MNN", "✅ Sesión MNN activa. Handle=$sessionHandle\nOCR LOCAL ⚡ disponible desde ahora.")
