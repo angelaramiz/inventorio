@@ -54,14 +54,50 @@ add_library(llama_jni SHARED
     ${LLAMA_CPP_DIR}/tools/mtmd/mtmd-image.cpp
     ${LLAMA_CPP_DIR}/tools/mtmd/mtmd.cpp
     ${LLAMA_CPP_DIR}/tools/mtmd/mtmd-audio.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/mtmd-helper.cpp
     ${LLAMA_CPP_DIR}/tools/mtmd/deprecation-warning.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/cogvlm.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/conformer.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/deepseekocr.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/deepseekocr2.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/dotsocr.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/exaone4_5.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/gemma4a.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/gemma4ua.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/gemma4uv.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/gemma4v.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/glm4v.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/granite-speech.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/granite4-vision.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/hunyuanvl.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/internvl.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/kimik25.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/kimivl.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/llama4.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/llava.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/minicpmv.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/mimovl.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/mobilenetv5.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/nemotron-v2-vl.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/paddleocr.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/pixtral.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/qwen2vl.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/qwen3a.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/qwen3vl.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/siglip.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/step3vl.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/whisper-enc.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/yasa2.cpp
+    ${LLAMA_CPP_DIR}/tools/mtmd/models/youtuvl.cpp
 )
 
 target_include_directories(llama_jni PRIVATE
     ${LLAMA_CPP_DIR}/include
     ${LLAMA_CPP_DIR}/ggml/include
     ${LLAMA_CPP_DIR}/vendor/stb
+    ${LLAMA_CPP_DIR}/vendor
     ${LLAMA_CPP_DIR}/tools/mtmd
+    ${LLAMA_CPP_DIR}/tools/mtmd/models
 )
 
 # Link: ggml (static) + llama (static) + log
@@ -71,11 +107,6 @@ target_link_libraries(llama_jni
     ggml
     llama
     ${log-lib}
-)
-
-# Clip graph vtables use inline virtuals; allow unresolved
-set_target_properties(llama_jni PROPERTIES
-    LINK_FLAGS "-Wl,-z,undefs"
 )
 
 # Strip symbols in release
