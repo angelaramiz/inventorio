@@ -414,7 +414,7 @@ fun MainAppScreen() {
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            "Qwen2.5-VL-3B · Q4_K_M GGUF",
+                            "${LabelOcrEngine.getCurrentConfig().displayName} · GGUF",
                             fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF374151)
                         )
                         if (ocrEngine.isModelReady) {
@@ -776,7 +776,7 @@ fun MainAppScreen() {
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            if (isLocalAi) "El motor nativo de IA local (Qwen2.5-VL-3B via llama.cpp) se ha cargado e inicializado correctamente."
+                            if (isLocalAi) "El motor nativo de IA local (${LabelOcrEngine.getCurrentConfig().displayName} via llama.cpp) se ha cargado e inicializado correctamente."
                             else "Se está utilizando la API en la nube como fallback para las tareas de OCR."
                         )
                         if (err != null) {

@@ -1,8 +1,15 @@
 package com.inventorio.alpha
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -17,42 +24,79 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-/**
- * Diálogo para descargar el modelo Qwen2.5-VL-3B GGUF on-demand.
- * Se muestra automáticamente cuando el usuario toca "Leer Etiqueta"
- * y el modelo no está descargado.
- *
- * @param ocrEngine Motor OCR que gestiona la descarga
- * @param onDismiss Llamado cuando el usuario cancela (modelo no descargado)
- * @param onModelReady Llamado cuando el modelo se descargó exitosamente
- */
 @Composable
 fun ModelDownloadDialog(
     ocrEngine: LabelOcrEngine,
     onDismiss: () -> Unit,
     onModelReady: () -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    val availableModels = LabelOcrEngine.AVAILABLE_MODELS
+    var selectedModelId by remember { mutableStateOf(availableModels.first().id) }
+    val selectedConfig = availableModels.find { it.id == selectedModelId } ?: availableModels.first()
+
     var downloadProgress by remember { mutableStateOf(0) }
     var isDownloading by remember { mutableStateOf(false) }
     var downloadFailed by remember { mutableStateOf(false) }
     var downloadErrorMessage by remember { mutableStateOf("") }
     var downloadComplete by remember { mutableStateOf(false) }
+    var downloadInfo by remember { mutableStateOf("") }
 
     val animatedProgress by animateFloatAsState(
         targetValue = downloadProgress / 100f,
         animationSpec = tween(durationMillis = 300),
         label = "progress"
     )
+
+    // Poll ModelDownloadService shared state instead of broadcasts (more reliable)
+    LaunchedEffect(isDownloading) {
+        while (isDownloading) {
+            downloadProgress = ModelDownloadService.currentProgress
+            downloadInfo = ModelDownloadService.currentInfo
+            if (!ModelDownloadService.isDownloading) {
+                if (ModelDownloadService.downloadSuccess) {
+                    downloadProgress = 100
+                    downloadComplete = true
+                    Thread { ocrEngine.initLocalModel() }.start()
+                } else {
+                    downloadFailed = true
+                    downloadErrorMessage = ModelDownloadService.downloadError
+                }
+                isDownloading = false
+                break
+            }
+            delay(500)
+        }
+    }
+
+    // Permission launcher for POST_NOTIFICATIONS (Android 13+)
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    fun requestNotificationPermAndStart(modelId: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        ModelDownloadService.start(context, modelId)
+    }
 
     Dialog(
         onDismissRequest = { if (!isDownloading) onDismiss() },
@@ -70,7 +114,7 @@ fun ModelDownloadDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
-                // ── Header ────────────────────────────────────────────────────
+                // ── Header ──────────────────────────────────
                 Box(
                     modifier = Modifier
                         .size(64.dp)
@@ -83,19 +127,9 @@ fun ModelDownloadDialog(
                     contentAlignment = Alignment.Center
                 ) {
                     if (downloadComplete) {
-                        Icon(
-                            Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
+                        Icon(Icons.Default.CheckCircle, null, tint = Color.White, modifier = Modifier.size(32.dp))
                     } else {
-                        Icon(
-                            Icons.Default.AutoAwesome,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
+                        Icon(Icons.Default.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(32.dp))
                     }
                 }
 
@@ -117,14 +151,10 @@ fun ModelDownloadDialog(
 
                 Text(
                     text = when {
-                        downloadComplete ->
-                            "Qwen2.5-VL-3B está listo. Ahora puedes leer etiquetas sin conexión a internet."
-                        downloadFailed ->
-                            "No se pudo descargar el modelo.\nDetalle: ${downloadErrorMessage.ifEmpty { "Verifica tu conexión WiFi e intenta de nuevo." }}"
-                        isDownloading ->
-                            "Descargando modelo de visión IA... No cierres la app."
-                        else ->
-                            "Para leer etiquetas sin internet, necesitas descargar el modelo Qwen2.5-VL-3B GGUF (~2.5 GB).\n\nSolo se descarga una vez. Requiere WiFi."
+                        downloadComplete -> "${selectedConfig.displayName} está listo."
+                        downloadFailed -> downloadErrorMessage.ifEmpty { "Verifica tu WiFi." }
+                        isDownloading -> "Descargando en segundo plano...\n${downloadInfo.ifEmpty { "Preparando..." }}"
+                        else -> "Elige un modelo y descárgalo una vez (~${formatSize(selectedConfig.totalBytes)}). Puede continuar con la pantalla apagada."
                     },
                     color = Color(0xFF94A3B8),
                     fontSize = 13.sp,
@@ -132,98 +162,91 @@ fun ModelDownloadDialog(
                     lineHeight = 19.sp
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                // ── Progreso ──────────────────────────────────────────────────
+                // ── Model selector ──────────────────────────
+                if (!isDownloading && !downloadComplete) {
+                    Text("Selecciona el modelo:", color = Color(0xFF64748B), fontSize = 11.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    availableModels.forEach { model ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (model.id == selectedModelId) Color(0xFF1E293B) else Color.Transparent
+                                )
+                                .then(
+                                    if (model.id == selectedModelId)
+                                        Modifier.border(1.dp, Color(0xFF7C3AED), RoundedCornerShape(10.dp))
+                                    else Modifier
+                                )
+                                .clickable { selectedModelId = model.id }
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(model.displayName, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("~${formatSize(model.totalBytes)}", color = Color(0xFF64748B), fontSize = 11.sp)
+                            }
+                            if (model.id == selectedModelId) {
+                                Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF7C3AED), modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // ── Progreso ────────────────────────────────
                 if (isDownloading || downloadComplete) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Barra de progreso
                         LinearProgressIndicator(
                             progress = { animatedProgress },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp)),
+                            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
                             color = Color(0xFF7C3AED),
                             trackColor = Color(0xFF1E293B)
                         )
-
                         Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = if (downloadComplete) "Completado" else "$downloadProgress%",
-                                color = Color(0xFF7C3AED),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                            Text(
-                                text = "~2 GB total",
-                                color = Color(0xFF475569),
-                                fontSize = 12.sp
-                            )
-                        }
+                        Text(
+                            text = if (downloadComplete) "Completado" else "$downloadProgress%",
+                            color = Color(0xFF7C3AED),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
                     }
-
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                // ── Aviso de WiFi (solo antes de descargar) ───────────────────
+                // ── WiFi warning ────────────────────────────
                 if (!isDownloading && !downloadComplete && !downloadFailed) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth()
                             .background(Color(0xFF1E293B), RoundedCornerShape(10.dp))
                             .padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            Icons.Default.Wifi,
-                            contentDescription = null,
-                            tint = Color(0xFF38BDF8),
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Icon(Icons.Default.Wifi, null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            "Recomendado: conectar a WiFi antes de descargar",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 11.sp
-                        )
+                        Text("Recomendado: WiFi. La descarga continúa con pantalla apagada.",
+                            color = Color(0xFF94A3B8), fontSize = 11.sp)
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                // ── Información del modelo ────────────────────────────────────
-                if (!isDownloading && !downloadComplete) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF1E293B), RoundedCornerShape(10.dp))
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        ModelInfoChip("Modelo", "Qwen2.5-VL-3B")
-                        ModelInfoChip("Formato", "GGUF Q4_K_M")
-                        ModelInfoChip("Tamaño", "~2 GB")
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                // ── Botones ───────────────────────────────────────────────────
+                // ── Botones ─────────────────────────────────
                 when {
                     downloadComplete -> {
                         Button(
-                            onClick = onModelReady,
+                            onClick = {
+                                LabelOcrEngine.setCurrentConfig(selectedConfig)
+                                onModelReady()
+                            },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF7C3AED)
-                            ),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp))
@@ -238,34 +261,13 @@ fun ModelDownloadDialog(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp)
                             ) { Text("Cancelar", color = Color(0xFF94A3B8)) }
-
-                            Button(
-                                onClick = {
-                                    downloadFailed = false
-                                    downloadErrorMessage = ""
-                                    isDownloading = true
-                                    downloadProgress = 0
-                                    scope.launch(Dispatchers.IO) {
-                                        ocrEngine.downloadModel(
-                                            onProgress = { progress ->
-                                                scope.launch(Dispatchers.Main) {
-                                                    downloadProgress = progress
-                                                }
-                                            },
-                                            onDone = { success, errorMsg ->
-                                                scope.launch(Dispatchers.Main) {
-                                                    isDownloading = false
-                                                    if (success) {
-                                                        downloadComplete = true
-                                                    } else {
-                                                        downloadFailed = true
-                                                        downloadErrorMessage = errorMsg
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
-                                },
+                                Button(
+                                    onClick = {
+                                        downloadFailed = false; downloadErrorMessage = ""
+                                        isDownloading = true; downloadProgress = 0
+                                        LabelOcrEngine.setCurrentConfig(selectedConfig)
+                                        requestNotificationPermAndStart(selectedModelId)
+                                    },
                                 modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
                                 shape = RoundedCornerShape(12.dp)
@@ -273,58 +275,32 @@ fun ModelDownloadDialog(
                         }
                     }
                     isDownloading -> {
-                        OutlinedButton(
-                            onClick = { /* No permitir cancelar durante descarga activa */ },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = false,
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = Color(0xFF7C3AED)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text("Descargando...", color = Color(0xFF475569))
+                        // Background download info
+                        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("La descarga continúa en segundo plano",
+                                color = Color(0xFF64748B), fontSize = 11.sp)
+                            Spacer(Modifier.height(4.dp))
+                            OutlinedButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("Cerrar diálogo", color = Color(0xFF94A3B8)) }
                         }
                     }
                     else -> {
-                        // Estado inicial: ofrecer descarga
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 onClick = onDismiss,
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp)
                             ) { Text("Ahora no", color = Color(0xFF94A3B8)) }
-
                             Button(
                                 onClick = {
                                     isDownloading = true
                                     downloadErrorMessage = ""
-                                    scope.launch(Dispatchers.IO) {
-                                        ocrEngine.downloadModel(
-                                            onProgress = { progress ->
-                                                scope.launch(Dispatchers.Main) {
-                                                    downloadProgress = progress
-                                                }
-                                            },
-                                            onDone = { success, errorMsg ->
-                                                scope.launch(Dispatchers.Main) {
-                                                    isDownloading = false
-                                                    if (success) {
-                                                        downloadComplete = true
-                                                        // Init native model in background
-                                                        scope.launch(Dispatchers.IO) {
-                                                            ocrEngine.initLocalModel()
-                                                        }
-                                                    } else {
-                                                        downloadFailed = true
-                                                        downloadErrorMessage = errorMsg
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
+                                    downloadProgress = 0
+                                    LabelOcrEngine.setCurrentConfig(selectedConfig)
+                                    requestNotificationPermAndStart(selectedModelId)
                                 },
                                 modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
@@ -342,10 +318,8 @@ fun ModelDownloadDialog(
     }
 }
 
-@Composable
-private fun ModelInfoChip(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = Color(0xFF475569), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-        Text(value, color = Color(0xFFCBD5E1), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-    }
+private fun formatSize(bytes: Long): String = when {
+    bytes >= 1_000_000_000L -> "%.1f GB".format(bytes / 1_000_000_000.0)
+    bytes >= 1_000_000L -> "%.0f MB".format(bytes / 1_000_000.0)
+    else -> "${bytes / 1_000} KB"
 }

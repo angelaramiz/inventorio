@@ -32,16 +32,54 @@ class LabelOcrEngine(
 ) {
     companion object {
         private const val TAG = "LabelOcrEngine"
-        private const val MODEL_DIR_NAME = "qwen_gguf_model"
 
-        // Qwen2.5-VL-3B-Instruct GGUF Q4_K_M (~2.3 GB + ~500 MB mmproj)
+        // ─── Model configs ───────────────────────────────────────
+
+        data class ModelConfig(
+            val id: String,
+            val displayName: String,
+            val ggufFileName: String,
+            val mmprojFileName: String,
+            val baseUrl: String,
+            val dirName: String,
+            val totalBytes: Long
+        ) {
+            val ggufUrl get() = "$baseUrl/$ggufFileName"
+            val mmprojUrl get() = "$baseUrl/$mmprojFileName"
+
+            fun destDir(context: Context): File =
+                File(context.filesDir, dirName)
+        }
+
+        val MODEL_QWEN25_7B = ModelConfig(
+            id = "qwen2.5-vl-7b-q4km",
+            displayName = "Qwen2.5-VL 7B Q4_K_M",
+            ggufFileName = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+            mmprojFileName = "mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf",
+            baseUrl = "https://huggingface.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main",
+            dirName = "qwen_gguf_model",
+            totalBytes = 5_000_000_000L
+        )
+
+        val AVAILABLE_MODELS = listOf(MODEL_QWEN25_7B)
+        private var currentConfig: ModelConfig = MODEL_QWEN25_7B
+
+        fun getModelConfig(id: String): ModelConfig? =
+            AVAILABLE_MODELS.find { it.id == id }
+
+        fun getCurrentConfig(): ModelConfig = currentConfig
+
+        fun setCurrentConfig(config: ModelConfig) {
+            currentConfig = config
+        }
+
+        // ─── Backward compat helpers ────────────────────────────
+
+        private const val MODEL_DIR_NAME = "qwen_gguf_model"
         private const val GGUF_FILE_NAME = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
         private const val MMPROJ_FILE_NAME = "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf"
-
-        // ggml-org (llama.cpp official) — público, sin auth requerida
         private const val HF_BASE_URL =
             "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main"
-
         private val MODEL_FILES = listOf(GGUF_FILE_NAME, MMPROJ_FILE_NAME)
 
         private val LABEL_EXTRACTION_PROMPT = """
@@ -61,13 +99,13 @@ class LabelOcrEngine(
     // ─── Estado público ──────────────────────────────────────────
 
     val modelDir: File
-        get() = File(context.filesDir, MODEL_DIR_NAME)
+        get() = File(context.filesDir, currentConfig.dirName)
 
     val ggufFile: File
-        get() = File(modelDir, GGUF_FILE_NAME)
+        get() = File(modelDir, currentConfig.ggufFileName)
 
     val mmprojFile: File
-        get() = File(modelDir, MMPROJ_FILE_NAME)
+        get() = File(modelDir, currentConfig.mmprojFileName)
 
     val isModelReady: Boolean
         get() = ggufFile.exists() && ggufFile.length() > 1024 * 1024 * 100 // >100MB

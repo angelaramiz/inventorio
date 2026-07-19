@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { 
-  Boxes, Package, Scan, LayoutDashboard, Tag, Warehouse, TrendingUp, Settings
+  Boxes, Package, Scan, LayoutDashboard, Tag, Warehouse, TrendingUp, Settings, Layers, ArrowRightLeft
 } from "lucide-react";
 import InventoryView from "./components/InventoryView";
 import CajasView from "./components/CajasView";
 import ScannerView from "./components/ScannerView";
+import BatchOcrView from "./components/BatchOcrView";
+import TransferFormatView from "./components/TransferFormatView";
 import ConceptosView from "./components/ConceptosView";
 import AlmacenView from "./components/AlmacenView";
 import SettingsView from "./components/SettingsView";
@@ -173,6 +175,18 @@ export default function App() {
                 label="Escanear"
               />
               <TabButton 
+                active={activeTab === "batch"} 
+                onClick={() => setActiveTab("batch")}
+                icon={<Layers size={15} />}
+                label="Lote"
+              />
+              <TabButton 
+                active={activeTab === "transfer"} 
+                onClick={() => setActiveTab("transfer")}
+                icon={<ArrowRightLeft size={15} />}
+                label="Transferir"
+              />
+              <TabButton 
                 active={activeTab === "inventory"} 
                 onClick={() => setActiveTab("inventory")}
                 icon={<Package size={15} />}
@@ -223,6 +237,18 @@ export default function App() {
             label="Escanear"
           />
           <TabButton 
+            active={activeTab === "batch"} 
+            onClick={() => setActiveTab("batch")}
+            icon={<Layers size={15} />}
+            label="Lote"
+          />
+          <TabButton 
+            active={activeTab === "transfer"} 
+            onClick={() => setActiveTab("transfer")}
+            icon={<ArrowRightLeft size={15} />}
+            label="Transferir"
+          />
+          <TabButton 
             active={activeTab === "inventory"} 
             onClick={() => setActiveTab("inventory")}
             icon={<Package size={15} />}
@@ -266,6 +292,8 @@ export default function App() {
           >
             {activeTab === "dashboard" && <AlphaDashboardView />}
             {activeTab === "scanner" && <ScannerView />}
+            {activeTab === "batch" && <BatchOcrView />}
+            {activeTab === "transfer" && <TransferFormatView />}
             {activeTab === "inventory" && <InventoryView />}
             {activeTab === "boxes" && <CajasView />}
             {activeTab === "concepts" && <ConceptosView />}
@@ -288,6 +316,18 @@ export default function App() {
           onClick={() => setActiveTab("scanner")}
           icon={<Scan size={20} />}
           label="Scan"
+        />
+        <MobileNavButton 
+          active={activeTab === "batch"} 
+          onClick={() => setActiveTab("batch")}
+          icon={<Layers size={20} />}
+          label="Lote"
+        />
+        <MobileNavButton 
+          active={activeTab === "transfer"} 
+          onClick={() => setActiveTab("transfer")}
+          icon={<ArrowRightLeft size={20} />}
+          label="Transferir"
         />
         <MobileNavButton 
           active={activeTab === "inventory"} 

@@ -9,6 +9,126 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
+// ─── Groq OCR Service ────────────────────────────────────────────
+
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+const GROQ_MODEL = process.env.GROQ_MODEL || "qwen/qwen3.6-27b";
+
+const OCR_SYSTEM_PROMPT = `Analiza la foto de esta etiqueta de ropa. Extrae SOLO estos campos en JSON válido sin texto adicional:
+{
+  "marca": "nombre de marca o null",
+  "talla": "talla (S/M/L/XL/número) o null",
+  "sku": "código numérico o null",
+  "modelo_grupo": "código de modelo base (NO incluir color si está separado por guion) o null",
+  "codigo_color": "código de color o null",
+  "fecha_temporada": "fecha/temporada o null",
+  "tipo_producto": "tipo de prenda (Playera, Jeans, Calzado, etc.) o null"
+}`;
+
+interface OcrFields {
+  marca: string | null;
+  talla: string | null;
+  sku: string | null;
+  modelo_grupo: string | null;
+  codigo_color: string | null;
+  fecha_temporada: string | null;
+  tipo_producto?: string | null;
+}
+
+async function groqOcr(imageBase64: string, mimeType: string): Promise<OcrFields> {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${GROQ_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: OCR_SYSTEM_PROMPT },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } }
+        ]
+      }],
+      temperature: 0.1,
+      max_tokens: 512,
+    })
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => "");
+    throw new Error(`Groq ${response.status}: ${errBody.slice(0, 200)}`);
+  }
+
+  const data = await response.json() as any;
+  const content = data?.choices?.[0]?.message?.content || "";
+  
+  // Parse JSON from response (may have markdown wrapping)
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Groq response has no JSON: " + content.slice(0, 100));
+  
+  return JSON.parse(jsonMatch[0]);
+}
+
+function parseModelColor(result: OcrFields): OcrFields {
+  let modelo = result.modelo_grupo || "";
+  let color = result.codigo_color || "";
+  if (modelo.includes("-")) {
+    const parts = modelo.split("-");
+    modelo = parts[0].trim();
+    if (!color) color = parts.slice(1).join("-").trim();
+  }
+  return { ...result, modelo_grupo: modelo || null, codigo_color: color || null };
+}
+
+async function runOcrWithFallback(imageBase64: string, mimeType: string): Promise<OcrFields> {
+  // Try Groq first
+  if (GROQ_API_KEY) {
+    try {
+      console.log("[OCR] Trying Groq...");
+      const result = await groqOcr(imageBase64, mimeType);
+      console.log("[OCR] Groq success:", JSON.stringify(result).slice(0, 120));
+      return parseModelColor(result);
+    } catch (e: any) {
+      console.warn("[OCR] Groq failed:", e.message?.slice(0, 120));
+    }
+  }
+
+  // Fallback to Gemini
+  console.log("[OCR] Falling back to Gemini...");
+  const geminiKey = process.env.GEMINI_API_KEY || "";
+  if (!geminiKey) throw new Error("No OCR API keys configured");
+
+  const ai = new GoogleGenerativeAI(geminiKey);
+  const model = ai.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: SchemaType.OBJECT,
+        properties: {
+          modelo_grupo: { type: SchemaType.STRING },
+          codigo_color: { type: SchemaType.STRING },
+          fecha_temporada: { type: SchemaType.STRING },
+          sku: { type: SchemaType.STRING },
+          marca: { type: SchemaType.STRING },
+          talla: { type: SchemaType.STRING },
+        },
+        required: ["modelo_grupo"]
+      }
+    }
+  });
+
+  const imagePart = { inlineData: { data: imageBase64, mimeType } };
+  const prompt = OCR_SYSTEM_PROMPT;
+  
+  const result = await model.generateContent([prompt, imagePart]);
+  const text = result.response.text();
+  console.log("[OCR] Gemini success:", text.slice(0, 120));
+  return parseModelColor(JSON.parse(text));
+}
+
 // In-memory event emitter for real-time stock updates
 const stockEvents = new EventEmitter();
 stockEvents.setMaxListeners(100);
@@ -3737,82 +3857,23 @@ function ocrRateLimiter(req: any, res: any, next: any) {
   next();
 }
 
-// POST /api/ocr/extract-label - Extract information from a label image using Gemini 1.5 Flash
+// POST /api/ocr/extract-label - Multi-provider OCR (Groq → Gemini fallback)
 app.post("/api/ocr/extract-label", ocrRateLimiter, upload.single("foto"), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: "No se recibió ninguna imagen de etiqueta" });
+      return res.status(400).json({ error: "No se recibió ninguna imagen" });
     }
 
-    // Enforce strict mime-type validation to prevent uploading malicious or unsupported files
     const allowedMimeTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"];
     if (!allowedMimeTypes.includes(req.file.mimetype.toLowerCase())) {
       return res.status(400).json({ error: "Solo se permiten imágenes (JPEG, PNG, WEBP, GIF)" });
     }
 
-    const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-
-    // Convert label image buffer to base64
-    const imagePart = {
-      inlineData: {
-        data: req.file.buffer.toString("base64"),
-        mimeType: req.file.mimetype
-      }
-    };
-
-    const prompt = `
-      Analiza detenidamente la foto de esta etiqueta de ropa. Identifica y extrae la información relevante.
-      Devuelve los datos estrictamente en formato JSON adaptando la respuesta a esta estructura:
-      - modelo_grupo: Código de modelo base, estilo o referencia de la prenda (ej: GMSIROCCO, gmYUJEN2, gwVALICE). NO incluyas el código de color aquí si está separado por un guion.
-      - codigo_color: Código de color si está presente o si viene después de un guion en el modelo (ej: N, F1PV, BLK).
-      - fecha_temporada: Fecha, año o mes de temporada si está impreso en la etiqueta (ej: 2026-05, SP26, FA26).
-      - sku: Código de barras numérico impreso en la etiqueta (típicamente UPC o EAN-13 de 12 o 13 dígitos, ej: 199593307730) si se encuentra. Si no se encuentra un código de barras numérico, omítelo.
-      - marca: Marca identificada (GUESS, MARCIANO, etc.).
-      - talla: Talla de la prenda (ej: S, M, L, XL, 32, 34).
-      - tipo_producto: Tipo de prenda (ej: Playera, Jeans, Camisa, Vestido, Gorra).
-    `;
-
-    const model = ai.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: SchemaType.OBJECT,
-          properties: {
-            modelo_grupo: { type: SchemaType.STRING },
-            codigo_color: { type: SchemaType.STRING },
-            fecha_temporada: { type: SchemaType.STRING },
-            sku: { type: SchemaType.STRING },
-            marca: { type: SchemaType.STRING },
-            talla: { type: SchemaType.STRING },
-            tipo_producto: { type: SchemaType.STRING }
-          },
-          required: ["modelo_grupo"]
-        }
-      }
-    });
-
-    const result = await model.generateContent([prompt, imagePart]);
-    const responseText = result.response.text();
-    
-    const extractedData = JSON.parse(responseText);
-    
-    // Parse modelo y codigo_color si contiene un guion "-"
-    let modelo = extractedData.modelo_grupo || "";
-    let color = extractedData.codigo_color || "";
-    if (modelo.includes("-")) {
-      const parts = modelo.split("-");
-      modelo = parts[0].trim();
-      if (!color) {
-        color = parts[1].trim();
-      }
-    }
-    extractedData.modelo_grupo = modelo;
-    extractedData.codigo_color = color;
-    
+    const imageBase64 = req.file.buffer.toString("base64");
+    const extractedData = await runOcrWithFallback(imageBase64, req.file.mimetype);
     res.json(extractedData);
   } catch (error: any) {
-    console.error("Error al procesar etiqueta con Gemini:", error);
+    console.error("Error en OCR:", error.message?.slice(0, 200));
     res.status(500).json({ error: error.message || "Error al analizar la etiqueta" });
   }
 });
@@ -4118,74 +4179,24 @@ app.post("/api/productos/search-web-image", async (req, res) => {
   }
 });
 
-// POST /api/productos/batch-ocr - Batch OCR process label images using Gemini
+// POST /api/productos/batch-ocr - Batch OCR (Groq → Gemini fallback)
 app.post("/api/productos/batch-ocr", upload.array("fotos", 50), async (req, res) => {
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
-      return res.status(400).json({ error: "No se recibieron imágenes de etiquetas" });
+      return res.status(400).json({ error: "No se recibieron imágenes" });
     }
     
     const supabase = getSupabase();
-    const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
     const parsedProducts: any[] = [];
     
     for (const file of files) {
       try {
-        const imagePart = {
-          inlineData: {
-            data: file.buffer.toString("base64"),
-            mimeType: file.mimetype
-          }
-        };
-        
-        const prompt = `
-          Analiza detenidamente la foto de esta etiqueta de ropa. Identifica y extrae la información relevante.
-          Devuelve los datos estrictamente en formato JSON adaptando la respuesta a esta estructura:
-          - modelo_grupo: Código de modelo base, estilo o referencia de la prenda (ej: W6YK53Z1031, GMSIROCCO). NO incluyas el código de color si viene separado por un guion en la etiqueta.
-          - codigo_color: Código de color de la prenda (ej: F1PV, N, BLK).
-          - fecha_temporada: Fecha, año o mes de temporada si está impreso (ej: 2026-05, SP26, SU26, FA26).
-          - sku: Código de barras numérico impreso en la etiqueta (ej: 199593307730) si se encuentra.
-          - marca: Marca identificada (GUESS, etc.).
-          - talla: Talla de la prenda (ej: S, M, L, XL).
-          - tipo_producto: Tipo de prenda (ej: Playera, Jeans, Calzado).
-        `;
-        
-        const model = ai.getGenerativeModel({
-          model: "gemini-2.5-flash",
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: SchemaType.OBJECT,
-              properties: {
-                modelo_grupo: { type: SchemaType.STRING },
-                codigo_color: { type: SchemaType.STRING },
-                fecha_temporada: { type: SchemaType.STRING },
-                sku: { type: SchemaType.STRING },
-                marca: { type: SchemaType.STRING },
-                talla: { type: SchemaType.STRING },
-                tipo_producto: { type: SchemaType.STRING }
-              },
-              required: ["modelo_grupo"]
-            }
-          }
-        });
-        
-        const result = await model.generateContent([prompt, imagePart]);
-        const responseText = result.response.text();
-        const rawData = JSON.parse(responseText);
+        const imageBase64 = file.buffer.toString("base64");
+        const rawData = await runOcrWithFallback(imageBase64, file.mimetype);
         
         let modelo = rawData.modelo_grupo || "";
         let colorCode = rawData.codigo_color || "";
-        
-        // Parse modelo y codigo_color si contiene un guion "-"
-        if (modelo.includes("-")) {
-          const parts = modelo.split("-");
-          modelo = parts[0].trim();
-          if (!colorCode) {
-            colorCode = parts[1].trim();
-          }
-        }
         
         // Lógica inteligente de género
         let genero = "unisex";
