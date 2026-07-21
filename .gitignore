@@ -49,3 +49,4 @@ test_db.ts
 apps movil/
 AGENTS.md
 .env.production
+opencode.json

@@ -4047,102 +4047,106 @@ app.post("/api/productos/search-web-image", async (req, res) => {
         job.progress = 40;
         
         // Background search helper
-        const searchProductImage = async (q: string, sources: string[]): Promise<Buffer | null> => {
-          // Helper to extract product image from HTML
-          const extractProductImage = (htmlContent: string): string | null => {
-            // 1. OpenGraph Image
-            const ogMatch = htmlContent.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
-                            htmlContent.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
-            if (ogMatch && ogMatch[1]) return ogMatch[1];
+          const searchProductImage = async (q: string, sources: string[]): Promise<Buffer | null> => {
+            const logoKeywords = ["logo", "icon", "favicon", "banner", "avatar", "spacer", "pixel", "placeholder", "sprite"];
+            const isLogoUrl = (url: string) => logoKeywords.some(k => url.toLowerCase().includes(k)) || url.endsWith(".gif") || url.endsWith(".svg");
 
-            // 2. Twitter Image
-            const twitterMatch = htmlContent.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i) ||
-                                htmlContent.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i);
-            if (twitterMatch && twitterMatch[1]) return twitterMatch[1];
-
-            // 3. Schema.org JSON-LD
-            const ldJsonMatches = htmlContent.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
-            if (ldJsonMatches) {
-              for (const ldJsonMatch of ldJsonMatches) {
-                try {
-                  const contentMatch = ldJsonMatch.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
-                  if (contentMatch && contentMatch[1]) {
-                    const json = JSON.parse(contentMatch[1]);
-                    if (json.image) {
-                      if (typeof json.image === 'string') return json.image;
-                      if (Array.isArray(json.image) && json.image.length > 0) return json.image[0];
-                      if (typeof json.image === 'object' && json.image.url) return json.image.url;
+            // Helper to extract product image from HTML — og:image is last resort (usually logo on search pages)
+            const extractProductImage = (htmlContent: string): string | null => {
+              // 1. Schema.org JSON-LD (structured data, most reliable)
+              const ldJsonMatches = htmlContent.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+              if (ldJsonMatches) {
+                for (const ldJsonMatch of ldJsonMatches) {
+                  try {
+                    const contentMatch = ldJsonMatch.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
+                    if (contentMatch && contentMatch[1]) {
+                      const json = JSON.parse(contentMatch[1]);
+                      if (json.image) {
+                        if (typeof json.image === 'string' && !isLogoUrl(json.image)) return json.image;
+                        if (Array.isArray(json.image) && json.image.length > 0 && !isLogoUrl(json.image[0])) return json.image[0];
+                        if (typeof json.image === 'object' && json.image.url && !isLogoUrl(json.image.url)) return json.image.url;
+                      }
                     }
-                  }
-                } catch (e) {
-                  // ignore JSON parse errors
-                }
-              }
-            }
-
-            // 4. Fallback to image tag with specific class patterns
-            const productImgMatches = htmlContent.match(/<img[^>]+(?:class|id)=["'][^"']*(?:product-gallery__media|product-image|main-image|primary-image|gallery)[^"']*["'][^>]+src=["'](https?:\/\/[^"']+)["']/i) ||
-                                       htmlContent.match(/<img[^>]+src=["'](https?:\/\/[^"']+)["'][^>]+(?:class|id)=["'][^"']*(?:product-gallery__media|product-image|main-image|primary-image|gallery)[^"']*["']/i);
-            if (productImgMatches && productImgMatches[1]) return productImgMatches[1];
-
-            return null;
-          };
-
-          for (const source of sources) {
-            try {
-              const url = source.replace("{q}", encodeURIComponent(q));
-              const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-              if (!resp.ok) continue;
-              
-              const contentType = resp.headers.get("content-type") || "";
-              if (contentType.startsWith("image/")) {
-                return Buffer.from(await resp.arrayBuffer());
-              }
-
-              const html = await resp.text();
-
-              // Try high-priority OG/Schema/Class image first
-              const bestImgUrl = extractProductImage(html);
-              if (bestImgUrl) {
-                const imgResp = await fetch(bestImgUrl);
-                if (imgResp.ok) {
-                  return Buffer.from(await imgResp.arrayBuffer());
+                  } catch (e) { /* ignore JSON parse errors */ }
                 }
               }
 
-              const imgRegex = /<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi;
+              // 2. Image tags with specific product class/ID patterns
+              const classMatch = htmlContent.match(/<img[^>]+(?:class|id)=["'][^"']*(?:product-gallery__media|product-image|main-image|primary-image|gallery|product__img|item-image|product-hero)[^"']*["'][^>]+src=["'](https?:\/\/[^"']+)["']/i) ||
+                                htmlContent.match(/<img[^>]+src=["'](https?:\/\/[^"']+)["'][^>]+(?:class|id)=["'][^"']*(?:product-gallery__media|product-image|main-image|primary-image|gallery|product__img|item-image|product-hero)[^"']*["']/i);
+              if (classMatch && classMatch[1] && !isLogoUrl(classMatch[1])) return classMatch[1];
+
+              // 3. Scan ALL img tags — pick the best (largest dimensions, filter out logos/icons)
+              const imgRegex = /<img[^>]+src=["'](https?:\/\/[^"']+)["'][^>]*/gi;
               let match;
-              while ((match = imgRegex.exec(html)) !== null) {
+              let bestImgUrl: string | null = null;
+              let bestScore = 0;
+              while ((match = imgRegex.exec(htmlContent)) !== null) {
                 const imgUrl = match[1];
-                if (imgUrl.includes("logo") || imgUrl.includes("icon") || imgUrl.endsWith(".gif")) continue;
-                const imgResp = await fetch(imgUrl);
-                if (imgResp.ok) {
-                  return Buffer.from(await imgResp.arrayBuffer());
-                }
+                const imgTag = match[0];
+                if (isLogoUrl(imgUrl)) continue;
+
+                let score = 1;
+                const w = parseInt(imgTag.match(/width["']?\s*[:=]\s*["']?(\d+)/i)?.[1] || "0");
+                const h = parseInt(imgTag.match(/height["']?\s*[:=]\s*["']?(\d+)/i)?.[1] || "0");
+                if (w > 50 && h > 50) score = w * h;
+                else if (!imgUrl.includes("thumb") && !imgUrl.includes("small")) score = 100;
+
+                // Prefer images with "product" or "full" in path
+                if (/product|full|large|zoom|hi[-_]?res|original/i.test(imgUrl)) score *= 2;
+
+                if (score > bestScore) { bestScore = score; bestImgUrl = imgUrl; }
               }
-            } catch (e) {
-              console.error("Custom source failed:", e);
+              if (bestImgUrl) return bestImgUrl;
+
+              // 4. og:image — last resort, usually the site logo on search/category pages
+              const ogMatch = htmlContent.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+                              htmlContent.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+              if (ogMatch && ogMatch[1] && !isLogoUrl(ogMatch[1])) return ogMatch[1];
+
+              // 5. twitter:image — absolute last resort
+              const twitterMatch = htmlContent.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i) ||
+                                  htmlContent.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i);
+              if (twitterMatch && twitterMatch[1] && !isLogoUrl(twitterMatch[1])) return twitterMatch[1];
+
+              return null;
+            };
+
+            for (const source of sources) {
+              try {
+                const url = source.replace("{q}", encodeURIComponent(q));
+                const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+                if (!resp.ok) continue;
+                
+                const contentType = resp.headers.get("content-type") || "";
+                if (contentType.startsWith("image/")) {
+                  return Buffer.from(await resp.arrayBuffer());
+                }
+
+                const html = await resp.text();
+
+                // Extract best candidate image (img tags prioritized over og:image)
+                const bestImgUrl = extractProductImage(html);
+                if (bestImgUrl) {
+                  const imgResp = await fetch(bestImgUrl);
+                  if (imgResp.ok) {
+                    return Buffer.from(await imgResp.arrayBuffer());
+                  }
+                }
+              } catch (e) {
+                console.error("Custom source failed:", e);
+              }
             }
-          }
-          // Fallback to DuckDuckGo HTML search
+          // Fallback to DuckDuckGo image search API
           try {
-            const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q + " clothing product image")}`;
+            const searchUrl = `https://duckduckgo.com/i.js?q=${encodeURIComponent(q + " clothing product")}&o=json`;
             const resp = await fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
             if (resp.ok) {
-              const html = await resp.text();
-              const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
-              let match;
-              while ((match = imgRegex.exec(html)) !== null) {
-                const imgUrl = match[1];
-                if (
-                  imgUrl.includes("logo") || 
-                  imgUrl.includes("icon") || 
-                  imgUrl.includes("favicon") || 
-                  imgUrl.includes("duckduckgo") ||
-                  imgUrl.endsWith(".ico") ||
-                  imgUrl.endsWith(".gif")
-                ) continue;
-                
+              const data = await resp.json();
+              const results: any[] = data.results || data.image || [];
+              for (const item of results) {
+                const imgUrl = item.image || item.thumbnail || item.url || "";
+                if (!imgUrl || isLogoUrl(imgUrl)) continue;
                 const finalUrl = imgUrl.startsWith("//") ? "https:" + imgUrl : imgUrl;
                 const imgResp = await fetch(finalUrl);
                 if (imgResp.ok) {
@@ -4151,7 +4155,7 @@ app.post("/api/productos/search-web-image", async (req, res) => {
               }
             }
           } catch (e) {
-            console.error("DuckDuckGo fallback search failed:", e);
+            console.error("DuckDuckGo image API search failed:", e);
           }
           return null;
         };
