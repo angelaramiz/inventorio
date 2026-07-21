@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { Upload, X, Play, Check, AlertCircle, Loader2, Save, Pencil, Trash2, Package, ImagePlus } from "lucide-react";
+import { Upload, X, Play, Check, AlertCircle, Loader2, Save, Pencil, Trash2, Package, ImagePlus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 interface OcrItem {
@@ -7,8 +7,10 @@ interface OcrItem {
   file: File;
   preview: string;
   status: "pending" | "processing" | "success" | "error";
+  barcode?: string;
   result?: OcrResult;
   error?: string;
+  retryCount: number;
 }
 
 interface OcrResult {
@@ -26,6 +28,7 @@ export default function BatchOcrView() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<OcrResult>>({});
+  const [rpmLimit, setRpmLimit] = useState(5);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const serverUrl = localStorage.getItem("serverUrl") || "";
 
@@ -42,6 +45,10 @@ export default function BatchOcrView() {
     return res.json();
   }, [serverUrl]);
 
+  const updateItem = (id: string, patch: Partial<OcrItem>) => {
+    setItems(prev => prev.map(i => i.id === id ? { ...i, ...patch } : i));
+  };
+
   const addImages = (files: FileList) => {
     const newItems: OcrItem[] = Array.from(files)
       .filter(f => f.type.startsWith("image/"))
@@ -50,6 +57,7 @@ export default function BatchOcrView() {
         file: f,
         preview: URL.createObjectURL(f),
         status: "pending" as const,
+        retryCount: 0,
       }));
     setItems(prev => [...prev, ...newItems]);
   };
@@ -58,45 +66,90 @@ export default function BatchOcrView() {
     setItems(prev => prev.filter(i => i.id !== id));
   };
 
+  const findResolvedSibling = (barcode: string): OcrItem | undefined => {
+    return items.find(i => i.barcode === barcode && i.status === "success");
+  };
+
+  const processSingleItem = async (item: OcrItem, signal: AbortSignal): Promise<Partial<OcrItem>> => {
+    try {
+      const formData = new FormData();
+      formData.append("foto", item.file, item.file.name || "label.jpg");
+
+      const result = await api("/api/ocr/extract-label", {
+        method: "POST",
+        body: formData,
+        signal,
+      });
+
+      return { status: "success", result };
+    } catch (e: any) {
+      if (e.name === "AbortError") throw e;
+      return { status: item.retryCount < 2 ? "pending" as const : "error" as const, error: e.message, retryCount: item.retryCount + 1 };
+    }
+  };
+
   const startProcessing = async () => {
     const pending = items.filter(i => i.status === "pending");
     if (pending.length === 0) return;
 
     setIsProcessing(true);
+    const delayMs = Math.round(60_000 / Math.max(1, Math.min(15, rpmLimit)));
+
+    // Mark all pending as processing
     setItems(prev => prev.map(i =>
       i.status === "pending" ? { ...i, status: "processing" } : i
     ));
 
     for (const item of pending) {
-      setItems(prev => prev.map(i =>
-        i.id === item.id ? { ...i, status: "processing" } : i
-      ));
+      if (item.status !== "pending") continue;
 
-      try {
-        const formData = new FormData();
-        formData.append("foto", item.file, item.file.name || "label.jpg");
+      // Pre-check: dedup via barcode (simulated — barcode not extracted client-side)
+      // In a full web version this would use ZXing or similar
+      const sibling = item.barcode ? findResolvedSibling(item.barcode) : undefined;
+      if (sibling && sibling.result) {
+        updateItem(item.id, { status: "success", result: sibling.result, barcode: item.barcode });
+        continue;
+      }
 
-        const result = await api("/api/ocr/extract-label", {
-          method: "POST",
-          body: formData,
-        });
+      const startTime = Date.now();
 
-        setItems(prev => prev.map(i =>
-          i.id === item.id
-            ? { ...i, status: "success", result }
-            : i
-        ));
-      } catch (e: any) {
-        setItems(prev => prev.map(i =>
-          i.id === item.id
-            ? { ...i, status: "error", error: e.message }
-            : i
-        ));
+      // Retry loop
+      let currentItem = { ...item, status: "processing" as const };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        updateItem(currentItem.id, { status: "processing", retryCount: attempt });
+
+        const result = await processSingleItem(currentItem, new AbortController().signal);
+
+        if (result.status === "success") {
+          updateItem(currentItem.id, { status: "success", result: result.result, error: undefined });
+          break;
+        }
+
+        if (result.status !== "pending") {
+          updateItem(currentItem.id, { status: "error", error: result.error, retryCount: attempt + 1 });
+          break;
+        }
+
+        // Exponential backoff
+        const backoff = 2000 * (attempt + 1);
+        await new Promise(r => setTimeout(r, backoff));
+        currentItem = { ...currentItem, retryCount: attempt + 1 };
+      }
+
+      // RPM throttle
+      const elapsed = Date.now() - startTime;
+      const remaining = delayMs - elapsed;
+      if (remaining > 0) {
+        await new Promise(r => setTimeout(r, remaining));
       }
     }
 
     setIsProcessing(false);
     toast.success("Procesamiento completado");
+  };
+
+  const retryItem = (id: string) => {
+    updateItem(id, { status: "pending", error: undefined, retryCount: 0 });
   };
 
   const startEditing = (id: string) => {
@@ -157,6 +210,7 @@ export default function BatchOcrView() {
   const stats = {
     total: items.length,
     pending: items.filter(i => i.status === "pending").length,
+    processing: items.filter(i => i.status === "processing").length,
     success: items.filter(i => i.status === "success").length,
     error: items.filter(i => i.status === "error").length,
   };
@@ -175,21 +229,12 @@ export default function BatchOcrView() {
           </p>
         </div>
         <div className="flex gap-2">
-          {stats.success > 0 && (
-            <button
-              onClick={bulkSave}
-              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 transition-colors"
-            >
-              <Save size={16} /> Guardar {stats.success}
-            </button>
-          )}
-          <button
+          <span
             onClick={() => fileInputRef.current?.click()}
-            disabled={isProcessing}
-            className="flex items-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-xl text-sm font-bold hover:bg-neutral-800 transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-xl text-sm font-bold hover:bg-neutral-800 transition-colors disabled:opacity-50 cursor-pointer"
           >
             <Upload size={16} /> Agregar
-          </button>
+          </span>
           {stats.pending > 0 && (
             <button
               onClick={startProcessing}
@@ -198,6 +243,14 @@ export default function BatchOcrView() {
             >
               {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
               Procesar {stats.pending}
+            </button>
+          )}
+          {stats.success > 0 && (
+            <button
+              onClick={bulkSave}
+              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 transition-colors"
+            >
+              <Save size={16} /> Guardar {stats.success}
             </button>
           )}
         </div>
@@ -212,12 +265,33 @@ export default function BatchOcrView() {
         onChange={e => e.target.files && addImages(e.target.files)}
       />
 
+      {/* Config bar */}
+      <div className="flex flex-wrap items-center gap-4 mb-4 p-4 bg-neutral-50 rounded-2xl border border-neutral-200">
+        <div className="flex items-center gap-3">
+          <label className="text-xs font-bold text-neutral-600 uppercase">RPM</label>
+          <input
+            type="range"
+            min={1}
+            max={15}
+            value={rpmLimit}
+            onChange={e => setRpmLimit(Number(e.target.value))}
+            className="w-24"
+            disabled={isProcessing}
+          />
+          <span className="text-sm font-bold text-purple-700 min-w-[2ch]">{rpmLimit}</span>
+        </div>
+        <div className="text-xs text-neutral-400">
+          ~{rpmLimit} requests/min · ~{Math.round(60 / rpmLimit)}s entre imágenes
+        </div>
+      </div>
+
       {/* Stats bar */}
       {items.length > 0 && (
         <div className="flex gap-3 mb-4">
           <StatBadge label="Total" count={stats.total} color="neutral" />
-          <StatBadge label="Pendiente" count={stats.pending} color="amber" />
-          <StatBadge label="Exitoso" count={stats.success} color="emerald" />
+          <StatBadge label="Pend." count={stats.pending} color="amber" />
+          <StatBadge label="Procesando" count={stats.processing} color="purple" />
+          <StatBadge label="OK" count={stats.success} color="emerald" />
           <StatBadge label="Error" count={stats.error} color="red" />
         </div>
       )}
@@ -247,6 +321,7 @@ export default function BatchOcrView() {
             className={`relative bg-white rounded-xl border-2 overflow-hidden transition-all ${
               item.status === "success" ? "border-emerald-200" :
               item.status === "error" ? "border-red-200" :
+              item.status === "processing" ? "border-purple-200" :
               "border-neutral-200"
             }`}
           >
@@ -263,12 +338,20 @@ export default function BatchOcrView() {
             {/* Result or placeholder */}
             <div className="p-3">
               {item.status === "processing" && (
-                <p className="text-sm text-purple-600 animate-pulse">Analizando...</p>
+                <p className="text-sm text-purple-600 animate-pulse">
+                  {item.retryCount > 0 ? `Reintento ${item.retryCount}/3...` : "Analizando..."}
+                </p>
               )}
               {item.status === "error" && (
                 <div>
                   <p className="text-sm text-red-600 font-bold">Error</p>
                   <p className="text-xs text-red-500 truncate">{item.error}</p>
+                  <button
+                    onClick={() => retryItem(item.id)}
+                    className="mt-2 flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-lg text-xs font-bold hover:bg-red-200"
+                  >
+                    <RefreshCw size={12} /> Reintentar
+                  </button>
                 </div>
               )}
               {item.status === "success" && item.result && (
@@ -322,34 +405,30 @@ function StatBadge({ label, count, color }: { label: string; count: number; colo
   const colors: Record<string, string> = {
     neutral: "bg-neutral-100 text-neutral-700",
     amber: "bg-amber-100 text-amber-700",
+    purple: "bg-purple-100 text-purple-700",
     emerald: "bg-emerald-100 text-emerald-700",
     red: "bg-red-100 text-red-700",
   };
   return (
-    <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${colors[color] || colors.neutral}`}>
-      {label} <span className="opacity-60">{count}</span>
-    </div>
-  );
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex gap-1 items-baseline">
-      <span className="text-neutral-400">{label}:</span>
-      <span className="text-neutral-700 font-medium">{value}</span>
+    <div className={`px-3 py-1.5 rounded-lg text-xs font-bold ${colors[color] || colors.neutral}`}>
+      {count} <span className="font-normal opacity-70">{label}</span>
     </div>
   );
 }
 
 function EditInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[10px] font-bold text-neutral-500 w-12">{label}</span>
+    <div>
+      <label className="text-[10px] font-bold text-neutral-500 uppercase block mb-0.5">{label}</label>
       <input
         value={value}
         onChange={e => onChange(e.target.value)}
-        className="flex-1 px-2 py-1 text-xs border border-neutral-200 rounded-md focus:outline-none focus:border-purple-400"
+        className="w-full px-2 py-1.5 border border-neutral-200 rounded-lg text-xs focus:outline-none focus:border-purple-400"
       />
     </div>
   );
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  return <div className="text-neutral-500"><span className="font-bold text-neutral-700">{label}:</span> {value}</div>;
 }

@@ -15,12 +15,20 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "qwen/qwen3.6-27b";
 
 const OCR_SYSTEM_PROMPT = `Analiza la foto de esta etiqueta de ropa. Extrae SOLO estos campos en JSON válido sin texto adicional:
+
+Reglas CRÍTICAS:
+- Si ves un código como "ND5DJD5615-JBLK", "W6YK53Z1031-F1PV" o "M6PG34K3200-FBDB", el modelo_grupo es el código ANTES del ÚLTIMO guion, y codigo_color es lo que está DESPUÉS.
+- Ejemplo: "ND5DJD5615-JBLK" → modelo_grupo="ND5DJD5615", codigo_color="JBLK"
+- Si NO hay guion, devuelve modelo_grupo como el código completo y codigo_color como null.
+- Las tallas pueden ser letras (S, M, L, XL), números (32, 34) o combinaciones (6 M, 9 W).
+
+Responde ÚNICAMENTE con:
 {
   "marca": "nombre de marca o null",
   "talla": "talla (S/M/L/XL/número) o null",
-  "sku": "código numérico o null",
-  "modelo_grupo": "código de modelo base (NO incluir color si está separado por guion) o null",
-  "codigo_color": "código de color o null",
+  "sku": "código numérico de barras o null",
+  "modelo_grupo": "código base ANTES del último guion o null",
+  "codigo_color": "código DESPUÉS del último guion o null",
   "fecha_temporada": "fecha/temporada o null",
   "tipo_producto": "tipo de prenda (Playera, Jeans, Calzado, etc.) o null"
 }`;
@@ -72,12 +80,15 @@ async function groqOcr(imageBase64: string, mimeType: string): Promise<OcrFields
 }
 
 function parseModelColor(result: OcrFields): OcrFields {
-  let modelo = result.modelo_grupo || "";
+  const raw = result.modelo_grupo || "";
+  let modelo = raw;
   let color = result.codigo_color || "";
-  if (modelo.includes("-")) {
-    const parts = modelo.split("-");
-    modelo = parts[0].trim();
-    if (!color) color = parts.slice(1).join("-").trim();
+  if (raw.includes("-")) {
+    const lastDash = raw.lastIndexOf("-");
+    if (lastDash > 0) {
+      modelo = raw.substring(0, lastDash).trim();
+      if (!color) color = raw.substring(lastDash + 1).trim();
+    }
   }
   return { ...result, modelo_grupo: modelo || null, codigo_color: color || null };
 }
@@ -1015,7 +1026,7 @@ app.get("/api/cajas/:id/productos", async (req, res) => {
       .select(`
         id_producto,
         cantidad,
-        productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo)
+        productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo, codigo_color)
       `)
       .eq("id_caja", id);
     

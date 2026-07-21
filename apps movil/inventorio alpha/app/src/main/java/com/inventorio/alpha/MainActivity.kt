@@ -363,6 +363,7 @@ fun MainAppScreen() {
                     Triple("dashboard", Icons.Default.Home, "Dashboard"),
                     Triple("scanner", Icons.Default.QrCodeScanner, "Escáner Barcode"),
                     Triple("batch_ocr", Icons.Default.Collections, "Escáner por Lote"),
+                    Triple("transferir", Icons.Default.ArrowForward, "Transferencias"),
                     Triple("consulta", Icons.Default.ManageSearch, "Consulta Rápida"),
                     Triple("productos", Icons.Default.Category, "Productos (Stock)"),
                     Triple("cajas", Icons.Default.Inbox, "Contenedores (Cajas)"),
@@ -553,6 +554,8 @@ fun MainAppScreen() {
                                 text = when (activeTab) {
                                     "dashboard" -> "DASHBOARD"
                                     "scanner" -> "ESCÁNER"
+                                    "batch_ocr" -> "LOTE"
+                                    "transferir" -> "TRANSFERENCIAS"
                                     "consulta" -> "CONSULTA"
                                     "productos" -> "CATÁLOGO"
                                     "cajas" -> "CONTENEDORES"
@@ -694,6 +697,15 @@ fun MainAppScreen() {
                             serverUrl = serverUrl,
                             ocrEngine = ocrEngine,
                             cajas = cajasList
+                        )
+                    }
+                    "transferir" -> {
+                        TransferFormatView(
+                            client = client,
+                            serverUrl = serverUrl,
+                            ocrEngine = ocrEngine,
+                            cajas = cajasList,
+                            onCajasUpdated = loadCajas
                         )
                     }
                     "consulta" -> {
