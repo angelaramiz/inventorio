@@ -3611,7 +3611,7 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
       supabase.from("zonas_almacen").select("id_zona_almacen, nombre"),
       supabase.from("zonas_pasillo").select("id_zona_pasillo, nombre, id_zona_almacen"),
       supabase.from("zonas_nivel").select("id_zona_nivel, nombre, id_zona_seccion"),
-      supabase.from("cajas").select("id_caja, numero_caja, id_zona_almacen, id_zona_seccion, id_zona_nivel, almacen_nombre, seccion_nombre, pasillo_nombre, estado")
+      supabase.from("cajas").select("id_caja, numero_caja, id_zona_almacen, id_zona_seccion, id_zona_nivel, estado")
     ]);
 
     // Build lookup maps
@@ -3653,9 +3653,9 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
       }
 
       debugPassed++;
-      let almacenNom = c.almacen_nombre || seccionAlmacenNombre.get(c.id_zona_seccion) || "";
-      let seccionNom = c.seccion_nombre || seccionNombre.get(c.id_zona_seccion) || "";
-      let pasilloNom = c.pasillo_nombre || seccionPasilloNombre.get(c.id_zona_seccion) || "";
+      let almacenNom = seccionAlmacenNombre.get(c.id_zona_seccion) || "";
+      let seccionNom = seccionNombre.get(c.id_zona_seccion) || "";
+      let pasilloNom = seccionPasilloNombre.get(c.id_zona_seccion) || "";
 
       const ws = zoneStatus[c.id_caja];
       items.push({
