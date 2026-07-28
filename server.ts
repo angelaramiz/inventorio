@@ -3637,10 +3637,9 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
 
     // Build items
     const items: any[] = [];
-    let debugSkippedNivelBox = 0, debugSkippedFilter = 0, debugPassed = 0;
 
     for (const c of (rawCajas || [])) {
-      if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) { debugSkippedNivelBox++; continue; }
+      if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) continue;
 
       // Check if this caja belongs to any of the selected almacenes
       if (almacenesIds.length > 0) {
@@ -3649,10 +3648,9 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
         const matchesSeccion = c.id_zona_seccion && almacenesIds.some((aid: number) => seccionAlmacenId.get(c.id_zona_seccion) === aid);
         const matchesNivel = c.id_zona_nivel && rawNiveles?.some((n: any) => n.id_zona_nivel === c.id_zona_nivel
           && almacenesIds.includes(seccionAlmacenId.get(n.id_zona_seccion) || 0));
-        if (!matchesAlmacen && !matchesSeccion && !matchesNivel) { debugSkippedFilter++; continue; }
+        if (!matchesAlmacen && !matchesSeccion && !matchesNivel) continue;
       }
 
-      debugPassed++;
       let almacenNom = seccionAlmacenNombre.get(c.id_zona_seccion) || "";
       let seccionNom = seccionNombre.get(c.id_zona_seccion) || "";
       let pasilloNom = seccionPasilloNombre.get(c.id_zona_seccion) || "";
@@ -3663,10 +3661,6 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
         almacen: almacenNom, seccion: seccionNom, pasillo: pasilloNom,
         status: ws || "pendiente"
       });
-    }
-
-    if (almacenesIds.length > 0) {
-      console.log(`[pending-summary] event=${eventId} almacenes=${almacenesIds} rawCajas=${rawCajas?.length} skipNIVEL=${debugSkippedNivelBox} skipFilter=${debugSkippedFilter} passed=${debugPassed} niveles=${rawNiveles?.length}`);
     }
 
     for (const n of (rawNiveles || [])) {
