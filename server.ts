@@ -3300,7 +3300,22 @@ app.get("/api/inventory/events", async (req, res) => {
       .order("fecha", { ascending: false });
       
     if (error) throw error;
-    res.json(data);
+    
+    // Parse descripcion JSON to extract text + almacenes_ids
+    const parsed = (data || []).map((ev: any) => {
+      let text = ev.descripcion;
+      let almacenesIds: number[] = [];
+      try {
+        const parsedDesc = JSON.parse(ev.descripcion);
+        if (parsedDesc && typeof parsedDesc === "object") {
+          text = parsedDesc.text || parsedDesc.descripcion || ev.descripcion;
+          almacenesIds = parsedDesc.almacenes_ids || [];
+        }
+      } catch (_) { /* plain string, keep as-is */ }
+      return { ...ev, descripcion: text, almacenes_ids: almacenesIds };
+    });
+    
+    res.json(parsed);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -3310,19 +3325,27 @@ app.get("/api/inventory/events", async (req, res) => {
 app.post("/api/inventory/events", async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { descripcion, fecha } = req.body;
+    const { descripcion, fecha, almacenes_ids } = req.body;
+    
+    // Store descripcion + almacenes_ids as JSON
+    const descJson = JSON.stringify({
+      text: descripcion || "",
+      almacenes_ids: Array.isArray(almacenes_ids) ? almacenes_ids.filter((id: any) => typeof id === "number" && id > 0) : []
+    });
     
     const { data, error } = await supabase
       .from("inventory_events")
       .insert([{
-        descripcion,
+        descripcion: descJson,
         fecha: fecha ? new Date(fecha) : new Date(),
         estado: "programado"
       }])
       .select();
       
     if (error) throw error;
-    res.json(data[0]);
+    
+    const ev = data[0];
+    res.json({ ...ev, descripcion: descripcion || "", almacenes_ids: almacenes_ids || [] });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -3549,53 +3572,114 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
     const supabase = getSupabase();
     const eventId = parseInt(req.query.event_id as string);
     if (isNaN(eventId)) return res.status(400).json({ error: "event_id requerido" });
-    
-    // Get all count requests for this event
+
+    // Fetch event to get almacenes_ids filter
+    const { data: eventData } = await supabase
+      .from("inventory_events")
+      .select("descripcion")
+      .eq("id", eventId)
+      .maybeSingle();
+
+    let almacenesIds: number[] = [];
+    if (eventData?.descripcion) {
+      try {
+        const parsed = JSON.parse(eventData.descripcion);
+        if (Array.isArray(parsed.almacenes_ids)) {
+          almacenesIds = parsed.almacenes_ids.filter((id: any) => typeof id === "number" && id > 0);
+        }
+      } catch (_) { /* plain string, no filter */ }
+    }
+
+    // Get count requests for this event → zone_id status map
     const { data: requests } = await supabase
       .from("count_requests")
       .select("zone_id, estado")
       .eq("event_id", eventId);
-    
-    // Map zone_id -> status
+
     const zoneStatus: Record<number, string> = {};
     for (const r of (requests || [])) {
       if (r.estado === "pendiente") zoneStatus[r.zone_id] = "revision";
       else if (r.estado === "aprobado") zoneStatus[r.zone_id] = "contado";
     }
-    
-    // Get all boxes and levels
-    const [{ data: cajas }, { data: niveles }] = await Promise.all([
-      supabase.from("cajas").select("id_caja, numero_caja, almacen_nombre, seccion_nombre, pasillo_nombre, estado"),
-      supabase.from("zonas_niveles").select("id_zona_nivel, nombre, almacen_nombre, seccion_nombre, pasillo_nombre")
+
+    // Fetch basic data: secciones, almacenes, pasillos, niveles, cajas
+    const [
+      { data: rawSecciones }, { data: rawAlmacenes }, { data: rawPasillos },
+      { data: rawNiveles }, { data: rawCajas }
+    ] = await Promise.all([
+      supabase.from("zonas_seccion").select("id_zona_seccion, nombre, id_zona_almacen, id_zona_pasillo"),
+      supabase.from("zonas_almacen").select("id_zona_almacen, nombre"),
+      supabase.from("zonas_pasillo").select("id_zona_pasillo, nombre, id_zona_almacen"),
+      supabase.from("zonas_nivel").select("id_zona_nivel, nombre, id_zona_seccion"),
+      supabase.from("cajas").select("id_caja, numero_caja, id_zona_almacen, id_zona_seccion, id_zona_nivel, almacen_nombre, seccion_nombre, pasillo_nombre, estado")
     ]);
-    
+
+    // Build lookup maps
+    const almacenNombreMap = new Map<number, string>((rawAlmacenes || []).map((a: any) => [a.id_zona_almacen, a.nombre]));
+    const pasilloMap = new Map<number, any>((rawPasillos || []).map((p: any) => [p.id_zona_pasillo, p]));
+
+    // Resolve each seccion's almacen_id (direct or via pasillo) and names
+    const seccionAlmacenId = new Map<number, number>();  // seccion_id → almacen_id
+    const seccionAlmacenNombre = new Map<number, string>();
+    const seccionPasilloNombre = new Map<number, string>();
+    const seccionNombre = new Map<number, string>();
+
+    for (const s of (rawSecciones || [])) {
+      const almId = s.id_zona_almacen
+        || (pasilloMap.get(s.id_zona_pasillo)?.id_zona_almacen)
+        || 0;
+      seccionAlmacenId.set(s.id_zona_seccion, almId);
+      seccionNombre.set(s.id_zona_seccion, s.nombre || "");
+      seccionAlmacenNombre.set(s.id_zona_seccion, almacenNombreMap.get(almId) || "");
+      const pasillo = pasilloMap.get(s.id_zona_pasillo);
+      seccionPasilloNombre.set(s.id_zona_seccion, pasillo?.nombre || "");
+    }
+
+    // Build items
     const items: any[] = [];
-    for (const c of (cajas || [])) {
-      if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) continue; // skip nivel-boxes
+
+    for (const c of (rawCajas || [])) {
+      if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) continue;
+
+      // Check if this caja belongs to any of the selected almacenes
+      if (almacenesIds.length > 0) {
+        const cajaAlmId = c.id_zona_almacen || seccionAlmacenId.get(c.id_zona_seccion) || 0;
+        const matchesAlmacen = almacenesIds.includes(cajaAlmId);
+        const matchesSeccion = c.id_zona_seccion && almacenesIds.some((aid: number) => seccionAlmacenId.get(c.id_zona_seccion) === aid);
+        const matchesNivel = c.id_zona_nivel && rawNiveles?.some((n: any) => n.id_zona_nivel === c.id_zona_nivel
+          && almacenesIds.includes(seccionAlmacenId.get(n.id_zona_seccion) || 0));
+        if (!matchesAlmacen && !matchesSeccion && !matchesNivel) continue;
+      }
+
+      let almacenNom = c.almacen_nombre || seccionAlmacenNombre.get(c.id_zona_seccion) || "";
+      let seccionNom = c.seccion_nombre || seccionNombre.get(c.id_zona_seccion) || "";
+      let pasilloNom = c.pasillo_nombre || seccionPasilloNombre.get(c.id_zona_seccion) || "";
+
       const ws = zoneStatus[c.id_caja];
       items.push({
-        type: "caja",
-        id: c.id_caja,
-        name: c.numero_caja,
-        almacen: c.almacen_nombre || "",
-        seccion: c.seccion_nombre || "",
-        pasillo: c.pasillo_nombre || "",
+        type: "caja", id: c.id_caja, name: c.numero_caja,
+        almacen: almacenNom, seccion: seccionNom, pasillo: pasilloNom,
         status: ws || "pendiente"
       });
     }
-    for (const n of (niveles || [])) {
+
+    for (const n of (rawNiveles || [])) {
+      // Check if this nivel belongs to any of the selected almacenes
+      if (almacenesIds.length > 0) {
+        const nivelAlmId = seccionAlmacenId.get(n.id_zona_seccion) || 0;
+        if (!almacenesIds.includes(nivelAlmId)) continue;
+      }
+
       const ws = zoneStatus[n.id_zona_nivel];
       items.push({
-        type: "nivel",
-        id: n.id_zona_nivel,
-        name: n.nombre,
-        almacen: n.almacen_nombre || "",
-        seccion: n.seccion_nombre || "",
-        pasillo: n.pasillo_nombre || "",
+        type: "nivel", id: n.id_zona_nivel, name: n.nombre,
+        almacen: seccionAlmacenNombre.get(n.id_zona_seccion) || "",
+        seccion: seccionNombre.get(n.id_zona_seccion) || "",
+        pasillo: seccionPasilloNombre.get(n.id_zona_seccion) || "",
         status: ws || "pendiente"
       });
     }
-    
+
     res.json(items);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
