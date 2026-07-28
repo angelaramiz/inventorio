@@ -3637,9 +3637,10 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
 
     // Build items
     const items: any[] = [];
+    let debugSkippedNivelBox = 0, debugSkippedFilter = 0, debugPassed = 0;
 
     for (const c of (rawCajas || [])) {
-      if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) continue;
+      if (c.numero_caja?.toUpperCase().startsWith("NIVEL:")) { debugSkippedNivelBox++; continue; }
 
       // Check if this caja belongs to any of the selected almacenes
       if (almacenesIds.length > 0) {
@@ -3648,9 +3649,10 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
         const matchesSeccion = c.id_zona_seccion && almacenesIds.some((aid: number) => seccionAlmacenId.get(c.id_zona_seccion) === aid);
         const matchesNivel = c.id_zona_nivel && rawNiveles?.some((n: any) => n.id_zona_nivel === c.id_zona_nivel
           && almacenesIds.includes(seccionAlmacenId.get(n.id_zona_seccion) || 0));
-        if (!matchesAlmacen && !matchesSeccion && !matchesNivel) continue;
+        if (!matchesAlmacen && !matchesSeccion && !matchesNivel) { debugSkippedFilter++; continue; }
       }
 
+      debugPassed++;
       let almacenNom = c.almacen_nombre || seccionAlmacenNombre.get(c.id_zona_seccion) || "";
       let seccionNom = c.seccion_nombre || seccionNombre.get(c.id_zona_seccion) || "";
       let pasilloNom = c.pasillo_nombre || seccionPasilloNombre.get(c.id_zona_seccion) || "";
@@ -3661,6 +3663,10 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
         almacen: almacenNom, seccion: seccionNom, pasillo: pasilloNom,
         status: ws || "pendiente"
       });
+    }
+
+    if (almacenesIds.length > 0) {
+      console.log(`[pending-summary] event=${eventId} almacenes=${almacenesIds} rawCajas=${rawCajas?.length} skipNIVEL=${debugSkippedNivelBox} skipFilter=${debugSkippedFilter} passed=${debugPassed} niveles=${rawNiveles?.length}`);
     }
 
     for (const n of (rawNiveles || [])) {
@@ -3683,6 +3689,65 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
     res.json(items);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/inventory/pending-debug - Debug endpoint for pending summaries
+app.get("/api/inventory/pending-debug", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const eventId = parseInt(req.query.event_id as string);
+    if (isNaN(eventId)) return res.status(400).json({ error: "event_id requerido" });
+
+    const { data: eventData } = await supabase.from("inventory_events").select("descripcion").eq("id", eventId).maybeSingle();
+    let almacenesIds: number[] = [];
+    if (eventData?.descripcion) {
+      try { const p = JSON.parse(eventData.descripcion); if (Array.isArray(p.almacenes_ids)) almacenesIds = p.almacenes_ids; } catch (_) {}
+    }
+
+    const [{ data: secciones }, { data: almacenes }, { data: pasillos }, { data: niveles }, { data: cajas }] = await Promise.all([
+      supabase.from("zonas_seccion").select("id_zona_seccion, id_zona_almacen, id_zona_pasillo"),
+      supabase.from("zonas_almacen").select("id_zona_almacen, nombre"),
+      supabase.from("zonas_pasillo").select("id_zona_pasillo, nombre, id_zona_almacen"),
+      supabase.from("zonas_nivel").select("id_zona_nivel, id_zona_seccion"),
+      supabase.from("cajas").select("id_caja, id_zona_almacen, id_zona_seccion, id_zona_nivel").not("numero_caja", "ilike", "NIVEL:%")
+    ]);
+
+    const pasilloMap = new Map<number, any>((pasillos || []).map((p: any) => [p.id_zona_pasillo, p]));
+    const seccionAlmacenId = new Map<number, number>((secciones || []).map((s: any) => {
+      const almId = s.id_zona_almacen || pasilloMap.get(s.id_zona_pasillo)?.id_zona_almacen || 0;
+      return [s.id_zona_seccion, almId] as [number, number];
+    }));
+
+    const debug: any = {
+      event_id: eventId,
+      almacenes_ids: almacenesIds,
+      total_secciones: secciones?.length || 0,
+      total_almacenes: almacenes?.length || 0,
+      total_niveles: niveles?.length || 0,
+      total_cajas: cajas?.length || 0,
+      secciones_con_almacen: [...new Set([...seccionAlmacenId.values()].filter(v => v > 0))],
+    };
+
+    // Check how many cajas pass the filter
+    if (almacenesIds.length > 0) {
+      let matchAlmacen = 0, matchSeccion = 0, matchNivel = 0, noMatch = 0;
+      for (const c of (cajas || [])) {
+        const cajaAlmId = c.id_zona_almacen || seccionAlmacenId.get(c.id_zona_seccion) || 0;
+        if (almacenesIds.includes(cajaAlmId)) { matchAlmacen++; continue; }
+        if (c.id_zona_seccion && almacenesIds.some((a: number) => seccionAlmacenId.get(c.id_zona_seccion) === a)) { matchSeccion++; continue; }
+        if (c.id_zona_nivel && niveles?.some((n: any) => n.id_zona_nivel === c.id_zona_nivel && almacenesIds.includes(seccionAlmacenId.get(n.id_zona_seccion) || 0))) { matchNivel++; continue; }
+        noMatch++;
+      }
+      debug.cajas_match_almacen = matchAlmacen;
+      debug.cajas_match_seccion = matchSeccion;
+      debug.cajas_match_nivel = matchNivel;
+      debug.cajas_no_match = noMatch;
+    }
+
+    res.json(debug);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 
