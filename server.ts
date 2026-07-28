@@ -3657,7 +3657,7 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
 
       const ws = zoneStatus[c.id_caja];
       items.push({
-        type: "caja", id: c.id_caja, name: c.numero_caja,
+        type: "cajas", id: c.id_caja, name: c.numero_caja,
         almacen: almacenNom, seccion: seccionNom, pasillo: pasilloNom,
         status: ws || "pendiente"
       });
@@ -3672,7 +3672,7 @@ app.get("/api/inventory/pending-summary", async (req, res) => {
 
       const ws = zoneStatus[n.id_zona_nivel];
       items.push({
-        type: "nivel", id: n.id_zona_nivel, name: n.nombre,
+        type: "niveles", id: n.id_zona_nivel, name: n.nombre,
         almacen: seccionAlmacenNombre.get(n.id_zona_seccion) || "",
         seccion: seccionNombre.get(n.id_zona_seccion) || "",
         pasillo: seccionPasilloNombre.get(n.id_zona_seccion) || "",
