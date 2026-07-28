@@ -1018,15 +1018,20 @@ app.post("/api/cajas/:id/asignar", async (req, res) => {
 // GET /api/cajas/:id/productos
 app.get("/api/cajas/:id/productos", async (req, res) => {
   try {
+    await detectSchema();
     const supabase = getSupabase();
     const { id } = req.params;
+    
+    let productoFields = "id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at";
+    if (hasModeloGrupoColumn) productoFields += ", modelo_grupo";
+    if (hasCodigoColorColumn) productoFields += ", codigo_color";
     
     const { data, error } = await supabase
       .from("caja_productos")
       .select(`
         id_producto,
         cantidad,
-        productos (id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at, modelo_grupo, codigo_color)
+        productos (${productoFields})
       `)
       .eq("id_caja", id);
     
