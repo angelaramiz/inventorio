@@ -3465,6 +3465,84 @@ app.post("/api/inventory/count-request", async (req, res) => {
     managerNotifications.push(newNotification);
     stockEvents.emit("manager-notification", newNotification);
     
+    // ── Auto-approve if setting enabled ─────────────────────
+    const { data: autoApproveSetting } = await supabase
+      .from("warehouse_settings")
+      .select("valor")
+      .eq("clave", "conteo_auto_approve")
+      .maybeSingle();
+    const autoApprove = autoApproveSetting?.valor === true || autoApproveSetting?.valor === "true";
+    
+    if (autoApprove && data[0]) {
+      const request = data[0];
+      const requestId = data[0].id;
+      
+      // Update count request status to aprobado
+      await supabase.from("count_requests").update({ estado: "aprobado" }).eq("id", requestId);
+      
+      // Process the counts (same logic as /api/inventory/approvals)
+      const cantidades = request.cantidades || {};
+      const tempSkus = (cantidades as any).temp_skus || {};
+      const eliminaciones: string[] = (cantidades as any).eliminaciones || [];
+      const zId = request.zone_id;
+      
+      const { data: box } = await supabase.from("cajas").select("id_caja").eq("id_caja", zId).maybeSingle();
+      
+      const countRows: any[] = [];
+      const boxProductUpserts: any[] = [];
+      const boxProductDeletes: { id_caja: number, id_producto: number }[] = [];
+      
+      for (const [prodIdStr, qty] of Object.entries(cantidades)) {
+        if (prodIdStr === "temp_skus" || prodIdStr === "eliminaciones") continue;
+        let prodId = parseInt(prodIdStr);
+        const quantity = parseInt(qty as any);
+        
+        if (prodId < 0) {
+          const tempSku = tempSkus[prodIdStr];
+          if (tempSku) {
+            const { data: existingProd } = await supabase.from("productos").select("id_producto").eq("sku", tempSku).maybeSingle();
+            if (!existingProd) {
+              const { data: newProd } = await supabase.from("productos").insert([{
+                sku: tempSku, talla: "UNICA", temporada: "todouso", tipo: "nivel", marca_sub: "TEMPORAL", activo: true
+              }]).select("id_producto").single();
+              prodId = newProd.id_producto;
+            } else {
+              prodId = existingProd.id_producto;
+            }
+          } else { continue; }
+        }
+        
+        countRows.push({ event_id: request.event_id, producto_id: prodId, zona_id: zId, cantidad_final: quantity });
+        if (box) {
+          if (quantity === 0) {
+            boxProductDeletes.push({ id_caja: zId, id_producto: prodId });
+          } else {
+            boxProductUpserts.push({ id_caja: zId, id_producto: prodId, cantidad: quantity });
+          }
+        }
+      }
+      
+      if (countRows.length > 0) await supabase.from("counts").insert(countRows);
+      for (const del of boxProductDeletes) await supabase.from("caja_productos").delete().eq("id_caja", del.id_caja).eq("id_producto", del.id_producto);
+      if (boxProductUpserts.length > 0) await supabase.from("caja_productos").upsert(boxProductUpserts, { onConflict: "id_caja,id_producto" });
+      
+      for (const prodIdStr of eliminaciones) {
+        const elimProdId = parseInt(prodIdStr);
+        if (isNaN(elimProdId)) continue;
+        await supabase.from("caja_productos").delete().eq("id_caja", zId).eq("id_producto", elimProdId);
+        await supabase.from("productos").delete().eq("id_producto", elimProdId);
+        await supabase.from("counts").insert([{ event_id: request.event_id, producto_id: elimProdId, zona_id: zId, cantidad_final: 0 }]);
+      }
+      
+      // Update box state
+      const { data: remainingProds } = await supabase.from("caja_productos").select("cantidad").eq("id_caja", zId);
+      const totalUnits = (remainingProds || []).reduce((sum: number, p: any) => sum + (p.cantidad || 0), 0);
+      await supabase.from("cajas").update({ estado: totalUnits > 0 ? "activa" : "vacia" }).eq("id_caja", zId);
+      
+      res.json({ ...data[0], autoApproved: true });
+      return;
+    }
+    
     res.json(data[0]);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -3484,6 +3562,39 @@ app.post("/api/inventory/operator-active", (req, res) => {
   managerNotifications.push(newNotification);
   stockEvents.emit("manager-notification", newNotification);
   res.json({ success: true });
+});
+
+// GET /api/inventory/auto-approve - Get auto-approve setting for count requests
+app.get("/api/inventory/auto-approve", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("warehouse_settings")
+      .select("valor")
+      .eq("clave", "conteo_auto_approve")
+      .maybeSingle();
+    if (error && error.code !== 'PGRST116') throw error;
+    res.json({ autoApprove: data?.valor === true || data?.valor === "true" });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/inventory/auto-approve - Toggle auto-approve setting
+app.put("/api/inventory/auto-approve", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { autoApprove } = req.body;
+    const enabled = autoApprove === true || autoApprove === "true";
+    const { data, error } = await supabase
+      .from("warehouse_settings")
+      .upsert({ clave: "conteo_auto_approve", valor: enabled }, { onConflict: "clave" })
+      .select();
+    if (error) throw error;
+    res.json({ autoApprove: enabled });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // GET /api/inventory/count-requests - List all count requests with enriched data
