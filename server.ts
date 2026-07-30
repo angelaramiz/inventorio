@@ -304,9 +304,11 @@ app.get('/api/app-version', (req, res) => {
 // GET /api/android-version - Returns the latest Android app version (supports ?app=conteo query param)
 app.get("/api/android-version", async (req, res) => {
   try {
-    const isConteo = req.query.app === "conteo";
-    const key = isConteo ? "android_version_conteo" : "android_version";
-    const defaultApk = isConteo ? "/public/inventorio-conteo.apk" : "/public/inventorio.apk";
+    const app = req.query.app as string;
+    const isConteo = app === "conteo";
+    const isOperations = app === "operations";
+    const key = isConteo ? "android_version_conteo" : isOperations ? "android_version_operations" : "android_version";
+    const defaultApk = isConteo ? "/public/inventorio-conteo.apk" : isOperations ? "/public/inventorio-operations.apk" : "/public/inventorio.apk";
 
     const supabase = getSupabase();
     const { data: settings, error } = await supabase
