@@ -370,7 +370,8 @@ fun MainAppScreen() {
                     Triple("conceptos", Icons.Default.LocalOffer, "Conceptos Catálogo"),
                     Triple("almacen", Icons.Default.Warehouse, "Layout Almacén"),
                     Triple("logs", Icons.Default.BugReport, "Diagnóstico / Logs"),
-                    Triple("config", Icons.Default.Settings, "Configuración")
+                    Triple("config", Icons.Default.Settings, "Configuración"),
+                    Triple("appcatalog", Icons.Default.Apps, "Catálogo Apps")
                 ).forEach { (tabName, icon, label) ->
                     val isSelected = activeTab == tabName
                     NavigationDrawerItem(
@@ -753,6 +754,9 @@ fun MainAppScreen() {
                             },
                             client = client
                         )
+                    }
+                    "appcatalog" -> {
+                        AppCatalogView(client = client, serverUrl = serverUrl)
                     }
                     "logs" -> {
                         LogsView(ocrEngine = ocrEngine)
