@@ -1985,17 +1985,42 @@ app.get("/api/consultar-producto/:query", async (req, res) => {
     const supabase = getSupabase();
     const { query } = req.params;
     
-    // Find the product by SKU or EAN-13
+    // Find the product by SKU or EAN-13 (layered search: exact → ilike → partial)
+    const cleanQuery = query.replace(/[\s\-]/g, '').trim();
     const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
-    const { data: product, error: pErr } = await supabase
+    
+    let product: any = null;
+
+    // 1. Exact match (fast)
+    const { data: exact, error: exactErr } = await supabase
       .from("productos")
       .select(fields)
       .or(`sku.eq.${query},ean_13.eq.${query}`)
       .maybeSingle();
-      
-    if (pErr) throw pErr;
+    if (!exactErr && exact) product = exact;
+
+    // 2. Case-insensitive / stripped match
     if (!product) {
-      return res.status(404).json({ error: "Producto no encontrado en el sistema" });
+      const { data: ilikeMatch } = await supabase
+        .from("productos")
+        .select(fields)
+        .or(`sku.ilike.${query},ean_13.ilike.${query}`)
+        .maybeSingle();
+      if (ilikeMatch) product = ilikeMatch;
+    }
+
+    // 3. Stripped (no spaces/dashes) match
+    if (!product && cleanQuery !== query) {
+      const { data: strippedMatch } = await supabase
+        .from("productos")
+        .select(fields)
+        .or(`sku.ilike.%${cleanQuery}%,ean_13.ilike.%${cleanQuery}%`)
+        .maybeSingle();
+      if (strippedMatch) product = strippedMatch;
+    }
+
+    if (!product) {
+      return res.status(404).json({ error: "Producto no encontrado", query });
     }
     
     // Get boxes containing this product, with nested warehouse section and warehouse zone info
@@ -2078,6 +2103,119 @@ app.get("/api/consultar-producto/:query", async (req, res) => {
       boxes: resultBoxes,
       variantes: variantes.map((v: any) => ({ modelo_grupo: "sin modelo", ...v }))
     });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/consultar-productos-batch - Batch search for multiple UPCs/SKUs at once
+app.post("/api/consultar-productos-batch", async (req, res) => {
+  try {
+    await detectSchema();
+    const supabase = getSupabase();
+    const { queries } = req.body;
+    
+    if (!Array.isArray(queries) || queries.length === 0) {
+      return res.status(400).json({ error: "queries array required" });
+    }
+
+    const limited = queries.slice(0, 300);
+    const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
+    
+    // Fetch ALL products once and match client-side (much faster than N queries)
+    const { data: allProducts, error: pErr } = await supabase
+      .from("productos")
+      .select(fields)
+      .eq("activo", true);
+    
+    if (pErr) throw pErr;
+
+    // Build lookup maps: exact, stripped, partial
+    const exactMap = new Map<string, any>();
+    const strippedMap = new Map<string, any>();
+    
+    for (const product of (allProducts || [])) {
+      if (product.sku) {
+        exactMap.set(product.sku.toLowerCase(), product);
+        strippedMap.set(product.sku.replace(/[\s\-]/g, '').toLowerCase(), product);
+      }
+      if (product.ean_13) {
+        exactMap.set(product.ean_13.toLowerCase(), product);
+        strippedMap.set(product.ean_13.replace(/[\s\-]/g, '').toLowerCase(), product);
+      }
+    }
+
+    // Match each query to a product
+    const matchedProducts = new Map<number, any>();
+    const queryProductMap = new Map<number, any>();
+    
+    for (let i = 0; i < limited.length; i++) {
+      const q = limited[i].trim();
+      const qLower = q.toLowerCase();
+      const qStripped = q.replace(/[\s\-]/g, '').toLowerCase();
+      
+      let product = exactMap.get(qLower) || strippedMap.get(qStripped);
+      
+      // Partial match fallback
+      if (!product && qStripped.length >= 6) {
+        for (const [key, p] of strippedMap) {
+          if (key.includes(qStripped) || qStripped.includes(key)) { product = p; break; }
+        }
+      }
+      
+      if (product) {
+        matchedProducts.set(product.id_producto, product);
+        queryProductMap.set(i, product);
+      }
+    }
+
+    // Fetch ALL boxes for matched products in one query
+    const boxMap = new Map<number, any[]>();
+    const productIds = [...matchedProducts.keys()];
+    
+    if (productIds.length > 0) {
+      const { data: cajaProd, error: cpErr } = await supabase
+        .from("caja_productos")
+        .select("id_producto, cantidad, cajas(id_caja, numero_caja, sku, estado, id_zona_seccion, id_zona_almacen, zonas_seccion(nombre, zonas_almacen(nombre)), zonas_almacen(nombre))")
+        .in("id_producto", productIds);
+      
+      if (!cpErr && cajaProd) {
+        for (const cp of cajaProd) {
+          const existing = boxMap.get(cp.id_producto) || [];
+          const c = cp.cajas as any;
+          const seccion = c?.zonas_seccion;
+          const almacen = seccion ? seccion.zonas_almacen : c?.zonas_almacen;
+          existing.push({
+            cantidad: cp.cantidad,
+            cajas: {
+              id_caja: c?.id_caja,
+              numero_caja: c?.numero_caja,
+              sku: c?.sku,
+              estado: c?.estado,
+              id_zona_seccion: c?.id_zona_seccion,
+              id_zona_almacen: c?.id_zona_almacen,
+              seccion_nombre: seccion?.nombre || null,
+              almacen_nombre: almacen?.nombre || null
+            }
+          });
+          boxMap.set(cp.id_producto, existing);
+        }
+      }
+    }
+
+    const results = limited.map((q: string, i: number) => {
+      const product = queryProductMap.get(i);
+      if (!product) return { query: q, found: false, product: null, boxes: [] };
+      
+      return {
+        query: q,
+        found: true,
+        product: { modelo_grupo: "sin modelo", ...product },
+        boxes: boxMap.get(product.id_producto) || []
+      };
+    });
+
+    res.json({ results });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
