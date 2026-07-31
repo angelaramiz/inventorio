@@ -2122,7 +2122,7 @@ app.post("/api/consultar-productos-batch", async (req, res) => {
     const limited = queries.slice(0, 300);
     const fields = `id_producto, sku, ean_13, talla, temporada, tipo, marca_sub, has_foto, activo, created_at${hasModeloGrupoColumn ? ", modelo_grupo" : ""}`;
     
-    // Fetch ALL products once and match client-side (much faster than N queries)
+    // 1. Fetch ALL active products
     const { data: allProducts, error: pErr } = await supabase
       .from("productos")
       .select(fields)
@@ -2130,7 +2130,7 @@ app.post("/api/consultar-productos-batch", async (req, res) => {
     
     if (pErr) throw pErr;
 
-    // Build lookup maps: exact, stripped, partial
+    // Build product lookup maps
     const exactMap = new Map<string, any>();
     const strippedMap = new Map<string, any>();
     
@@ -2145,65 +2145,133 @@ app.post("/api/consultar-productos-batch", async (req, res) => {
       }
     }
 
-    // Match each query to a product
-    const matchedProducts = new Map<number, any>();
+    // 2. Also fetch ALL boxes and build box-by-sku lookup (like consultar-dinamico step 2)
+    const { data: allCajas } = await supabase
+      .from("vista_total_cajas")
+      .select("*");
+    
+    const cajaBySku = new Map<string, any>();
+    const cajaByNumero = new Map<string, any>();
+    for (const caja of (allCajas || [])) {
+      if (caja.sku) cajaBySku.set(caja.sku.toLowerCase(), caja);
+      if (caja.numero_caja) cajaByNumero.set(caja.numero_caja.toLowerCase(), caja);
+    }
+
+    // 3. Match each query
     const queryProductMap = new Map<number, any>();
+    const queryCajaMap = new Map<number, any>();
     
     for (let i = 0; i < limited.length; i++) {
       const q = limited[i].trim();
       const qLower = q.toLowerCase();
       const qStripped = q.replace(/[\s\-]/g, '').toLowerCase();
       
-      let product = exactMap.get(qLower) || strippedMap.get(qStripped);
+      // a) Check if it matches a box (by sku or numero_caja) - like consultar-dinamico step 2
+      const matchedCaja = cajaBySku.get(qLower) || cajaByNumero.get(qLower);
+      if (matchedCaja) {
+        queryCajaMap.set(i, matchedCaja);
+        continue;
+      }
       
-      // Partial match fallback
+      // b) Check if it matches a product (by sku or ean_13)
+      let product = exactMap.get(qLower) || strippedMap.get(qStripped);
       if (!product && qStripped.length >= 6) {
         for (const [key, p] of strippedMap) {
-          if (key.includes(qStripped) || qStripped.includes(key)) { product = p; break; }
+          if (key === qStripped || key.includes(qStripped) || qStripped.includes(key)) { product = p; break; }
         }
       }
       
       if (product) {
-        matchedProducts.set(product.id_producto, product);
         queryProductMap.set(i, product);
       }
     }
 
-    // Fetch ALL boxes for matched products in one query
+    // 4. Fetch products inside matched boxes
+    const boxProductMap = new Map<number, any[]>(); // boxId -> caja_productos[]
+    const matchedCajas = [...new Set(queryCajaMap.values())];
+    if (matchedCajas.length > 0) {
+      const cajaIds = matchedCajas.map((c: any) => c.id_caja);
+      const { data: boxProds } = await supabase
+        .from("caja_productos")
+        .select("id_caja, id_producto, cantidad, productos!inner(id_producto, sku, ean_13, talla, modelo_grupo)")
+        .in("id_caja", cajaIds);
+      
+      for (const bp of (boxProds || [])) {
+        const existing = boxProductMap.get(bp.id_caja) || [];
+        existing.push(bp);
+        boxProductMap.set(bp.id_caja, existing);
+      }
+    }
+
+    // 5. Fetch boxes for matched products
     const boxMap = new Map<number, any[]>();
-    const productIds = [...matchedProducts.keys()];
+    const productIds = [...new Set([...queryProductMap.values()].map((p: any) => p.id_producto))];
     
     if (productIds.length > 0) {
-      const { data: cajaProd, error: cpErr } = await supabase
-        .from("caja_productos")
-        .select("id_producto, cantidad, cajas(id_caja, numero_caja, sku, estado, id_zona_seccion, id_zona_almacen, zonas_seccion(nombre, zonas_almacen(nombre)), zonas_almacen(nombre))")
-        .in("id_producto", productIds);
-      
-      if (!cpErr && cajaProd) {
-        for (const cp of cajaProd) {
-          const existing = boxMap.get(cp.id_producto) || [];
-          const c = cp.cajas as any;
-          const seccion = c?.zonas_seccion;
-          const almacen = seccion ? seccion.zonas_almacen : c?.zonas_almacen;
-          existing.push({
-            cantidad: cp.cantidad,
-            cajas: {
-              id_caja: c?.id_caja,
-              numero_caja: c?.numero_caja,
-              sku: c?.sku,
-              estado: c?.estado,
-              id_zona_seccion: c?.id_zona_seccion,
-              id_zona_almacen: c?.id_zona_almacen,
-              seccion_nombre: seccion?.nombre || null,
-              almacen_nombre: almacen?.nombre || null
-            }
-          });
-          boxMap.set(cp.id_producto, existing);
+      for (let ci = 0; ci < productIds.length; ci += 50) {
+        const chunk = productIds.slice(ci, ci + 50);
+        const { data: cajaProd, error: cpErr } = await supabase
+          .from("caja_productos")
+          .select("id_producto, cantidad, cajas(id_caja, numero_caja, sku, estado, id_zona_seccion, id_zona_almacen, zonas_seccion(nombre, zonas_almacen(nombre)), zonas_almacen(nombre))")
+          .in("id_producto", chunk);
+        
+        if (!cpErr && cajaProd) {
+          for (const cp of cajaProd) {
+            const existing = boxMap.get(cp.id_producto) || [];
+            const c = cp.cajas as any;
+            const seccion = c?.zonas_seccion;
+            const almacen = seccion ? seccion.zonas_almacen : c?.zonas_almacen;
+            existing.push({
+              cantidad: cp.cantidad,
+              cajas: {
+                id_caja: c?.id_caja,
+                numero_caja: c?.numero_caja,
+                sku: c?.sku,
+                estado: c?.estado,
+                id_zona_seccion: c?.id_zona_seccion,
+                id_zona_almacen: c?.id_zona_almacen,
+                seccion_nombre: seccion?.nombre || null,
+                almacen_nombre: almacen?.nombre || null
+              }
+            });
+            boxMap.set(cp.id_producto, existing);
+          }
         }
       }
     }
 
+    // 6. Build results
     const results = limited.map((q: string, i: number) => {
+      // If matched a BOX, return the box with all its products
+      const matchedCaja = queryCajaMap.get(i);
+      if (matchedCaja) {
+        const boxProducts = boxProductMap.get(matchedCaja.id_caja) || [];
+        const firstProduct = boxProducts.length > 0 ? boxProducts[0].productos : null;
+        return {
+          query: q,
+          found: true,
+          product: firstProduct ? { modelo_grupo: "sin modelo", ...firstProduct } : null,
+          boxes: [{
+            cantidad: boxProducts.reduce((sum: number, bp: any) => sum + (bp.cantidad || 0), 0),
+            cajas: {
+              id_caja: matchedCaja.id_caja,
+              numero_caja: matchedCaja.numero_caja,
+              sku: matchedCaja.sku,
+              estado: matchedCaja.estado,
+              seccion_nombre: matchedCaja.seccion_nombre || matchedCaja.nombre_seccion || null,
+              almacen_nombre: matchedCaja.almacen_nombre || matchedCaja.nombre_almacen || null
+            }
+          }],
+          boxProducts: boxProducts.map((bp: any) => ({
+            sku: bp.productos?.sku,
+            modelo_grupo: bp.productos?.modelo_grupo,
+            talla: bp.productos?.talla,
+            cantidad: bp.cantidad
+          }))
+        };
+      }
+      
+      // If matched a PRODUCT, return with its boxes
       const product = queryProductMap.get(i);
       if (!product) return { query: q, found: false, product: null, boxes: [] };
       
