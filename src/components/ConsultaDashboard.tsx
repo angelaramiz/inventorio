@@ -1275,6 +1275,9 @@ export default function ConsultaDashboard() {
                       </div>
                       
                       <p className="text-xs text-neutral-400 font-mono">EAN-13: {currentProduct.product.ean_13 || "N/A"}</p>
+                      {currentProduct.product.modelo_grupo && currentProduct.product.modelo_grupo !== "sin modelo" && (
+                        <p className="text-xs text-neutral-500 font-semibold">Modelo: {currentProduct.product.modelo_grupo}</p>
+                      )}
                       
                       <div className="flex flex-wrap gap-1.5 justify-center sm:justify-start pt-1.5">
                         <span className="text-[10px] font-black uppercase px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded-lg text-neutral-300">
