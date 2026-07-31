@@ -261,6 +261,12 @@ export default function InventoryControlView({ userRole }: Props) {
   const [pendingTab, setPendingTab] = useState<"cajas" | "niveles">("cajas");
   const [loadingPending, setLoadingPending] = useState(false);
 
+  // Normalize data states
+  const [normalizePreview, setNormalizePreview] = useState<any[]>([]);
+  const [loadingNormalize, setLoadingNormalize] = useState(false);
+  const [applyingNormalize, setApplyingNormalize] = useState(false);
+  const [selectedNormalize, setSelectedNormalize] = useState<Set<number>>(new Set());
+
   const handleDeleteBox = async (boxId: number, boxName: string) => {
     if (!confirm(`¿Eliminar la caja "${boxName}"? Se borrará de caja_productos (los productos se conservan).`)) return;
     try {
@@ -281,6 +287,39 @@ export default function InventoryControlView({ userRole }: Props) {
   useEffect(() => {
     if (activeEvent?.id) { fetchPending(); }
   }, [activeEvent?.id]);
+
+  const fetchNormalizePreview = async () => {
+    setLoadingNormalize(true);
+    try {
+      const res = await fetch("/api/productos/normalize-preview");
+      if (res.ok) {
+        const data = await res.json();
+        setNormalizePreview(data.products || []);
+        setSelectedNormalize(new Set((data.products || []).map((p: any) => p.id_producto)));
+      }
+    } catch (_) { toast.error("Error al cargar productos para normalizar"); }
+    setLoadingNormalize(false);
+  };
+
+  const applyNormalization = async () => {
+    if (selectedNormalize.size === 0) return;
+    setApplyingNormalize(true);
+    try {
+      const res = await fetch("/api/productos/normalize-apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selectedNormalize] })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`${data.updated} productos actualizados, ${data.skipped} omitidos`);
+        fetchNormalizePreview();
+      } else {
+        toast.error("Error al aplicar normalización");
+      }
+    } catch (_) { toast.error("Error de red al aplicar normalización"); }
+    setApplyingNormalize(false);
+  };
 
   const groupedReportTree = React.useMemo(() => {
     const tree: Record<string, {
@@ -2136,6 +2175,113 @@ export default function InventoryControlView({ userRole }: Props) {
                   </CardContent>
                 </Card>
               )}
+
+              {/* Normalizado de Datos */}
+              <Card className="border-none shadow-lg rounded-3xl bg-white overflow-hidden">
+                <CardHeader className="bg-neutral-50 border-b pb-4">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-bold flex items-center gap-1.5 uppercase text-neutral-800">
+                      <Layers size={16} /> Normalizado de Datos
+                    </CardTitle>
+                    <button onClick={fetchNormalizePreview} disabled={loadingNormalize}
+                      className="h-7 w-7 flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-700">
+                      <RefreshCw size={14} className={loadingNormalize ? "animate-spin" : ""} />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-neutral-400 font-semibold mt-1">
+                    Corrige productos con modelo compuesto (ej: "W5BP39KACM2-F0D9" → modelo: "W5BP39KACM2" + color: "F0D9")
+                  </p>
+                </CardHeader>
+                <CardContent className="p-0 max-h-[400px] overflow-y-auto">
+                  {loadingNormalize ? (
+                    <div className="py-8 flex justify-center"><Loader2 className="animate-spin text-neutral-300" /></div>
+                  ) : normalizePreview.length === 0 ? (
+                    <div className="py-12 text-center text-neutral-400 text-xs font-semibold">
+                      <p>Presiona el botón de actualizar para buscar productos con modelo compuesto.</p>
+                      <p className="mt-1 text-neutral-300">Si todos los productos ya están normalizados, no se mostrarán resultados.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="px-4 py-3 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-blue-700 uppercase">
+                          {normalizePreview.length} productos por normalizar ({selectedNormalize.size} seleccionados)
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setSelectedNormalize(new Set(normalizePreview.map(p => p.id_producto)))}
+                            className="text-[9px] font-bold text-blue-600 hover:text-blue-800 uppercase"
+                          >
+                            Todos
+                          </button>
+                          <button
+                            onClick={() => setSelectedNormalize(new Set())}
+                            className="text-[9px] font-bold text-neutral-400 hover:text-neutral-600 uppercase"
+                          >
+                            Ninguno
+                          </button>
+                        </div>
+                      </div>
+                      <div className="divide-y divide-neutral-100">
+                        {normalizePreview.slice(0, 100).map((item: any) => (
+                          <div key={item.id_producto}
+                            className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
+                              selectedNormalize.has(item.id_producto) ? "bg-blue-50/60 hover:bg-blue-50" : "hover:bg-neutral-50"
+                            }`}
+                            onClick={() => {
+                              const next = new Set(selectedNormalize);
+                              if (next.has(item.id_producto)) next.delete(item.id_producto);
+                              else next.add(item.id_producto);
+                              setSelectedNormalize(next);
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedNormalize.has(item.id_producto)}
+                              onChange={() => {}}
+                              className="w-3.5 h-3.5 accent-blue-600"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-black text-red-500 line-through truncate max-w-[140px]">
+                                  {item.modelo_grupo_actual}
+                                </span>
+                                <span className="text-neutral-300">→</span>
+                                <span className="text-[10px] font-black text-emerald-600 truncate max-w-[100px]">
+                                  {item.modelo_grupo_nuevo}
+                                </span>
+                                <span className="text-[10px] font-bold text-blue-500">
+                                  +{item.codigo_color_nuevo}
+                                </span>
+                              </div>
+                              <p className="text-[9px] text-neutral-400 font-semibold mt-0.5">
+                                SKU: {item.sku} · Talla: {item.talla}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                        {normalizePreview.length > 100 && (
+                          <p className="py-2 text-center text-[10px] text-neutral-400">
+                            ... y {normalizePreview.length - 100} más
+                          </p>
+                        )}
+                      </div>
+                      <div className="px-4 py-3 border-t border-neutral-100 bg-neutral-50/50">
+                        <Button
+                          onClick={applyNormalization}
+                          disabled={applyingNormalize || selectedNormalize.size === 0}
+                          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs uppercase h-10 shadow-md shadow-emerald-600/10 border-none transition-all disabled:opacity-50"
+                        >
+                          {applyingNormalize ? (
+                            <><Loader2 size={14} className="animate-spin mr-2" /> Aplicando...</>
+                          ) : (
+                            <><CheckCircle2 size={14} className="mr-2" /> Normalizar {selectedNormalize.size} Productos</>
+                          )}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
 
               {/* Bandeja de Aprobación */}
               <Card className="border-none shadow-lg rounded-3xl bg-white overflow-hidden">

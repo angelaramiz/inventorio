@@ -1602,6 +1602,111 @@ app.delete("/api/productos/:id", async (req, res) => {
   }
 });
 
+// GET /api/productos/normalize-preview - Preview products with compound modelo_grupo that need splitting
+app.get("/api/productos/normalize-preview", async (req, res) => {
+  try {
+    await detectSchema();
+    if (!hasModeloGrupoColumn || !hasCodigoColorColumn) {
+      return res.status(400).json({ error: "Las columnas modelo_grupo y codigo_color son requeridas" });
+    }
+    const supabase = getSupabase();
+    
+    // Find products where modelo_grupo contains a hyphen (compound format like "W5BP39KACM2-F0D9")
+    // and codigo_color is null or empty (not yet normalized)
+    const { data: products, error } = await supabase
+      .from("productos")
+      .select("id_producto, sku, modelo_grupo, codigo_color, talla, activo")
+      .eq("activo", true)
+      .not("modelo_grupo", "is", null)
+      .or("codigo_color.is.null,codigo_color.eq.")
+      .limit(2000);
+    
+    if (error) throw error;
+    
+    // Filter products where modelo_grupo contains a hyphen (compound format)
+    const compoundPattern = /^(.+)-(.+)$/;
+    const toNormalize = (products || []).filter((p: any) => {
+      if (!p.modelo_grupo) return false;
+      const match = p.modelo_grupo.match(compoundPattern);
+      return match !== null;
+    }).map((p: any) => {
+      const match = p.modelo_grupo.match(compoundPattern)!;
+      return {
+        id_producto: p.id_producto,
+        sku: p.sku,
+        modelo_grupo_actual: p.modelo_grupo,
+        codigo_color_actual: p.codigo_color || null,
+        modelo_grupo_nuevo: match[1].trim(),
+        codigo_color_nuevo: match[2].trim(),
+        talla: p.talla
+      };
+    });
+    
+    res.json({ products: toNormalize, total: toNormalize.length });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/productos/normalize-apply - Apply normalization (split compound modelo_grupo)
+app.post("/api/productos/normalize-apply", async (req, res) => {
+  try {
+    await detectSchema();
+    if (!hasModeloGrupoColumn || !hasCodigoColorColumn) {
+      return res.status(400).json({ error: "Las columnas modelo_grupo y codigo_color son requeridas" });
+    }
+    const supabase = getSupabase();
+    const { ids } = req.body; // array of id_producto to normalize
+    
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: "ids array required" });
+    }
+    
+    const compoundPattern = /^(.+)-(.+)$/;
+    let updated = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    
+    // Process in batches of 50
+    for (let i = 0; i < ids.length; i += 50) {
+      const batch = ids.slice(i, i + 50);
+      const { data: products } = await supabase
+        .from("productos")
+        .select("id_producto, modelo_grupo, codigo_color")
+        .in("id_producto", batch);
+      
+      if (!products) continue;
+      
+      for (const p of products) {
+        if (!p.modelo_grupo) { skipped++; continue; }
+        const match = p.modelo_grupo.match(compoundPattern);
+        if (!match) { skipped++; continue; }
+        
+        const newModelo = match[1].trim();
+        const newColor = match[2].trim();
+        
+        const { error: uErr } = await supabase
+          .from("productos")
+          .update({
+            modelo_grupo: newModelo,
+            codigo_color: newColor
+          })
+          .eq("id_producto", p.id_producto);
+        
+        if (uErr) {
+          errors.push(`ID ${p.id_producto}: ${uErr.message}`);
+        } else {
+          updated++;
+        }
+      }
+    }
+    
+    res.json({ updated, skipped, errors, total: ids.length });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/conceptos/temporadas - Get dynamic seasons with usage counts
 app.get("/api/conceptos/temporadas", async (req, res) => {
   try {
