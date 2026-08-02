@@ -2238,7 +2238,7 @@ app.post("/api/consultar-productos-batch", async (req, res) => {
     // Build product lookup maps
     const exactMap = new Map<string, any>();
     const strippedMap = new Map<string, any>();
-    const modeloMap = new Map<string, any>(); // modelo_grupo lowercase -> product
+    const modeloMap = new Map<string, any[]>(); // modelo_grupo lowercase -> [products]
     
     for (const product of (allProducts || [])) {
       if (product.sku) {
@@ -2250,7 +2250,10 @@ app.post("/api/consultar-productos-batch", async (req, res) => {
         strippedMap.set(product.ean_13.replace(/[\s\-]/g, '').toLowerCase(), product);
       }
       if (hasModeloGrupoColumn && product.modelo_grupo) {
-        modeloMap.set(product.modelo_grupo.toLowerCase(), product);
+        const mg = product.modelo_grupo.toLowerCase();
+        const existing = modeloMap.get(mg) || [];
+        existing.push(product);
+        modeloMap.set(mg, existing);
       }
     }
 
@@ -2274,9 +2277,22 @@ app.post("/api/consultar-productos-batch", async (req, res) => {
         }
       }
       
-      // c) Match by modelo_grupo (from CSV material column)
+      // c) Match by modelo_grupo: exact match first, then prefix match
       if (!product && modelo && hasModeloGrupoColumn) {
-        product = modeloMap.get(modelo.toLowerCase());
+        const modeloLower = modelo.toLowerCase();
+        // Exact match
+        const exactMatch = modeloMap.get(modeloLower);
+        if (exactMatch && exactMatch.length > 0) {
+          product = exactMatch[0];
+        } else {
+          // Prefix match: "W5BP39KACM2" should match "W5BP39KACM2-G1H3"
+          for (const [key, products] of modeloMap) {
+            if (key.startsWith(modeloLower + '-') || key === modeloLower) {
+              product = products[0];
+              break;
+            }
+          }
+        }
       }
       
       if (product) {
@@ -2291,27 +2307,54 @@ app.post("/api/consultar-productos-batch", async (req, res) => {
       // Also add ALL products with same modelo_grupo (variants: different sizes/colors)
       if (hasModeloGrupoColumn && product.modelo_grupo) {
         const mg = product.modelo_grupo.toLowerCase();
-        for (const [, p] of modeloMap) {
-          if (p.modelo_grupo?.toLowerCase() === mg) {
-            allRelevantIds.add(p.id_producto);
-          }
+        const variants = modeloMap.get(mg) || [];
+        for (const p of variants) {
+          allRelevantIds.add(p.id_producto);
         }
       }
     }
+
+    console.log(`[Batch] Matched ${queryProductMap.size} products, ${allRelevantIds.size} total variant IDs`);
 
     // 4. Fetch boxes for ALL relevant products
     const boxMap = new Map<number, any[]>();
     const productIds = [...allRelevantIds];
     
+    // Fetch all caja_productos for these IDs with proper join
     if (productIds.length > 0) {
       for (let ci = 0; ci < productIds.length; ci += 50) {
         const chunk = productIds.slice(ci, ci + 50);
+        console.log(`[Batch] Fetching caja_productos for chunk ${ci} (${chunk.length} IDs)`);
+        
         const { data: cajaProd, error: cpErr } = await supabase
           .from("caja_productos")
-          .select("id_producto, cantidad, cajas(id_caja, numero_caja, sku, estado, id_zona_seccion, id_zona_almacen, zonas_seccion(nombre, zonas_almacen(nombre)), zonas_almacen(nombre))")
+          .select(`
+            id_producto,
+            cantidad,
+            cajas (
+              id_caja,
+              numero_caja,
+              sku,
+              estado,
+              id_zona_seccion,
+              id_zona_almacen,
+              zonas_seccion (
+                nombre,
+                zonas_almacen (nombre)
+              ),
+              zonas_almacen (
+                nombre
+              )
+            )
+          `)
           .in("id_producto", chunk);
         
-        if (!cpErr && cajaProd) {
+        if (cpErr) {
+          console.error(`[Batch] Error fetching caja_productos for chunk ${ci}:`, cpErr);
+        }
+        
+        if (cajaProd && cajaProd.length > 0) {
+          console.log(`[Batch] Found ${cajaProd.length} caja_productos entries for chunk ${ci}`);
           for (const cp of cajaProd) {
             const existing = boxMap.get(cp.id_producto) || [];
             const c = cp.cajas as any;
@@ -2332,9 +2375,96 @@ app.post("/api/consultar-productos-batch", async (req, res) => {
             });
             boxMap.set(cp.id_producto, existing);
           }
+        } else {
+          console.log(`[Batch] No caja_productos found for chunk ${ci} (${chunk.length} IDs)`);
         }
       }
     }
+
+    // Fallback: if no boxes found via direct query, try fetching by cajas.sku for each matched product
+    if (boxMap.size === 0) {
+      console.log(`[Batch] Fallback: trying to find boxes via cajas.sku`);
+      for (const [queryIdx, product] of queryProductMap) {
+        // Try matching by SKU
+        if (product.sku) {
+          const { data: caja } = await supabase
+            .from("vista_total_cajas")
+            .select("*")
+            .eq("sku", product.sku)
+            .maybeSingle();
+          
+          if (caja) {
+            const { data: prods } = await supabase
+              .from("caja_productos")
+              .select("id_producto, cantidad")
+              .eq("id_caja", caja.id_caja);
+            
+            // Find the matching product in the box
+            for (const cp of prods || []) {
+              if (cp.id_producto === product.id_producto) {
+                const existing = boxMap.get(product.id_producto) || [];
+                existing.push({
+                  cantidad: cp.cantidad,
+                  cajas: {
+                    id_caja: caja.id_caja,
+                    numero_caja: caja.numero_caja,
+                    sku: caja.sku,
+                    estado: caja.estado,
+                    id_zona_seccion: caja.id_zona_seccion,
+                    id_zona_almacen: caja.id_zona_almacen,
+                    seccion_nombre: caja.zonas_seccion?.nombre || null,
+                    almacen_nombre: caja.zonas_seccion?.zonas_almacen?.nombre || caja.zonas_almacen?.nombre || null
+                  }
+                });
+                boxMap.set(product.id_producto, existing);
+                console.log(`[Batch] Found box via cajas.sku for product ${product.id_producto}`);
+                break;
+              }
+            }
+          }
+        }
+        
+        // Try matching by EAN_13
+        if (product.ean_13 && !boxMap.has(product.id_producto)) {
+          const { data: caja } = await supabase
+            .from("vista_total_cajas")
+            .select("*")
+            .eq("sku", product.ean_13)
+            .maybeSingle();
+          
+          if (caja) {
+            const { data: prods } = await supabase
+              .from("caja_productos")
+              .select("id_producto, cantidad")
+              .eq("id_caja", caja.id_caja);
+            
+            for (const cp of prods || []) {
+              if (cp.id_producto === product.id_producto) {
+                const existing = boxMap.get(product.id_producto) || [];
+                existing.push({
+                  cantidad: cp.cantidad,
+                  cajas: {
+                    id_caja: caja.id_caja,
+                    numero_caja: caja.numero_caja,
+                    sku: caja.sku,
+                    estado: caja.estado,
+                    id_zona_seccion: caja.id_zona_seccion,
+                    id_zona_almacen: caja.id_zona_almacen,
+                    seccion_nombre: caja.zonas_seccion?.nombre || null,
+                    almacen_nombre: caja.zonas_seccion?.zonas_almacen?.nombre || caja.zonas_almacen?.nombre || null
+                  }
+                });
+                boxMap.set(product.id_producto, existing);
+                console.log(`[Batch] Found box via cajas.sku (EAN) for product ${product.id_producto}`);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    console.log(`[Batch] Box map has ${boxMap.size} products with boxes`);
 
     // 5. Build results: aggregate boxes from ALL variants of same modelo_grupo
     const results = limited.map((q: any, i: number) => {
@@ -2345,12 +2475,10 @@ app.post("/api/consultar-productos-batch", async (req, res) => {
       let allBoxes: any[] = [];
       if (hasModeloGrupoColumn && product.modelo_grupo) {
         const mg = product.modelo_grupo.toLowerCase();
-        for (const [pid, boxes] of boxMap) {
-          // Check if this product is a variant (same modelo_grupo)
-          const p = allProducts?.find((ap: any) => ap.id_producto === pid);
-          if (p?.modelo_grupo?.toLowerCase() === mg) {
-            allBoxes = allBoxes.concat(boxes);
-          }
+        const variants = modeloMap.get(mg) || [];
+        for (const v of variants) {
+          const vBoxes = boxMap.get(v.id_producto) || [];
+          allBoxes = allBoxes.concat(vBoxes);
         }
       } else {
         allBoxes = boxMap.get(product.id_producto) || [];
