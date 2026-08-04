@@ -1233,6 +1233,255 @@ fun ConfigTab(
                 }
             }
         }
+
+        // ── OCR Training Dashboard ─────────────────────────────────
+        OcrTrainingDashboard(serverUrl = serverUrl, client = client)
+    }
+}
+
+@Composable
+fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    var stats by remember { mutableStateOf<Map<String, Any>?>(null) }
+    var isLoadingStats by remember { mutableStateOf(false) }
+    var isVerifying by remember { mutableStateOf(false) }
+    var isTraining by remember { mutableStateOf(false) }
+    var lastVerifyResult by remember { mutableStateOf<String?>(null) }
+    var lastTrainResult by remember { mutableStateOf<String?>(null) }
+
+    // Load stats
+    val loadStats = {
+        isLoadingStats = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                val req = Request.Builder()
+                    .url("${serverUrl.trimEnd('/')}/api/ocr/training-stats")
+                    .build()
+                client.newCall(req).execute().use { res ->
+                    if (res.isSuccessful) {
+                        val body = res.body?.string() ?: "{}"
+                        val jsonObj = org.json.JSONObject(body)
+                        val map = mutableMapOf<String, Any>()
+                        for (key in jsonObj.keys()) {
+                            map[key] = jsonObj.get(key)
+                        }
+                        withContext(Dispatchers.Main) { stats = map }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("OcrTraining", "Error loading stats: ${e.message}")
+            } finally {
+                withContext(Dispatchers.Main) { isLoadingStats = false }
+            }
+        }
+    }
+
+    LaunchedEffect(serverUrl) { loadStats() }
+
+    // Verify batch
+    val verifyBatch = {
+        isVerifying = true
+        lastVerifyResult = null
+        scope.launch(Dispatchers.IO) {
+            try {
+                val body = Gson().toJson(mapOf("limit" to 10))
+                val req = Request.Builder()
+                    .url("${serverUrl.trimEnd('/')}/api/ocr/verify-batch")
+                    .post(body.toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { res ->
+                    val result = res.body?.string() ?: "{}"
+                    withContext(Dispatchers.Main) {
+                        lastVerifyResult = if (res.isSuccessful) {
+                            val jsonObj = org.json.JSONObject(result)
+                            "Verificados: ${jsonObj.optInt("verified", 0)}/${jsonObj.optInt("total", 0)}"
+                        } else {
+                            "Error: ${res.code}"
+                        }
+                        isVerifying = false
+                        loadStats()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    lastVerifyResult = "Error: ${e.message}"
+                    isVerifying = false
+                }
+            }
+        }
+    }
+
+    // Trigger training
+    val triggerTraining = {
+        isTraining = true
+        lastTrainResult = null
+        scope.launch(Dispatchers.IO) {
+            try {
+                val req = Request.Builder()
+                    .url("${serverUrl.trimEnd('/')}/api/ocr/start-training")
+                    .post("{}".toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { res ->
+                    val result = res.body?.string() ?: "{}"
+                    withContext(Dispatchers.Main) {
+                        lastTrainResult = if (res.isSuccessful) {
+                            val jsonObj = org.json.JSONObject(result)
+                            "Training iniciado: ${jsonObj.optString("message", "OK")}"
+                        } else {
+                            "Error: ${res.code}"
+                        }
+                        isTraining = false
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    lastTrainResult = "Error: ${e.message}"
+                    isTraining = false
+                }
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Entrenamiento OCR",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 15.sp,
+                        color = Color(0xFF0F172A)
+                    )
+                    Text(
+                        text = "Dataset para PaddleOCR — datos recopilados automáticamente",
+                        fontSize = 10.sp,
+                        color = Color.Gray
+                    )
+                }
+                if (isLoadingStats) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                }
+            }
+
+            // Stats grid
+            if (stats != null) {
+                val total = (stats!!["total_samples"] as? Number)?.toInt() ?: 0
+                val verified = (stats!!["verified_samples"] as? Number)?.toInt() ?: 0
+                val pending = (stats!!["pending_verification"] as? Number)?.toInt() ?: 0
+                val mlkitCorrect = (stats!!["mlkit_correct"] as? Number)?.toInt() ?: 0
+                val mlkitIncorrect = (stats!!["mlkit_incorrect"] as? Number)?.toInt() ?: 0
+                val accuracy = (stats!!["mlkit_accuracy_pct"] as? Number)?.toDouble() ?: 0.0
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OcrStatCard("Total", "$total", Color(0xFF7C3AED), Modifier.weight(1f))
+                    OcrStatCard("Verificados", "$verified", Color(0xFF059669), Modifier.weight(1f))
+                    OcrStatCard("Pendientes", "$pending", Color(0xFFF59E0B), Modifier.weight(1f))
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OcrStatCard("ML Kit OK", "$mlkitCorrect", Color(0xFF10B981), Modifier.weight(1f))
+                    OcrStatCard("ML Kit Falló", "$mlkitIncorrect", Color(0xFFEF4444), Modifier.weight(1f))
+                    OcrStatCard("Accuracy", "%.1f%%".format(accuracy), Color(0xFF2563EB), Modifier.weight(1f))
+                }
+
+                // Accuracy bar
+                if (verified > 0) {
+                    Column {
+                        Text("Precisión ML Kit vs Groq", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+                        Spacer(Modifier.height(4.dp))
+                        Box(modifier = Modifier.fillMaxWidth().height(8.dp).background(Color(0xFFF1F5F9), RoundedCornerShape(4.dp))) {
+                            Box(modifier = Modifier
+                                .fillMaxWidth((accuracy / 100f).toFloat())
+                                .fillMaxHeight()
+                                .background(
+                                    when {
+                                        accuracy >= 80 -> Color(0xFF10B981)
+                                        accuracy >= 60 -> Color(0xFFF59E0B)
+                                        else -> Color(0xFFEF4444)
+                                    },
+                                    RoundedCornerShape(4.dp)
+                                )
+                            )
+                        }
+                    }
+                }
+            } else {
+                Text("No hay datos disponibles", fontSize = 11.sp, color = Color.Gray)
+            }
+
+            Divider(color = Color(0xFFF1F5F9))
+
+            // Action buttons
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { verifyBatch() },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                    shape = RoundedCornerShape(10.dp),
+                    enabled = !isVerifying && !isTraining
+                ) {
+                    if (isVerifying) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                    } else {
+                        Text("Verificar con Groq", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Button(
+                    onClick = { triggerTraining() },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                    shape = RoundedCornerShape(10.dp),
+                    enabled = !isTraining && !isVerifying
+                ) {
+                    if (isTraining) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                    } else {
+                        Text("Entrenar PaddleOCR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // Result messages
+            lastVerifyResult?.let {
+                Text(it, fontSize = 10.sp, color = if (it.startsWith("Verificados")) Color(0xFF059669) else Color(0xFFEF4444))
+            }
+            lastTrainResult?.let {
+                Text(it, fontSize = 10.sp, color = if (it.startsWith("Training")) Color(0xFF2563EB) else Color(0xFFEF4444))
+            }
+
+            // Info
+            Text(
+                text = "Los datos se recopilan automáticamente al escanear etiquetas. Verificar con Groq crea el ground truth para entrenar.",
+                fontSize = 9.sp,
+                color = Color(0xFF94A3B8)
+            )
+        }
+    }
+}
+
+@Composable
+fun OcrStatCard(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .background(color.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(value, fontWeight = FontWeight.Black, fontSize = 16.sp, color = color)
+        Text(label, fontSize = 8.sp, color = color.copy(alpha = 0.7f), fontWeight = FontWeight.Medium)
     }
 }
 

@@ -2,9 +2,6 @@ package com.inventorio.alpha
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -12,18 +9,30 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileOutputStream
-import java.util.concurrent.TimeUnit
 
 /**
- * Motor de OCR para etiquetas de ropa — llama.cpp edition.
+ * Motor de OCR para etiquetas de ropa — Maestro-Estudiante edition.
  *
- * Estrategia dual:
- *  1. Modelo local: Qwen2.5-VL-3B GGUF via llama.cpp (offline)
- *  2. Fallback: POST /api/ocr/extract-label en el servidor (requiere internet)
+ * Arquitectura de 2 tiers:
+ *  1. ML Kit Text Recognition (local, on-device, ~100ms, $0)
+ *     - Extrae texto crudo con ML Kit
+ *     - LabelTextParser analiza con heurísticas + regex
+ *     - Confidence scoring determina si necesita verificación
  *
- * El modelo GGUF (~2.3 GB Q4_K_M) se descarga de HuggingFace.
+ *  2. Server fallback (Groq → Gemini, requiere internet)
+ *     - Se usa si ML Kit falla o devuelve texto insuficiente
+ *     - Procesamiento en el servidor con IA de mayor capacidad
+ *
+ * Opcional: Groq second opinion (usuario habilita)
+ *  - Si confidence < threshold, envía a Groq como segunda opinión
+ *  - Costo: ~$0.001 por imagen (solo las inciertas)
+ *
+ * Flujo de datos:
+ *  Bitmap → ML Kit → Texto → Parser → LabelOcrResult
+ *                                  ↓
+ *                          ¿Confianza < 60%?
+ *                          Sí → Groq second opinion
+ *                          No → devolver resultado
  */
 class LabelOcrEngine(
     private val context: Context,
@@ -33,36 +42,34 @@ class LabelOcrEngine(
     companion object {
         private const val TAG = "LabelOcrEngine"
 
-        // ─── Model configs ───────────────────────────────────────
+        // Confidence threshold: por debajo de esto, Groq second opinion es recomendado
+        const val CONFIDENCE_THRESHOLD = 60
+
+        // ─── Backward compat stubs (para ModelDownloadDialog/Service) ──────
 
         data class ModelConfig(
             val id: String,
             val displayName: String,
-            val ggufFileName: String,
-            val mmprojFileName: String,
-            val baseUrl: String,
-            val dirName: String,
-            val totalBytes: Long
+            val ggufFileName: String = "",
+            val mmprojFileName: String = "",
+            val baseUrl: String = "",
+            val dirName: String = "mlkit_ocr",
+            val totalBytes: Long = 0L
         ) {
             val ggufUrl get() = "$baseUrl/$ggufFileName"
             val mmprojUrl get() = "$baseUrl/$mmprojFileName"
 
-            fun destDir(context: Context): File =
-                File(context.filesDir, dirName)
+            fun destDir(context: Context): java.io.File =
+                java.io.File(context.filesDir, dirName)
         }
 
-        val MODEL_QWEN25_7B = ModelConfig(
-            id = "qwen2.5-vl-7b-q4km",
-            displayName = "Qwen2.5-VL 7B Q4_K_M",
-            ggufFileName = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
-            mmprojFileName = "mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf",
-            baseUrl = "https://huggingface.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main",
-            dirName = "qwen_gguf_model",
-            totalBytes = 5_000_000_000L
+        private val MLKIT_CONFIG = ModelConfig(
+            id = "mlkit",
+            displayName = "ML Kit Text Recognition"
         )
 
-        val AVAILABLE_MODELS = listOf(MODEL_QWEN25_7B)
-        private var currentConfig: ModelConfig = MODEL_QWEN25_7B
+        val AVAILABLE_MODELS = listOf(MLKIT_CONFIG)
+        private var currentConfig: ModelConfig = MLKIT_CONFIG
 
         fun getModelConfig(id: String): ModelConfig? =
             AVAILABLE_MODELS.find { it.id == id }
@@ -72,108 +79,117 @@ class LabelOcrEngine(
         fun setCurrentConfig(config: ModelConfig) {
             currentConfig = config
         }
-
-        // ─── Backward compat helpers ────────────────────────────
-
-        private const val MODEL_DIR_NAME = "qwen_gguf_model"
-        private const val GGUF_FILE_NAME = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
-        private const val MMPROJ_FILE_NAME = "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf"
-        private const val HF_BASE_URL =
-            "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main"
-        private val MODEL_FILES = listOf(GGUF_FILE_NAME, MMPROJ_FILE_NAME)
-
-        private val LABEL_EXTRACTION_PROMPT = """
-            Analiza la imagen de esta etiqueta de ropa y extrae los datos que puedas ver.
-            Responde ÚNICAMENTE con un objeto JSON válido en este formato exacto, sin texto adicional:
-            {
-              "marca": "nombre de la marca o null",
-              "talla": "talla (XS/S/M/L/XL/número) o null",
-              "sku": "código SKU o referencia del producto o null",
-              "modelo_grupo": "nombre del modelo o colección o null",
-              "codigo_color": "código de color o null",
-              "fecha_temporada": "fecha o temporada o null"
-            }
-        """.trimIndent()
     }
 
     // ─── Estado público ──────────────────────────────────────────
 
-    val modelDir: File
-        get() = File(context.filesDir, currentConfig.dirName)
+    /** ML Kit siempre está listo — no necesita descarga */
+    val isModelReady: Boolean get() = true
 
-    val ggufFile: File
-        get() = File(modelDir, currentConfig.ggufFileName)
+    val modelSizeDescription: String get() = "ML Kit (on-device)"
 
-    val mmprojFile: File
-        get() = File(modelDir, currentConfig.mmprojFileName)
+    /** Solo para compatibilidad: always true */
+    val isAvailable: Boolean get() = true
 
-    val isModelReady: Boolean
-        get() = ggufFile.exists() && ggufFile.length() > 1024 * 1024 * 100 // >100MB
+    // ─── Backward compat stubs (para MainActivity/LogsView/ModelDownloadDialog) ──
 
-    val modelSizeDescription: String
-        get() {
-            val totalBytes = modelDir.walkTopDown()
-                .filter { it.isFile }
-                .sumOf { it.length() }
-            return when {
-                totalBytes > 1_000_000_000L -> "%.1f GB".format(totalBytes / 1_000_000_000.0)
-                totalBytes > 1_000_000L -> "%.0f MB".format(totalBytes / 1_000_000.0)
-                else -> "$totalBytes B"
-            }
-        }
+    val modelDir: java.io.File
+        get() = java.io.File(context.filesDir, "mlkit_ocr")
+
+    val ggufFile: java.io.File
+        get() = java.io.File(modelDir, "mlkit_placeholder.gguf")
+
+    val mmprojFile: java.io.File
+        get() = java.io.File(modelDir, "mlkit_placeholder.mmproj")
+
+    @Deprecated("ML Kit no necesita init", ReplaceWith("true"))
+    fun initLocalModel(): Boolean {
+        AppLogger.i(TAG, "✅ ML Kit — siempre listo.")
+        return true
+    }
+
+    @Deprecated("ML Kit no necesita descarga", ReplaceWith("true"))
+    fun downloadModel(onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
+        onProgress(100)
+        onDone(true, "ML Kit no necesita descarga — siempre disponible on-device")
+    }
+
+    @Deprecated("ML Kit no tiene modelo que borrar", ReplaceWith("true"))
+    fun deleteModel(): Boolean {
+        AppLogger.i(TAG, "ML Kit — no hay modelo que borrar.")
+        return true
+    }
 
     // ─── Punto de entrada principal ──────────────────────────────
 
-    suspend fun analyze(bitmap: Bitmap): LabelOcrResult = withContext(Dispatchers.IO) {
-        AppLogger.i("OCR", "=== analyze() iniciado ===")
-        AppLogger.i("OCR", "isModelReady=$isModelReady | isLoaded=${LlamacppBridge.isLoaded} | isAvailable=${LlamacppBridge.isAvailable}")
+    /**
+     * Analiza un bitmap y extrae campos de la etiqueta.
+     * Estrategia: ML Kit primero → Server fallback si falla.
+     *
+     * @param bitmap Imagen de la etiqueta
+     * @param enableGroqVerification Si true y confidence < threshold, usa Groq como segunda opinión
+     * @return LabelOcrResult con campos extraídos
+     */
+    suspend fun analyze(
+        bitmap: Bitmap,
+        enableGroqVerification: Boolean = false
+    ): LabelOcrResult {
+        AppLogger.i(TAG, "=== analyze() iniciado ===")
 
-        if (isModelReady && LlamacppBridge.isAvailable) {
-            AppLogger.i("OCR", "→ Intentando inferencia LOCAL ⚡ (llama.cpp)")
-            try {
-                val result = analyzeLocal(bitmap)
-                if (result != null) {
-                    AppLogger.i("OCR", "✅ Resultado LOCAL obtenido.")
-                    return@withContext result
-                }
-                AppLogger.w("OCR", "⚠️ analyzeLocal devolvió null. Intentando servidor.")
-            } catch (e: Throwable) {
-                AppLogger.e("OCR", "❌ Inferencia LOCAL falló: ${e.message}")
+        // Tier 1: ML Kit (local, rápido, gratis)
+        AppLogger.i(TAG, "→ Intentando ML Kit Text Recognition")
+        try {
+            val result = MlKitLabelOcrEngine.analyze(bitmap)
+            val confidence = extractConfidence(result.source)
+
+            AppLogger.i(TAG, "✅ ML Kit resultado: confidence=$confidence, modelo=${result.modeloGrupo}, talla=${result.talla}")
+
+            // Si confidence es alta, devolver directamente
+            if (confidence >= CONFIDENCE_THRESHOLD) {
+                AppLogger.i(TAG, "✅ Confianza alta ($confidence >= $CONFIDENCE_THRESHOLD). Resultado final.")
+                return result
             }
-        } else if (isModelReady && !LlamacppBridge.isAvailable) {
-            AppLogger.w("OCR", "⚠️ Modelo listo pero sesión inactiva. Iniciando...")
-            LlamacppBridge.initModel(context, ggufFile, mmprojFile)
-            if (LlamacppBridge.isAvailable) {
-                try {
-                    val result = analyzeLocal(bitmap)
-                    if (result != null) return@withContext result
-                } catch (e: Throwable) {
-                    AppLogger.e("OCR", "❌ Inferencia falló tras carga tardía: ${e.message}")
+
+            // Si confidence es baja y verificación está habilitada, intentar Groq
+            if (enableGroqVerification && confidence < CONFIDENCE_THRESHOLD) {
+                AppLogger.i(TAG, "⚠️ Confianza baja ($confidence < $CONFIDENCE_THRESHOLD). Intentando Groq second opinion...")
+                val groqResult = analyzeViaGroq(bitmap)
+                if (groqResult.hasAnyData) {
+                    // Usar el de mayor confidence
+                    val groqConf = extractConfidence(groqResult.source)
+                    if (groqConf > confidence) {
+                        AppLogger.i(TAG, "✅ Groq devolvió mejor resultado (confidence=$groqConf)")
+                        return groqResult
+                    }
                 }
             }
-        } else {
-            AppLogger.w("OCR", "⚠️ Modelo NO descargado. Usando servidor.")
+
+            // Si ML Kit extrajo algo, devolverlo (aunque con confidence baja)
+            if (result.hasAnyData) {
+                AppLogger.i(TAG, "⚠️ ML Kit con confianza baja pero con datos. Devolviendo resultado.")
+                return result
+            }
+        } catch (e: Throwable) {
+            AppLogger.e(TAG, "❌ ML Kit falló: ${e.message}")
         }
 
-        AppLogger.i("OCR", "→ Fallback SERVIDOR ☁️")
-        return@withContext analyzeRemote(bitmap)
+        // Tier 2: Server fallback (Groq → Gemini)
+        AppLogger.i(TAG, "→ Fallback SERVIDOR ☁️")
+        return analyzeRemote(bitmap)
     }
 
-    // ─── Inferencia local ────────────────────────────────────────
-
-    private suspend fun analyzeLocal(bitmap: Bitmap): LabelOcrResult? = withContext(Dispatchers.IO) {
-        val raw = LlamacppBridge.runVisionInference(context, bitmap, LABEL_EXTRACTION_PROMPT)
-            ?: return@withContext null
-        parseJsonResponse(raw, source = "local")
+    /**
+     * Versión simplificada para compatibilidad con código existente.
+     */
+    suspend fun analyze(bitmap: Bitmap): LabelOcrResult {
+        return analyze(bitmap, enableGroqVerification = false)
     }
 
-    // ─── Fallback: servidor ──────────────────────────────────────
+    // ─── Groq directo (second opinion) ──────────────────────────
 
-    suspend fun analyzeRemote(bitmap: Bitmap): LabelOcrResult = withContext(Dispatchers.IO) {
-        try {
-            val bytes = ByteArrayOutputStream().also { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-            }.toByteArray()
+    private suspend fun analyzeViaGroq(bitmap: Bitmap): LabelOcrResult {
+        return try {
+            val bytes = bitmapToJpeg(bitmap, 85)
             val body = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("foto", "label.jpg", bytes.toRequestBody("image/jpeg".toMediaType()))
@@ -184,9 +200,34 @@ class LabelOcrEngine(
                 .build()
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    parseJsonResponse(response.body?.string() ?: "{}", source = "servidor")
+                    parseJsonResponse(response.body?.string() ?: "{}", source = "groq-verification")
                 } else {
-                    LabelOcrResult.empty(source = "servidor")
+                    LabelOcrResult.empty(source = "groq-failed")
+                }
+            }
+        } catch (e: Exception) {
+            LabelOcrResult.empty(source = "groq-error")
+        }
+    }
+
+    // ─── Server fallback ────────────────────────────────────────
+
+    suspend fun analyzeRemote(bitmap: Bitmap): LabelOcrResult {
+        return try {
+            val bytes = bitmapToJpeg(bitmap, 90)
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("foto", "label.jpg", bytes.toRequestBody("image/jpeg".toMediaType()))
+                .build()
+            val request = Request.Builder()
+                .url("${serverUrl.trimEnd('/')}/api/ocr/extract-label")
+                .post(body)
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    parseJsonResponse(response.body?.string() ?: "{}", source = "server")
+                } else {
+                    LabelOcrResult.empty(source = "server-error")
                 }
             }
         } catch (e: Exception) {
@@ -194,7 +235,19 @@ class LabelOcrEngine(
         }
     }
 
-    // ─── Parser JSON ─────────────────────────────────────────────
+    // ─── Helpers ─────────────────────────────────────────────────
+
+    private fun bitmapToJpeg(bitmap: Bitmap, quality: Int): ByteArray {
+        return ByteArrayOutputStream().also { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        }.toByteArray()
+    }
+
+    private fun extractConfidence(source: String): Int {
+        // source format: "mlkit-75" or "server" or "groq-verification"
+        val match = Regex("""mlkit-(\d+)""").find(source)
+        return match?.groupValues?.get(1)?.toIntOrNull() ?: 50
+    }
 
     private fun parseJsonResponse(raw: String, source: String): LabelOcrResult {
         return try {
@@ -214,6 +267,7 @@ class LabelOcrEngine(
                 ?: json.optString("temporada").takeIf { it != "null" && it.isNotBlank() }
                 ?: json.optString("season").takeIf { it != "null" && it.isNotBlank() }
 
+            // Split modelo compuesto: "MODELO-COLOR"
             if (modelo != null && modelo.contains("-")) {
                 val parts = modelo.split("-")
                 modelo = parts[0].trim()
@@ -232,102 +286,6 @@ class LabelOcrEngine(
         } catch (e: Exception) {
             LabelOcrResult.empty(source = source)
         }
-    }
-
-    // ─── Gestión del modelo ──────────────────────────────────────
-
-    fun downloadModel(onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
-        // Cliente dedicado para descarga — timeouts extendidos (hasta 30 min sin datos)
-        val downloadClient = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS)   // sin timeout de lectura
-            .writeTimeout(0, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .build()
-        try {
-            modelDir.mkdirs()
-            val totalFiles = MODEL_FILES.size
-
-            MODEL_FILES.forEachIndexed { index, fileName ->
-                val dest = File(modelDir, fileName)
-                val fileUrl = "$HF_BASE_URL/$fileName"
-                var expectedSize: Long = -1
-
-                // HEAD check for file size
-                try {
-                    val headResp = downloadClient.newCall(Request.Builder().url(fileUrl).head().build()).execute()
-                    expectedSize = headResp.body?.contentLength() ?: -1
-                    headResp.close()
-                } catch (_: Exception) {}
-
-                if (dest.exists() && dest.length() > 0) {
-                    if (expectedSize > 0 && dest.length() == expectedSize) {
-                        onProgress(((index + 1) * 100) / totalFiles)
-                        return@forEachIndexed
-                    }
-                    if (expectedSize <= 0 && dest.length() > 1024 * 1024) {
-                        onProgress(((index + 1) * 100) / totalFiles)
-                        return@forEachIndexed
-                    }
-                    Log.w(TAG, "$fileName: tamaño local=${dest.length()} vs esperado=$expectedSize. Re-descargando...")
-                    dest.delete()
-                }
-
-                Log.i(TAG, "Descargando $fileName (${if (expectedSize > 0) "%.0f MB".format(expectedSize / 1_000_000.0) else "?"})")
-                val request = Request.Builder().url(fileUrl).build()
-
-                downloadClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        throw java.io.IOException("Error ${response.code} al descargar $fileName")
-                    }
-                    val body = response.body ?: throw java.io.IOException("Cuerpo vacío para $fileName")
-                    val total = body.contentLength()
-                    var downloaded = 0L
-                    body.byteStream().use { input ->
-                        FileOutputStream(dest).use { output ->
-                            val buffer = ByteArray(65536)
-                            var n: Int
-                            while (input.read(buffer).also { n = it } != -1) {
-                                output.write(buffer, 0, n)
-                                downloaded += n
-                                val fileProgress = if (total > 0) (downloaded * 100 / total).toInt() else 50
-                                onProgress(((index * 100 + fileProgress) / totalFiles).coerceIn(0, 99))
-                            }
-                        }
-                    }
-                }
-
-                if (expectedSize > 0 && dest.length() != expectedSize) {
-                    dest.delete()
-                    throw java.io.IOException("$fileName incomplete: ${dest.length()} de $expectedSize bytes")
-                }
-                onProgress(((index + 1) * 100) / totalFiles)
-            }
-
-            onProgress(100)
-            onDone(true, "")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error descargando modelo: ${e.message}", e)
-            onDone(false, e.message ?: "Error desconocido")
-        }
-    }
-
-    fun deleteModel(): Boolean {
-        return try {
-            LlamacppBridge.destroyModel()
-            modelDir.deleteRecursively()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error borrando modelo: ${e.message}")
-            false
-        }
-    }
-
-    fun initLocalModel(): Boolean {
-        if (!isModelReady) {
-            LlamacppBridge.lastInitError = "Modelo no descargado completamente."
-            return false
-        }
-        return LlamacppBridge.initModel(context, ggufFile, mmprojFile)
     }
 }
 

@@ -4565,6 +4565,239 @@ app.post("/api/ocr/extract-label", ocrRateLimiter, upload.single("foto"), async 
   }
 });
 
+// POST /api/ocr/save-training - Guardar sample de entrenamiento OCR
+// Recibe imagen original + preprocesada en base64, resultado ML Kit, y metadata.
+// Almacena en Supabase para entrenamiento futuro de PaddleOCR.
+app.post("/api/ocr/save-training", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const {
+      image_original,
+      image_preprocessed,
+      mlkit_result,
+      barcode,
+      image_width,
+      image_height,
+      preprocessing_time_ms,
+      device_info
+    } = req.body;
+
+    if (!image_original || !mlkit_result) {
+      return res.status(400).json({ error: "Faltan campos requeridos: image_original, mlkit_result" });
+    }
+
+    // Guardar en tabla ocr_training_data
+    const { data, error } = await supabase
+      .from('ocr_training_data')
+      .insert({
+        image_original: image_original,
+        image_preprocessed: image_preprocessed || null,
+        mlkit_result: mlkit_result,
+        barcode: barcode || null,
+        image_width: image_width || null,
+        image_height: image_height || null,
+        preprocessing_time_ms: preprocessing_time_ms || null,
+        device_info: device_info || null,
+        is_verified: false,
+        created_at: new Date().toISOString()
+      })
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error("Error guardando training sample:", error.message);
+      // Si la tabla no existe, devolver success silencioso (no romper el flujo)
+      if (error.message?.includes('relation') || error.message?.includes('does not exist')) {
+        return res.status(200).json({ saved: false, reason: "Tabla ocr_training_data no existe aún" });
+      }
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(200).json({ saved: true, id: data?.id });
+  } catch (error: any) {
+    console.error("Error en save-training:", error.message?.slice(0, 200));
+    res.status(500).json({ error: error.message || "Error al guardar training sample" });
+  }
+});
+
+// POST /api/ocr/verify-batch - Verificar batch de training samples con Groq
+// Toma samples no verificados, los envía a Groq, y guarda el ground truth.
+app.post("/api/ocr/verify-batch", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { limit = 10 } = req.body;
+
+    // 1. Obtener samples no verificados
+    const { data: unverified, error: fetchError } = await supabase
+      .from('ocr_training_data')
+      .select('id, image_original, mlkit_result')
+      .eq('is_verified', false)
+      .order('created_at', { ascending: true })
+      .limit(limit);
+
+    if (fetchError || !unverified || unverified.length === 0) {
+      return res.status(200).json({ verified: 0, message: "No hay samples pendientes" });
+    }
+
+    let verifiedCount = 0;
+    const results: any[] = [];
+
+    // 2. Verificar cada sample con Groq
+    for (const sample of unverified) {
+      try {
+        const imageBase64 = sample.image_original;
+        if (!imageBase64) continue;
+
+        const groqResult = await runOcrWithFallback(imageBase64, 'image/jpeg');
+
+        // 3. Guardar ground truth
+        const { error: updateError } = await supabase
+          .from('ocr_training_data')
+          .update({
+            groq_truth: groqResult,
+            is_verified: true,
+            verified_at: new Date().toISOString(),
+            matches_mlkit: JSON.stringify(sample.mlkit_result) === JSON.stringify(groqResult)
+          })
+          .eq('id', sample.id);
+
+        if (!updateError) {
+          verifiedCount++;
+          results.push({
+            id: sample.id,
+            matches: JSON.stringify(sample.mlkit_result) === JSON.stringify(groqResult)
+          });
+        }
+      } catch (e: any) {
+        console.error(`Error verificando sample ${sample.id}:`, e.message?.slice(0, 100));
+      }
+    }
+
+    res.status(200).json({ verified: verifiedCount, total: unverified.length, results });
+  } catch (error: any) {
+    console.error("Error en verify-batch:", error.message?.slice(0, 200));
+    res.status(500).json({ error: error.message || "Error en verificación batch" });
+  }
+});
+
+// GET /api/ocr/training-stats - Estadísticas del dataset de entrenamiento
+app.get("/api/ocr/training-stats", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+
+    const { data, error } = await supabase
+      .from('ocr_training_data')
+      .select('id, is_verified, matches_mlkit, barcode, created_at');
+
+    if (error) {
+      // Si la tabla no existe, devolver stats vacías
+      if (error.message?.includes('relation') || error.message?.includes('does not exist')) {
+        return res.status(200).json({
+          total_samples: 0,
+          verified_samples: 0,
+          pending_verification: 0,
+          mlkit_correct: 0,
+          mlkit_incorrect: 0,
+          mlkit_accuracy_pct: 0,
+          unique_barcodes: 0,
+          first_sample: null,
+          last_sample: null
+        });
+      }
+      return res.status(500).json({ error: error.message });
+    }
+
+    const total = data?.length || 0;
+    const verified = data?.filter(r => r.is_verified).length || 0;
+    const pending = total - verified;
+    const mlkitCorrect = data?.filter(r => r.matches_mlkit === true).length || 0;
+    const mlkitIncorrect = data?.filter(r => r.matches_mlkit === false).length || 0;
+    const accuracy = verified > 0 ? Math.round(100.0 * mlkitCorrect / verified * 10) / 10 : 0;
+    const uniqueBarcodes = new Set(data?.filter(r => r.barcode).map(r => r.barcode)).size;
+    const dates = data?.map(r => r.created_at).filter(Boolean).sort();
+
+    res.status(200).json({
+      total_samples: total,
+      verified_samples: verified,
+      pending_verification: pending,
+      mlkit_correct: mlkitCorrect,
+      mlkit_incorrect: mlkitIncorrect,
+      mlkit_accuracy_pct: accuracy,
+      unique_barcodes: uniqueBarcodes,
+      first_sample: dates?.[0] || null,
+      last_sample: dates?.[dates.length - 1] || null
+    });
+  } catch (error: any) {
+    console.error("Error en training-stats:", error.message?.slice(0, 200));
+    res.status(500).json({ error: error.message || "Error al obtener stats" });
+  }
+});
+
+// POST /api/ocr/start-training - Iniciar entrenamiento de PaddleOCR
+// Ejecuta el script Python de training en el servidor.
+app.post("/api/ocr/start-training", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+
+    // 1. Verificar que hay suficientes datos
+    const { count, error: countError } = await supabase
+      .from('ocr_training_data')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_verified', true)
+      .not_.is_('groq_truth', 'null');
+
+    if (countError) {
+      return res.status(500).json({ error: countError.message });
+    }
+
+    if (!count || count < 100) {
+      return res.status(200).json({
+        started: false,
+        message: `Insuficientes datos verificados (${count || 0}/100 mínimo). Sigue recopilando.`,
+        verified_count: count || 0
+      });
+    }
+
+    // 2. Ejecutar training script (async, fire and forget)
+    // En producción, esto sería un job de Render o un cron job
+    const { exec } = require('child_process');
+    const scriptPath = './scripts/train_paddle_ocr.py';
+
+    // Verificar que el script existe
+    const fs = require('fs');
+    if (!fs.existsSync(scriptPath)) {
+      return res.status(200).json({
+        started: false,
+        message: "Script de training no encontrado. Verifica scripts/train_paddle_ocr.py",
+        verified_count: count
+      });
+    }
+
+    // Ejecutar en background
+    const envVars = `SUPABASE_URL=${process.env.SUPABASE_URL || ''} SUPABASE_KEY=${process.env.SUPABASE_ANON_KEY || ''}`;
+    const command = `${envVars} python ${scriptPath} --supabase-url "${process.env.SUPABASE_URL || ''}" --supabase-key "${process.env.SUPABASE_ANON_KEY || ''}" --output-dir ./training_output`;
+
+    exec(command, { timeout: 3600000 }, (error: any, stdout: string, stderr: string) => {
+      if (error) {
+        console.error("Training error:", error.message);
+        console.error("STDERR:", stderr);
+      } else {
+        console.log("Training completado:", stdout.slice(-500));
+      }
+    });
+
+    res.status(200).json({
+      started: true,
+      message: `Training iniciado con ${count} samples verificados`,
+      verified_count: count,
+      estimated_time: "10-30 minutos"
+    });
+  } catch (error: any) {
+    console.error("Error en start-training:", error.message?.slice(0, 200));
+    res.status(500).json({ error: error.message || "Error al iniciar training" });
+  }
+});
+
 // POST /api/productos/:id/async-image - Asynchronous image processor
 app.post("/api/productos/:id/async-image", upload.single('foto'), async (req, res) => {
   try {

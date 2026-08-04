@@ -86,6 +86,9 @@ dependencies {
   // ML Kit Barcode Scanning
   implementation("com.google.mlkit:barcode-scanning:17.3.0")
 
+  // ML Kit Text Recognition (OCR para etiquetas)
+  implementation("com.google.mlkit:text-recognition:16.0.0")
+
   // Coil - network image loading for Compose
   implementation("io.coil-kt:coil-compose:2.6.0")
 }
