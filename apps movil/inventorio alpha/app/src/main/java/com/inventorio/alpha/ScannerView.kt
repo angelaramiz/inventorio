@@ -206,7 +206,7 @@ fun ScannerView(
                             result.talla?.let { qrTalla = it }
                             result.modeloGrupo?.let { qrModelGroup = it }
                             ocrSource = result.source
-                            val sourceLabel = if (result.source == "local") "modelo local ⚡" else "servidor ☁️"
+                            val sourceLabel = if (result.source.contains("mlkit")) "ML Kit (on-device) ⚡" else "Servidor ☁️"
                             Toast.makeText(context, "Datos extraídos via $sourceLabel", Toast.LENGTH_SHORT).show()
                         } else {
                             ocrSource = result.source

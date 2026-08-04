@@ -178,26 +178,15 @@ fun MainAppScreen() {
 
     var isCheckingUpdate by remember { mutableStateOf(false) }
 
-    // OCR Engine — inicializa modelo local Qwen2.5-VL bajo demanda
+    // OCR Engine — ML Kit Text Recognition (on-device, always ready)
     val ocrEngine = remember {
         LabelOcrEngine(context, client, serverUrl)
     }
 
-    // Auto-inicializar la IA local al arrancar si el modelo ya está listo y descargado
+    // ML Kit siempre está listo — no necesita inicialización
     LaunchedEffect(ocrEngine) {
-        AppLogger.i("MAIN", "=== App iniciada. Verificando estado de IA local... ===")
-        AppLogger.i("MAIN", "isModelReady=${ocrEngine.isModelReady} | isLoaded=${LlamacppBridge.isLoaded} | isAvailable=${LlamacppBridge.isAvailable}")
-        if (ocrEngine.isModelReady && !LlamacppBridge.isAvailable) {
-            AppLogger.i("MAIN", "Modelo descargado y sesión inactiva. Iniciando initLocalModel()...")
-            kotlinx.coroutines.withContext(Dispatchers.IO) {
-                val ok = ocrEngine.initLocalModel()
-                AppLogger.i("MAIN", if (ok) "✅ initLocalModel() exitoso. IA LOCAL lista." else "❌ initLocalModel() falló. lastInitError=${LlamacppBridge.lastInitError}")
-            }
-        } else if (!ocrEngine.isModelReady) {
-            AppLogger.w("MAIN", "⚠️ Modelo NO descargado. OCR usará servidor (nube). Descarga el modelo desde el Drawer > IA Model.")
-        } else if (LlamacppBridge.isAvailable) {
-            AppLogger.i("MAIN", "✅ IA LOCAL ya activa al iniciar. Listo para OCR offline.")
-        }
+        AppLogger.i("MAIN", "=== App iniciada. ML Kit Text Recognition listo ===")
+        AppLogger.i("MAIN", "✅ OCR on-device siempre disponible. Sin descarga necesaria.")
     }
 
 
@@ -334,140 +323,102 @@ fun MainAppScreen() {
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .fillMaxHeight()
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF0F172A)),
-                        contentAlignment = Alignment.Center
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.List, contentDescription = "Logo", tint = Color.White)
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF0F172A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.List, contentDescription = "Logo", tint = Color.White)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Inventorio Alpha",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 18.sp,
+                            color = Color(0xFF0F172A)
+                        )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "Inventorio Alpha",
-                        fontWeight = FontWeight.Black,
-                        fontSize = 18.sp,
-                        color = Color(0xFF0F172A)
-                    )
-                }
-                HorizontalDivider(color = Color(0xFFF1F5F9))
-                Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                listOf(
-                    Triple("dashboard", Icons.Default.Home, "Dashboard"),
-                    Triple("scanner", Icons.Default.QrCodeScanner, "Escáner Barcode"),
-                    Triple("batch_ocr", Icons.Default.Collections, "Escáner por Lote"),
-                    Triple("transferir", Icons.Default.ArrowForward, "Transferencias"),
-                    Triple("consulta", Icons.Default.ManageSearch, "Consulta Rápida"),
-                    Triple("productos", Icons.Default.Category, "Productos (Stock)"),
-                    Triple("cajas", Icons.Default.Inbox, "Contenedores (Cajas)"),
-                    Triple("conceptos", Icons.Default.LocalOffer, "Conceptos Catálogo"),
-                    Triple("almacen", Icons.Default.Warehouse, "Layout Almacén"),
-                    Triple("logs", Icons.Default.BugReport, "Diagnóstico / Logs"),
-                    Triple("config", Icons.Default.Settings, "Configuración"),
-                    Triple("appcatalog", Icons.Default.Apps, "Catálogo Apps")
-                ).forEach { (tabName, icon, label) ->
-                    val isSelected = activeTab == tabName
+                    listOf(
+                        Triple("dashboard", Icons.Default.Home, "Dashboard"),
+                        Triple("scanner", Icons.Default.QrCodeScanner, "Escáner Barcode"),
+                        Triple("batch_ocr", Icons.Default.Collections, "Escáner por Lote"),
+                        Triple("transferir", Icons.Default.ArrowForward, "Transferencias"),
+                        Triple("consulta", Icons.Default.ManageSearch, "Consulta Rápida"),
+                        Triple("productos", Icons.Default.Category, "Productos (Stock)"),
+                        Triple("cajas", Icons.Default.Inbox, "Contenedores (Cajas)"),
+                        Triple("conceptos", Icons.Default.LocalOffer, "Conceptos Catálogo"),
+                        Triple("almacen", Icons.Default.Warehouse, "Layout Almacén"),
+                        Triple("logs", Icons.Default.BugReport, "Diagnóstico / Logs"),
+                        Triple("config", Icons.Default.Settings, "Configuración"),
+                        Triple("appcatalog", Icons.Default.Apps, "Catálogo Apps")
+                    ).forEach { (tabName, icon, label) ->
+                        val isSelected = activeTab == tabName
+                        NavigationDrawerItem(
+                            icon = { Icon(icon, contentDescription = label) },
+                            label = { Text(label, fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                            selected = isSelected,
+                            onClick = {
+                                activeTab = tabName
+                                scope.launch { drawerState.close() }
+                            },
+                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
+
+                    // OCR Status
                     NavigationDrawerItem(
-                        icon = { Icon(icon, contentDescription = label) },
-                        label = { Text(label, fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                        selected = isSelected,
+                        icon = { Icon(Icons.Default.AutoAwesome, contentDescription = "OCR") },
+                        label = {
+                            Column {
+                                Text("OCR — Motor de Lectura", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text(
+                                    text = "✅ ML Kit Text Recognition",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF16A34A)
+                                )
+                            }
+                        },
+                        selected = false,
+                        onClick = { },
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                    )
+
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
+                    NavigationDrawerItem(
+                        icon = {
+                            if (isCheckingUpdate) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color(0xFF0F172A), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.SystemUpdate, contentDescription = "Actualización")
+                            }
+                        },
+                        label = { Text("Comprobar Actualización", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                        selected = false,
                         onClick = {
-                            activeTab = tabName
                             scope.launch { drawerState.close() }
+                            checkForUpdate(true)
                         },
                         modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                     )
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
-                Spacer(modifier = Modifier.weight(1f))
-                HorizontalDivider(color = Color(0xFFF1F5F9))
-
-                // Gestión del Modelo IA
-                var showOcrModelInfo by remember { mutableStateOf(false) }
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = "IA Model") },
-                    label = {
-                        Column {
-                            Text("IA — Modelo Etiquetas", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Text(
-                                text = if (ocrEngine.isModelReady) "✅ Listo (${ocrEngine.modelSizeDescription})" else "⬇️ No descargado",
-                                fontSize = 10.sp,
-                                color = if (ocrEngine.isModelReady) Color(0xFF16A34A) else Color(0xFF9CA3AF)
-                            )
-                        }
-                    },
-                    selected = false,
-                    onClick = { showOcrModelInfo = !showOcrModelInfo },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
-
-                if (showOcrModelInfo) {
-                    Column(
-                        modifier = Modifier
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                            .background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
-                            .padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            "${LabelOcrEngine.getCurrentConfig().displayName} · GGUF",
-                            fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF374151)
-                        )
-                        if (ocrEngine.isModelReady) {
-                            TextButton(
-                                onClick = {
-                                    ocrEngine.deleteModel()
-                                    scope.launch { drawerState.close() }
-                                    Toast.makeText(context, "Modelo eliminado", Toast.LENGTH_SHORT).show()
-                                    showOcrModelInfo = false
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Delete, null, Modifier.size(16.dp), tint = Color(0xFFDC2626))
-                                Spacer(Modifier.width(4.dp))
-                                Text("🗑️ Borrar modelo", color = Color(0xFFDC2626), fontSize = 11.sp)
-                            }
-                        } else {
-                            Button(
-                                onClick = {
-                                    showOcrModelInfo = false
-                                    scope.launch { drawerState.close() }
-                                    showOcrDownloadDialog = true
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("⬇️ Descargar modelo", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-
-                HorizontalDivider(color = Color(0xFFF1F5F9))
-                NavigationDrawerItem(
-                    icon = { 
-                        if (isCheckingUpdate) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color(0xFF0F172A), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.SystemUpdate, contentDescription = "Actualización")
-                        }
-                    },
-                    label = { Text("Comprobar Actualización", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                    selected = false,
-                    onClick = {
-                        scope.launch { drawerState.close() }
-                        checkForUpdate(true)
-                    },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
-                Spacer(modifier = Modifier.height(10.dp))
             }
         }
     ) {
@@ -777,85 +728,26 @@ fun MainAppScreen() {
         }
 
         if (showAiStatusDialog) {
-            val isLocalAi = LlamacppBridge.isAvailable
-            val err = LlamacppBridge.lastInitError
-            val modelValidation = remember(showAiStatusDialog) {
-                if (ocrEngine.isModelReady) {
-                    val ggufOk = ocrEngine.ggufFile.exists() && ocrEngine.ggufFile.length() > 0
-                    val mmprojOk = ocrEngine.mmprojFile.exists() && ocrEngine.mmprojFile.length() > 0
-                    if (!ggufOk || !mmprojOk) "Faltan archivos del modelo GGUF." else null
-                } else null
-            }
             AlertDialog(
                 onDismissRequest = { showAiStatusDialog = false },
-                title = { Text(if (isLocalAi) "IA Local Activa" else "IA Nube Activa") },
+                title = { Text("Estado del OCR") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Motor principal: ML Kit Text Recognition (on-device)")
+                        Text("Preprocesamiento: ImagePreprocessor (grayscale + CLAHE + Otsu)")
+                        Text("Parser: LabelTextParser (40+ marcas, regex)")
+                        Text("Fallback: Groq → Gemini (servidor)")
+                        Spacer(Modifier.height(4.dp))
                         Text(
-                            if (isLocalAi) "El motor nativo de IA local (${LabelOcrEngine.getCurrentConfig().displayName} via llama.cpp) se ha cargado e inicializado correctamente."
-                            else "Se está utilizando la API en la nube como fallback para las tareas de OCR."
+                            "ML Kit siempre está disponible. No necesita descarga de modelos.",
+                            color = Color(0xFF16A34A),
+                            fontSize = 11.sp
                         )
-                        if (err != null) {
-                            Text("Detalle del último error:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Text(
-                                text = err,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier
-                                    .background(Color(0xFFFEF2F2), shape = RoundedCornerShape(8.dp))
-                                    .padding(8.dp)
-                            )
-                        } else if (!isLocalAi && !ocrEngine.isModelReady) {
-                            Text(
-                                "El modelo local de IA no está descargado. Puedes descargarlo en Configuración.",
-                                color = Color.Gray,
-                                fontSize = 12.sp
-                            )
-                        }
-                        if (modelValidation != null) {
-                            Text("Validación de archivos:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Text(
-                                text = modelValidation,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
                     }
                 },
                 confirmButton = {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (!isLocalAi && ocrEngine.isModelReady) {
-                            var initializing by remember { mutableStateOf(false) }
-                            TextButton(
-                                enabled = !initializing,
-                                onClick = {
-                                    initializing = true
-                                    scope.launch(Dispatchers.IO) {
-                                        ocrEngine.initLocalModel()
-                                        withContext(Dispatchers.Main) {
-                                            initializing = false
-                                            if (LlamacppBridge.isAvailable) {
-                                                Toast.makeText(context, "IA Local inicializada correctamente", Toast.LENGTH_SHORT).show()
-                                                showAiStatusDialog = false
-                                            } else {
-                                                Toast.makeText(context, "Fallo al inicializar IA Local", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    }
-                                }
-                            ) {
-                                Text(if (initializing) "Iniciando..." else "Inicializar Local")
-                            }
-                        }
-                        Spacer(modifier = Modifier.weight(1f))
-                        TextButton(onClick = { showAiStatusDialog = false }) {
-                            Text("Cerrar")
-                        }
+                    TextButton(onClick = { showAiStatusDialog = false }) {
+                        Text("Cerrar")
                     }
                 }
             )
