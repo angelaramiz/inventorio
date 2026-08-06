@@ -132,14 +132,15 @@ class LabelOcrEngine(
      */
     suspend fun analyze(
         bitmap: Bitmap,
-        enableGroqVerification: Boolean = false
+        enableGroqVerification: Boolean = false,
+        barcode: String? = null
     ): LabelOcrResult {
         AppLogger.i(TAG, "=== analyze() iniciado ===")
 
         // Tier 1: ML Kit (local, rápido, gratis)
         AppLogger.i(TAG, "→ Intentando ML Kit Text Recognition")
         try {
-            val result = MlKitLabelOcrEngine.analyze(bitmap)
+            val result = MlKitLabelOcrEngine.analyze(bitmap, barcode = barcode)
             val confidence = extractConfidence(result.source)
 
             AppLogger.i(TAG, "✅ ML Kit resultado: confidence=$confidence, modelo=${result.modeloGrupo}, talla=${result.talla}")
@@ -244,8 +245,9 @@ class LabelOcrEngine(
     }
 
     private fun extractConfidence(source: String): Int {
-        // source format: "mlkit-75" or "server" or "groq-verification"
-        val match = Regex("""mlkit-(\d+)""").find(source)
+        // source format: "mlkit-preprocessed-88" or "mlkit-original-88" or "mlkit-raw-75" or "server"
+        val match = Regex("""mlkit-\w*-(\d+)""").find(source)
+            ?: Regex("""mlkit-(\d+)""").find(source)
         return match?.groupValues?.get(1)?.toIntOrNull() ?: 50
     }
 
