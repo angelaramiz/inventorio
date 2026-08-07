@@ -12,7 +12,7 @@ import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 // ─── Groq OCR Service ────────────────────────────────────────────
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
-const GROQ_MODEL = process.env.GROQ_MODEL || "qwen/qwen3.6-27b";
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.2-90b-vision-preview";
 
 const OCR_SYSTEM_PROMPT = `Analiza la foto de esta etiqueta de ropa. Extrae SOLO estos campos en JSON válido sin texto adicional:
 
@@ -44,6 +44,13 @@ interface OcrFields {
 }
 
 async function groqOcr(imageBase64: string, mimeType: string): Promise<OcrFields> {
+  // Truncar imagen si es muy grande (Groq limit: ~4MB total request)
+  // Base64 200KB ≈ 150KB imagen real
+  const maxBase64Len = 200000;
+  const truncatedImage = imageBase64.length > maxBase64Len
+    ? imageBase64.slice(0, maxBase64Len)
+    : imageBase64;
+
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -56,7 +63,7 @@ async function groqOcr(imageBase64: string, mimeType: string): Promise<OcrFields
         role: "user",
         content: [
           { type: "text", text: OCR_SYSTEM_PROMPT },
-          { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } }
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${truncatedImage}` } }
         ]
       }],
       temperature: 0.1,
@@ -94,7 +101,45 @@ function parseModelColor(result: OcrFields): OcrFields {
 }
 
 async function runOcrWithFallback(imageBase64: string, mimeType: string): Promise<OcrFields> {
-  // Try Groq first
+  // Gemini tiene soporte de imagen/vision. Groq NO tiene modelos vision.
+  // Intentar Gemini primero.
+
+  // 1. Try Gemini (vision support)
+  const geminiKey = process.env.GEMINI_API_KEY || "";
+  if (geminiKey) {
+    try {
+      console.log("[OCR] Trying Gemini...");
+      const ai = new GoogleGenerativeAI(geminiKey);
+      const model = ai.getGenerativeModel({
+        model: "gemini-2.5-flash",
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: SchemaType.OBJECT,
+            properties: {
+              modelo_grupo: { type: SchemaType.STRING },
+              codigo_color: { type: SchemaType.STRING },
+              fecha_temporada: { type: SchemaType.STRING },
+              sku: { type: SchemaType.STRING },
+              marca: { type: SchemaType.STRING },
+              talla: { type: SchemaType.STRING },
+            },
+            required: ["modelo_grupo"]
+          }
+        }
+      });
+
+      const imagePart = { inlineData: { data: imageBase64, mimeType } };
+      const result = await model.generateContent([OCR_SYSTEM_PROMPT, imagePart]);
+      const text = result.response.text();
+      console.log("[OCR] Gemini success:", text.slice(0, 120));
+      return parseModelColor(JSON.parse(text));
+    } catch (e: any) {
+      console.warn("[OCR] Gemini failed:", e.message?.slice(0, 120));
+    }
+  }
+
+  // 2. Try Groq (por si agregan vision en el futuro)
   if (GROQ_API_KEY) {
     try {
       console.log("[OCR] Trying Groq...");
@@ -106,38 +151,7 @@ async function runOcrWithFallback(imageBase64: string, mimeType: string): Promis
     }
   }
 
-  // Fallback to Gemini
-  console.log("[OCR] Falling back to Gemini...");
-  const geminiKey = process.env.GEMINI_API_KEY || "";
-  if (!geminiKey) throw new Error("No OCR API keys configured");
-
-  const ai = new GoogleGenerativeAI(geminiKey);
-  const model = ai.getGenerativeModel({
-    model: "gemini-2.5-flash",
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: SchemaType.OBJECT,
-        properties: {
-          modelo_grupo: { type: SchemaType.STRING },
-          codigo_color: { type: SchemaType.STRING },
-          fecha_temporada: { type: SchemaType.STRING },
-          sku: { type: SchemaType.STRING },
-          marca: { type: SchemaType.STRING },
-          talla: { type: SchemaType.STRING },
-        },
-        required: ["modelo_grupo"]
-      }
-    }
-  });
-
-  const imagePart = { inlineData: { data: imageBase64, mimeType } };
-  const prompt = OCR_SYSTEM_PROMPT;
-  
-  const result = await model.generateContent([prompt, imagePart]);
-  const text = result.response.text();
-  console.log("[OCR] Gemini success:", text.slice(0, 120));
-  return parseModelColor(JSON.parse(text));
+  throw new Error("No OCR API keys configured or all providers failed");
 }
 
 // In-memory event emitter for real-time stock updates
@@ -4620,12 +4634,12 @@ app.post("/api/ocr/save-training", async (req, res) => {
   }
 });
 
-// POST /api/ocr/verify-batch - Verificar batch de training samples con Groq
-// Toma samples no verificados, los envía a Groq, y guarda el ground truth.
+// POST /api/ocr/verify-batch - Verificar batch de training samples con Gemini
+// Procesa samples de UNO en UNO con delay para respetar rate limits de Gemini gratis.
 app.post("/api/ocr/verify-batch", async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { limit = 10 } = req.body;
+    const { limit = 3 } = req.body;  // Default 3 para rate limits
 
     // 1. Obtener samples no verificados
     const { data: unverified, error: fetchError } = await supabase
@@ -4639,37 +4653,53 @@ app.post("/api/ocr/verify-batch", async (req, res) => {
       return res.status(200).json({ verified: 0, message: "No hay samples pendientes" });
     }
 
+    // 2. Verificar cada sample secuencialmente con delay (rate limit Gemini)
     let verifiedCount = 0;
     const results: any[] = [];
+    const DELAY_MS = 2000;  // 2 segundos entre cada request
 
-    // 2. Verificar cada sample con Groq
-    for (const sample of unverified) {
+    for (let i = 0; i < unverified.length; i++) {
+      const sample = unverified[i];
       try {
         const imageBase64 = sample.image_original;
         if (!imageBase64) continue;
 
-        const groqResult = await runOcrWithFallback(imageBase64, 'image/jpeg');
+        // Truncar imagen si es muy grande
+        const truncatedImage = imageBase64.length > 200000
+          ? imageBase64.slice(0, 200000)
+          : imageBase64;
 
-        // 3. Guardar ground truth
-        const { error: updateError } = await supabase
+        const groqResult = await runOcrWithFallback(truncatedImage, 'image/jpeg');
+
+        // Comparar campos clave (case-insensitive)
+        const mlkit = sample.mlkit_result || {};
+        const matches = (
+          (mlkit.modelo_grupo || "").toUpperCase() === (groqResult.modelo_grupo || "").toUpperCase() &&
+          (mlkit.talla || "").toUpperCase() === (groqResult.talla || "").toUpperCase()
+        );
+
+        await supabase
           .from('ocr_training_data')
           .update({
             groq_truth: groqResult,
             is_verified: true,
             verified_at: new Date().toISOString(),
-            matches_mlkit: JSON.stringify(sample.mlkit_result) === JSON.stringify(groqResult)
+            matches_mlkit: matches
           })
           .eq('id', sample.id);
 
-        if (!updateError) {
-          verifiedCount++;
-          results.push({
-            id: sample.id,
-            matches: JSON.stringify(sample.mlkit_result) === JSON.stringify(groqResult)
-          });
-        }
+        verifiedCount++;
+        results.push({ id: sample.id, matches });
+
+        console.log(`[VERIFY] ${i + 1}/${unverified.length}: sample ${sample.id} → ${matches ? "MATCH" : "MISMATCH"}`);
       } catch (e: any) {
-        console.error(`Error verificando sample ${sample.id}:`, e.message?.slice(0, 100));
+        console.error(`[VERIFY] Error sample ${sample.id}:`, e.message?.slice(0, 100));
+        results.push({ id: sample.id, error: e.message?.slice(0, 100) });
+      }
+
+      // Delay entre requests (excepto el último)
+      if (i < unverified.length - 1) {
+        await new Promise(r => setTimeout(r, DELAY_MS));
       }
     }
 
@@ -4744,16 +4774,16 @@ app.post("/api/ocr/start-training", async (req, res) => {
       .from('ocr_training_data')
       .select('id', { count: 'exact', head: true })
       .eq('is_verified', true)
-      .not_.is_('groq_truth', 'null');
+      .not('groq_truth', 'is', null);
 
     if (countError) {
       return res.status(500).json({ error: countError.message });
     }
 
-    if (!count || count < 100) {
+    if (!count || count < 50) {
       return res.status(200).json({
         started: false,
-        message: `Insuficientes datos verificados (${count || 0}/100 mínimo). Sigue recopilando.`,
+        message: `Insuficientes datos verificados (${count || 0}/50 mínimo). Sigue recopilando.`,
         verified_count: count || 0
       });
     }

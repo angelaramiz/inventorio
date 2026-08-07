@@ -1178,7 +1178,7 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
         lastVerifyResult = null
         scope.launch(Dispatchers.IO) {
             try {
-                val body = Gson().toJson(mapOf("limit" to 10))
+                val body = Gson().toJson(mapOf("limit" to 3))
                 val req = Request.Builder()
                     .url("${serverUrl.trimEnd('/')}/api/ocr/verify-batch")
                     .post(body.toRequestBody("application/json".toMediaType()))

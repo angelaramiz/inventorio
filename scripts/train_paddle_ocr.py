@@ -113,8 +113,8 @@ class DatasetManager:
             response = supabase.table('ocr_training_data') \
                 .select('*') \
                 .eq('is_verified', True) \
-                .not_.is_('groq_truth', 'null') \
-                .not_.is_('image_preprocessed', 'null') \
+                .not_('groq_truth', 'is', None) \
+                .not_('image_preprocessed', 'is', None) \
                 .order('created_at', desc=True) \
                 .limit(5000) \
                 .execute()
