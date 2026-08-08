@@ -4601,6 +4601,9 @@ app.post("/api/ocr/save-training", async (req, res) => {
     }
 
     // Guardar en tabla ocr_training_data
+    const modelo = mlkit_result?.modelo_grupo || "";
+    const categoria = categorizeLabel(modelo);
+
     const { data, error } = await supabase
       .from('ocr_training_data')
       .insert({
@@ -4608,6 +4611,8 @@ app.post("/api/ocr/save-training", async (req, res) => {
         image_preprocessed: image_preprocessed || null,
         mlkit_result: mlkit_result,
         barcode: barcode || null,
+        modelo_grupo: modelo || null,
+        categoria: categoria,
         image_width: image_width || null,
         image_height: image_height || null,
         preprocessing_time_ms: preprocessing_time_ms || null,
@@ -4746,6 +4751,18 @@ app.get("/api/ocr/training-stats", async (req, res) => {
     const uniqueBarcodes = new Set(data?.filter(r => r.barcode).map(r => r.barcode)).size;
     const dates = data?.map(r => r.created_at).filter(Boolean).sort();
 
+    // Estadísticas por categoría
+    const byCategory: Record<string, { total: number; verified: number; correct: number }> = {};
+    data?.forEach(r => {
+      const cat = r.categoria || "sin_categoria";
+      if (!byCategory[cat]) byCategory[cat] = { total: 0, verified: 0, correct: 0 };
+      byCategory[cat].total++;
+      if (r.is_verified) {
+        byCategory[cat].verified++;
+        if (r.matches_mlkit === true) byCategory[cat].correct++;
+      }
+    });
+
     res.status(200).json({
       total_samples: total,
       verified_samples: verified,
@@ -4755,7 +4772,8 @@ app.get("/api/ocr/training-stats", async (req, res) => {
       mlkit_accuracy_pct: accuracy,
       unique_barcodes: uniqueBarcodes,
       first_sample: dates?.[0] || null,
-      last_sample: dates?.[dates.length - 1] || null
+      last_sample: dates?.[dates.length - 1] || null,
+      by_category: byCategory
     });
   } catch (error: any) {
     console.error("Error en training-stats:", error.message?.slice(0, 200));
@@ -4763,7 +4781,85 @@ app.get("/api/ocr/training-stats", async (req, res) => {
   }
 });
 
-// POST /api/ocr/start-training - Iniciar entrenamiento de PaddleOCR
+// ─── Categorización de etiquetas por prefijo ──────────────────
+function categorizeLabel(modelo: string): string {
+  const m = modelo.trim().toUpperCase();
+  if (!m || m.length < 2) return "desconocido";
+
+  const first = m.charAt(0);
+  const second = m.length > 1 ? m.charAt(1) : "";
+  const isDigit = (c: string) => c >= '0' && c <= '9';
+
+  // GW = Calzado Mujer, GM = Calzado Hombre
+  if (first === 'G' && second) {
+    if (second === 'W') return "calzado_mujer";
+    if (second === 'M') return "calzado_hombre";
+  }
+
+  // W = Ropa Mujer
+  if (first === 'W' && isDigit(second)) return "ropa_mujer";
+
+  // M = Ropa Hombre
+  if (first === 'M' && isDigit(second)) return "ropa_hombre";
+
+  // 3/4/5/6 = Marciano
+  if (isDigit(first) && (first === '3' || first === '4' || first === '5' || first === '6')) {
+    return "marciano";
+  }
+
+  // ESG/SSG = Bolsas/Mochilas
+  if (m.startsWith("ESG") || m.startsWith("SSG")) return "bolsas";
+
+  // PD/GWJR = Calzado descripción
+  if (m.startsWith("PD") || m.startsWith("GWJR") || m.startsWith("GMJR")) return "calzado_etiqueta";
+
+  // Default
+  if (first === 'G') return "calzado";
+  if (isDigit(first)) return "marciano";
+  return "general";
+}
+
+// POST /api/ocr/save-correction - Guardar corrección del usuario como ground truth
+app.post("/api/ocr/save-correction", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { barcode, mlkit_result, corrected_result, modelo_grupo } = req.body;
+
+    if (!barcode || !corrected_result) {
+      return res.status(400).json({ error: "barcode y corrected_result requeridos" });
+    }
+
+    // Categorizar por prefijo de modelo
+    const modelo = modelo_grupo || corrected_result.modelo_grupo || "";
+    const categoria = categorizeLabel(modelo);
+
+    const { error } = await supabase
+      .from('ocr_training_data')
+      .insert({
+        image_original: null, // Already saved in previous sample
+        image_preprocessed: null,
+        mlkit_result: mlkit_result || {},
+        groq_truth: corrected_result,
+        is_verified: true,
+        verified_at: new Date().toISOString(),
+        matches_mlkit: false, // User corrected = ML Kit was wrong
+        barcode: barcode,
+        modelo_grupo: modelo,
+        categoria: categoria,
+        device_info: "user-correction"
+      });
+
+    if (error) {
+      console.error("Error guardando corrección:", error.message);
+      return res.status(200).json({ saved: false, reason: error.message });
+    }
+
+    res.status(200).json({ saved: true, categoria });
+  } catch (error: any) {
+    console.error("Error en save-correction:", error.message?.slice(0, 200));
+    res.status(500).json({ error: error.message });
+  }
+});
 // Ejecuta el script Python de training en el servidor.
 app.post("/api/ocr/start-training", async (req, res) => {
   try {
@@ -5327,6 +5423,7 @@ app.post("/api/productos/batch-register", async (req, res) => {
     }
 
     const parsedProducts: any[] = [];
+    const updatedProducts: any[] = [];
 
     for (const item of products) {
       try {
@@ -5362,7 +5459,7 @@ app.post("/api/productos/batch-register", async (req, res) => {
           }
         }
 
-        // Registrar o actualizar producto en base de datos
+        // Registrar o actualizar producto
         const cleanSku = sanitizeIdentifier(item.sku || modelo, 100);
         if (cleanSku) {
           const fields = getProductFields();
@@ -5373,8 +5470,11 @@ app.post("/api/productos/batch-register", async (req, res) => {
             .maybeSingle();
 
           let productRecord = existing;
+          let wasUpdated = false;
+          const changedFields: string[] = [];
 
           if (!productRecord) {
+            // INSERT new product
             const insertData: any = {
               sku: cleanSku,
               ean_13: cleanSku,
@@ -5402,10 +5502,52 @@ app.post("/api/productos/batch-register", async (req, res) => {
             if (newProd && newProd[0]) {
               productRecord = newProd[0];
             }
+          } else {
+            // UPDATE existing product if new data is more complete
+            const updateData: any = {};
+            const tallaVal = sanitizeIdentifier(item.talla || "", 50);
+            if (tallaVal && tallaVal !== "SINTALLA" && (!productRecord.talla || productRecord.talla === "SinTalla")) {
+              updateData.talla = tallaVal;
+              changedFields.push("talla");
+            }
+            if (hasModeloGrupoColumn && modelo && modelo !== "sin modelo") {
+              if (!productRecord.modelo_grupo || productRecord.modelo_grupo === "sin modelo") {
+                updateData.modelo_grupo = modelo;
+                changedFields.push("modelo_grupo");
+              }
+            }
+            if (hasCodigoColorColumn && colorCode && !productRecord.codigo_color) {
+              updateData.codigo_color = colorCode;
+              changedFields.push("codigo_color");
+            }
+            if (hasFechaTemporadaColumn && item.fecha_temporada) {
+              const tempVal = sanitizeIdentifier(item.fecha_temporada, 50);
+              if (tempVal && !productRecord.fecha_temporada) {
+                updateData.fecha_temporada = tempVal;
+                changedFields.push("fecha_temporada");
+              }
+            }
+            const marcaVal = sanitizeIdentifier(item.marca || "", 100);
+            if (marcaVal && marcaVal !== "GUESS" && (!productRecord.marca_sub || productRecord.marca_sub === "Guess")) {
+              updateData.marca_sub = marcaVal;
+              changedFields.push("marca_sub");
+            }
+
+            if (Object.keys(updateData).length > 0) {
+              const { data: updated } = await supabase
+                .from("productos")
+                .update(updateData)
+                .eq("id_producto", productRecord.id_producto)
+                .select(fields);
+              if (updated && updated[0]) {
+                productRecord = updated[0];
+                wasUpdated = true;
+              }
+            }
           }
 
           if (productRecord) {
-            parsedProducts.push({
+            const entry: any = {
               modelo_grupo: modelo,
               codigo_color: colorCode,
               sku: productRecord.sku,
@@ -5415,7 +5557,11 @@ app.post("/api/productos/batch-register", async (req, res) => {
               genero,
               existeModelo: true,
               id_producto: productRecord.id_producto
-            });
+            };
+            parsedProducts.push(entry);
+            if (wasUpdated && changedFields.length > 0) {
+              updatedProducts.push({ ...entry, changed_fields: changedFields });
+            }
           }
         }
       } catch (err: any) {
@@ -5471,6 +5617,34 @@ app.post("/api/productos/batch-register", async (req, res) => {
         currentAssoc.forEach((a: any) => assocMap.set(a.id_producto, a.cantidad));
       }
 
+      // Verificar conflictos: productos que ya están en OTRO contenedor
+      const productIds = parsedProducts.map(p => p.id_producto).filter(Boolean);
+      const conflicts: any[] = [];
+
+      if (productIds.length > 0) {
+        const { data: existingInOther } = await supabase
+          .from("caja_productos")
+          .select("id_producto, id_caja, cantidad, cajas(numero_caja)")
+          .in("id_producto", productIds)
+          .neq("id_caja", targetCajaId);
+
+        if (existingInOther && existingInOther.length > 0) {
+          for (const assoc of existingInOther) {
+            const prod = parsedProducts.find(p => p.id_producto === assoc.id_producto);
+            if (prod) {
+              conflicts.push({
+                id_producto: assoc.id_producto,
+                modelo_grupo: prod.modelo_grupo,
+                sku: prod.sku,
+                existing_caja: assoc.cajas?.numero_caja || `Caja ${assoc.id_caja}`,
+                existing_caja_id: assoc.id_caja,
+                existing_cantidad: assoc.cantidad
+              });
+            }
+          }
+        }
+      }
+
       const scanCounts = new Map<number, number>();
       parsedProducts.forEach(p => {
         if (p.id_producto) {
@@ -5495,9 +5669,81 @@ app.post("/api/productos/batch-register", async (req, res) => {
         if (assocErr) throw assocErr;
         await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", targetCajaId).eq("estado", "vacia");
       }
+
+      // Emit domain event for real-time sync
+      emitDomainEvent("producto:batch-registered", {
+        id_caja: targetCajaId,
+        count: parsedProducts.length,
+        updated: updatedProducts.length
+      });
+
+      res.json({ parsedProducts, conflicts, updated: updatedProducts });
+    } else {
+      res.json({ parsedProducts, conflicts: [], updated: updatedProducts });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/productos/move-container - Mover producto de un contenedor a otro
+app.post("/api/productos/move-container", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id_producto, from_caja_id, to_caja_id, cantidad } = req.body;
+
+    if (!id_producto || !to_caja_id) {
+      return res.status(400).json({ error: "id_producto y to_caja_id requeridos" });
     }
 
-    res.json({ parsedProducts });
+    // Quitar del contenedor origen
+    if (from_caja_id) {
+      const { data: current } = await supabase
+        .from("caja_productos")
+        .select("cantidad")
+        .eq("id_caja", from_caja_id)
+        .eq("id_producto", id_producto)
+        .maybeSingle();
+
+      if (current) {
+        const newQty = (current.cantidad || 0) - (cantidad || 1);
+        if (newQty <= 0) {
+          await supabase.from("caja_productos")
+            .delete()
+            .eq("id_caja", from_caja_id)
+            .eq("id_producto", id_producto);
+        } else {
+          await supabase.from("caja_productos")
+            .update({ cantidad: newQty })
+            .eq("id_caja", from_caja_id)
+            .eq("id_producto", id_producto);
+        }
+      }
+    }
+
+    // Agregar al contenedor destino
+    const { data: existingDest } = await supabase
+      .from("caja_productos")
+      .select("cantidad")
+      .eq("id_caja", to_caja_id)
+      .eq("id_producto", id_producto)
+      .maybeSingle();
+
+    if (existingDest) {
+      await supabase.from("caja_productos")
+        .update({ cantidad: (existingDest.cantidad || 0) + (cantidad || 1) })
+        .eq("id_caja", to_caja_id)
+        .eq("id_producto", id_producto);
+    } else {
+      await supabase.from("caja_productos")
+        .insert([{ id_caja: to_caja_id, id_producto, cantidad: cantidad || 1 }]);
+    }
+
+    await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", to_caja_id).eq("estado", "vacia");
+
+    emitDomainEvent("caja:updated", { id_caja: from_caja_id, id_caja_destino: to_caja_id, id_producto, cantidad: cantidad || 1 });
+
+    res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

@@ -243,6 +243,20 @@ fun MainAppScreen() {
         checkForUpdate(false)
     }
 
+    // SSE real-time sync: reconectar cuando cambia el serverUrl
+    LaunchedEffect(serverUrl) {
+        SseClient.disconnect()
+        SseClient.addListener { event ->
+            // When products or boxes change, refresh relevant views
+            when (event.type) {
+                "producto:batch-registered", "caja:updated", "caja:deleted", "producto:deleted" -> {
+                    Log.i("MainActivity", "SSE event: ${event.type} → refreshing data")
+                }
+            }
+        }
+        SseClient.connect(serverUrl, client)
+    }
+
     // Load statistics logic
     val loadStats: (Boolean) -> Unit = { silent ->
         if (!silent) loadingStats = true
@@ -1287,6 +1301,36 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
                     OcrStatCard("ML Kit OK", "$mlkitCorrect", Color(0xFF10B981), Modifier.weight(1f))
                     OcrStatCard("ML Kit Falló", "$mlkitIncorrect", Color(0xFFEF4444), Modifier.weight(1f))
                     OcrStatCard("Accuracy", "%.1f%%".format(accuracy), Color(0xFF2563EB), Modifier.weight(1f))
+                }
+
+                // Category breakdown
+                if (stats!!.containsKey("by_category")) {
+                    val byCategory = stats!!["by_category"] as? Map<String, Any>
+                    if (byCategory != null && byCategory.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Por Categoría", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+                        Spacer(Modifier.height(4.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            val sorted = byCategory.entries.sortedWith(compareByDescending<Map.Entry<String, Any>> {
+                                (it.value as? Map<*, *>)?.get("total") as? Int ?: 0
+                            })
+                            sorted.forEach { entry ->
+                                val cat = entry.key
+                                val catData = entry.value as? Map<*, *> ?: return@forEach
+                                val catTotal = (catData["total"] as? Number)?.toInt() ?: 0
+                                val catVerified = (catData["verified"] as? Number)?.toInt() ?: 0
+                                val catCorrect = (catData["correct"] as? Number)?.toInt() ?: 0
+                                val label = cat.replace("_", " ").replaceFirstChar { it.uppercase() }
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(text = label, fontSize = 9.sp, color = Color.Gray, modifier = Modifier.weight(1f))
+                                    Text(text = "$catTotal", fontSize = 9.sp, color = Color(0xFF475569))
+                                    if (catVerified > 0) {
+                                        Text(text = " / ${catVerified}v ${catCorrect}✓", fontSize = 8.sp, color = if (catCorrect > 0) Color(0xFF10B981) else Color(0xFFEF4444))
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Accuracy bar
