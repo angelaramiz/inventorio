@@ -11,8 +11,8 @@ android {
     applicationId = "com.inventorio.loyalty"
     minSdk = 24
     targetSdk = 36
-    versionCode = 8
-    versionName = "1.0.7"
+    versionCode = 9
+    versionName = "1.0.8"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -60,6 +60,7 @@ dependencies {
   implementation(libs.okhttp)
   implementation("com.google.code.gson:gson:2.10.1")
   implementation("com.google.zxing:core:3.5.3")
+  implementation("androidx.biometric:biometric:1.1.0")
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.coil.compose)
 }
