@@ -315,14 +315,15 @@ app.get('/api/app-version', (req, res) => {
   }
 });
 
-// GET /api/android-version - Returns the latest Android app version (supports ?app=conteo query param)
+// GET /api/android-version - Returns the latest Android app version (supports ?app=conteo, ?app=operations, ?app=loyalty)
 app.get("/api/android-version", async (req, res) => {
   try {
     const app = req.query.app as string;
     const isConteo = app === "conteo";
     const isOperations = app === "operations";
-    const key = isConteo ? "android_version_conteo" : isOperations ? "android_version_operations" : "android_version";
-    const defaultApk = isConteo ? "/public/inventorio-conteo.apk" : isOperations ? "/public/inventorio-operations.apk" : "/public/inventorio.apk";
+    const isLoyalty = app === "loyalty";
+    const key = isConteo ? "android_version_conteo" : isOperations ? "android_version_operations" : isLoyalty ? "android_version_loyalty" : "android_version";
+    const defaultApk = isConteo ? "/public/inventorio-conteo.apk" : isOperations ? "/public/inventorio-operations.apk" : isLoyalty ? "/public/inventorio-loyalty.apk" : "/public/inventorio.apk";
 
     const supabase = getSupabase();
     const { data: settings, error } = await supabase
@@ -6691,6 +6692,250 @@ async function startServer() {
   } catch (err: any) {
     console.error("Error al iniciar normalización de marcas:", err.message);
   }
+
+  // ============================================================
+  // FIELCLUB LOYALTY — Clientes, Wallet, POS Venta Simulado
+  // ============================================================
+
+  function generateLoyaltyRef(): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let r = 'FIEL-';
+    for (let i = 0; i < 6; i++) r += chars[Math.floor(Math.random() * chars.length)];
+    return r;
+  }
+
+  // POST /api/loyalty/clientes
+  app.post("/api/loyalty/clientes", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { nombre, correo, telefono, cumple } = req.body;
+      if (!nombre) return res.status(400).json({ error: "nombre requerido" });
+      const refCode = generateLoyaltyRef();
+      const { data, error } = await supabase.from("loyalty_clientes").insert([{ ref: refCode, nombre, correo, telefono, cumple, saldo_monedero: 0 }]).select().single();
+      if (error) throw error;
+      await supabase.from("loyalty_cupones").insert([{ cliente_id: data.id, codigo: `BIENVENIDA-${refCode}`, descripcion: "$200 en tu primera compra", tipo: "fijo", valor: 200, generado_por: "bienvenida", expira: new Date(Date.now() + 90*86400000).toISOString().split('T')[0] }]);
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/loyalty/cliente/:ref
+  app.get("/api/loyalty/cliente/:ref", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.from("loyalty_clientes").select("*").eq("ref", req.params.ref).single();
+      if (error) return res.status(404).json({ error: "Cliente no encontrado" });
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/loyalty/cliente/:ref
+  app.put("/api/loyalty/cliente/:ref", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { nombre, correo, telefono, cumple } = req.body;
+      const { data, error } = await supabase.from("loyalty_clientes").update({ nombre, correo, telefono, cumple, updated_at: new Date().toISOString() }).eq("ref", req.params.ref).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/loyalty/cliente/:ref/tarjetas
+  app.get("/api/loyalty/cliente/:ref/tarjetas", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { data } = await supabase.from("loyalty_tarjetas").select("*").eq("cliente_id", cli.id);
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/loyalty/cliente/:ref/tarjetas
+  app.post("/api/loyalty/cliente/:ref/tarjetas", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { alias, ultimos_digitos, tipo, banco } = req.body;
+      const { data } = await supabase.from("loyalty_tarjetas").insert([{ cliente_id: cli.id, alias, ultimos_digitos, tipo: tipo||"debito", banco }]).select().single();
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/loyalty/cliente/:ref/cupones
+  app.get("/api/loyalty/cliente/:ref/cupones", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { data } = await supabase.from("loyalty_cupones").select("*").eq("cliente_id", cli.id).eq("usado", false);
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/loyalty/cliente/:ref/cupones/generar
+  app.post("/api/loyalty/cliente/:ref/cupones/generar", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("*").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const cupones = [{ tipo: "porcentaje", valor: 15, desc: "15% OFF" },{ tipo: "fijo", valor: 150, desc: "$150 OFF" },{ tipo: "envio_gratis", valor: 0, desc: "Envío gratis" }];
+      const c = cupones[Math.floor(Math.random()*cupones.length)];
+      const codigo = `CUPON-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
+      const { data } = await supabase.from("loyalty_cupones").insert([{ cliente_id: cli.id, codigo, descripcion: c.desc, tipo: c.tipo, valor: c.valor, generado_por: "random", expira: new Date(Date.now()+30*86400000).toISOString().split('T')[0] }]).select().single();
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/loyalty/compras
+  app.post("/api/loyalty/compras", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { cliente_ref, productos, metodo_pago, cambio_monedero, cupon_id } = req.body;
+      let cliente_id = null;
+      if (cliente_ref) {
+        const { data: cli } = await supabase.from("loyalty_clientes").select("id,saldo_monedero").eq("ref", cliente_ref).single();
+        if (cli) cliente_id = cli.id;
+      }
+      const total = productos.reduce((s: number, p: any) => s + (p.precio||0)*(p.cantidad||1), 0);
+      let descuento = 0;
+      if (cupon_id && cliente_id) {
+        const { data: cup } = await supabase.from("loyalty_cupones").select("*").eq("id", cupon_id).eq("usado", false).single();
+        if (cup) {
+          descuento = cup.tipo === "porcentaje" ? total*(cup.valor/100) : Math.min(cup.valor, total);
+          await supabase.from("loyalty_cupones").update({ usado: true }).eq("id", cupon_id);
+        }
+      }
+      const montoFinal = Math.max(0, total - descuento);
+      if (metodo_pago === "monedero" && cliente_id) {
+        const { data: cli } = await supabase.from("loyalty_clientes").select("saldo_monedero").eq("id", cliente_id).single();
+        if ((cli?.saldo_monedero||0) < montoFinal) return res.status(400).json({ error: "Saldo insuficiente" });
+        await supabase.from("loyalty_clientes").update({ saldo_monedero: (cli?.saldo_monedero||0)-montoFinal, updated_at: new Date().toISOString() }).eq("id", cliente_id);
+      }
+      if (metodo_pago === "efectivo" && cambio_monedero > 0 && cliente_id) {
+        const { data: cli } = await supabase.from("loyalty_clientes").select("saldo_monedero").eq("id", cliente_id).single();
+        await supabase.from("loyalty_clientes").update({ saldo_monedero: (cli?.saldo_monedero||0)+cambio_monedero, updated_at: new Date().toISOString() }).eq("id", cliente_id);
+      }
+      const { data: compra, error } = await supabase.from("loyalty_compras").insert([{ cliente_id, total: montoFinal, metodo_pago, cambio_monedero: cambio_monedero||0, cupon_id: cupon_id||null, descuento_aplicado: descuento, productos, estado: "completada" }]).select().single();
+      if (error) throw error;
+      const folio = `FAC-${new Date().getFullYear()}-${String(Math.floor(Math.random()*10000)).padStart(4,'0')}`;
+      await supabase.from("loyalty_facturas").insert([{ compra_id: compra.id, cliente_id, folio, total: montoFinal, subtotal: montoFinal, iva: Math.round(montoFinal*0.16*100)/100 }]);
+      emitDomainEvent("compra:created", { compra_id: compra.id, cliente_id });
+      res.status(201).json(compra);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/loyalty/cliente/:ref/compras
+  app.get("/api/loyalty/cliente/:ref/compras", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { data } = await supabase.from("loyalty_compras").select("*").eq("cliente_id", cli.id).order("created_at", { ascending: false }).limit(50);
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/loyalty/cliente/:ref/facturas
+  app.get("/api/loyalty/cliente/:ref/facturas", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { data } = await supabase.from("loyalty_facturas").select("*").eq("cliente_id", cli.id).order("created_at", { ascending: false });
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/loyalty/solicitar-pago — POS → App
+  app.post("/api/loyalty/solicitar-pago", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { cliente_ref, monto, concepto } = req.body;
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", cliente_ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { data, error } = await supabase.from("loyalty_solicitudes_pago").insert([{ cliente_id: cli.id, monto, concepto: concepto||"Compra en AURA Boutique", estado: "pendiente", expira: new Date(Date.now()+5*60000).toISOString() }]).select().single();
+      if (error) throw error;
+      emitDomainEvent("pago:solicitado", { solicitud_id: data.id, cliente_ref, monto });
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/loyalty/cliente/:ref/solicitudes-pago
+  app.get("/api/loyalty/cliente/:ref/solicitudes-pago", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { data } = await supabase.from("loyalty_solicitudes_pago").select("*").eq("cliente_id", cli.id).eq("estado", "pendiente").order("created_at", { ascending: false });
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/loyalty/aprobar-pago
+  app.post("/api/loyalty/aprobar-pago", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { solicitud_id, tarjeta_id } = req.body;
+      const { data: sol } = await supabase.from("loyalty_solicitudes_pago").select("*").eq("id", solicitud_id).single();
+      if (!sol) return res.status(404).json({ error: "Solicitud no encontrada" });
+      if (sol.estado !== "pendiente") return res.status(400).json({ error: "Ya procesada" });
+      await supabase.from("loyalty_solicitudes_pago").update({ estado: "aprobado", tarjeta_id }).eq("id", solicitud_id);
+      emitDomainEvent("pago:aprobado", { solicitud_id });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/loyalty/recargar-monedero
+  app.post("/api/loyalty/recargar-monedero", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { cliente_ref, monto } = req.body;
+      const { data: cli } = await supabase.from("loyalty_clientes").select("*").eq("ref", cliente_ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      await supabase.from("loyalty_clientes").update({ saldo_monedero: (cli.saldo_monedero||0)+monto, updated_at: new Date().toISOString() }).eq("ref", cliente_ref);
+      res.json({ success: true, nuevo_saldo: (cli.saldo_monedero||0)+monto });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/app-catalog — Catálogo de apps móviles para descarga
+  app.get("/api/app-catalog", async (_req, res) => {
+    const apps = [
+      {
+        id: "alpha",
+        name: "Inventorio Alpha",
+        description: "Dashboard principal con escáner, OCR por lote y gestión de inventario",
+        packageName: "com.inventorio.alpha",
+        apkUrl: "/public/inventorio.apk",
+        versionName: "2.0.82"
+      },
+      {
+        id: "conteo",
+        name: "Inventorio Conteo",
+        description: "Conteo físico con eventos, niveles y cajas",
+        packageName: "com.inventorio.conteo",
+        apkUrl: "/public/inventorio-conteo.apk",
+        versionName: "1.0.30"
+      },
+      {
+        id: "operations",
+        name: "Inventorio Operations",
+        description: "Procesamiento de CSV, búsqueda en DB y operaciones de inventario",
+        packageName: "com.inventorio.operations",
+        apkUrl: "/public/inventorio-operations.apk",
+        versionName: "1.0.19"
+      },
+      {
+        id: "loyalty",
+        name: "AURA Club (Loyalty)",
+        description: "Club de lealtad con monedero electrónico, tarjetas y QR de membresía",
+        packageName: "com.inventorio.loyalty",
+        apkUrl: "/public/inventorio-loyalty.apk",
+        versionName: "1.0.0"
+      }
+    ];
+    res.json(apps);
+  });
 
   // Serve static public assets in both dev and prod
   if (fs.existsSync(path.join(process.cwd(), "public"))) {

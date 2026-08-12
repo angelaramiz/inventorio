@@ -15,6 +15,7 @@ import ConsultaDashboard from "./components/ConsultaDashboard";
 import ImageLightbox from "./components/ImageLightbox";
 import POSView from "./components/POSView";
 import InventoryControlView from "./components/InventoryControlView";
+import PosVentaView from "./components/PosVentaView";
 import AlphaDashboardView from "./components/AlphaDashboardView";
 import SyncStatusBadge from "./components/SyncStatusBadge";
 import UpdateNotification from "./components/UpdateNotification";
@@ -142,7 +143,21 @@ export default function App() {
     );
   }
 
-  // 5. Default Main App Layout (/ or /alpha)
+  // 5. Dedicated POS Venta View (FIELCLUB integration demo)
+  if (pathMatches(["/pos_venta"])) {
+    return (
+      <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-6">
+        <AppHeader subtitle="POS VENTA" />
+        <main className="container mx-auto p-4 md:p-6 lg:p-8">
+          <PosVentaView />
+        </main>
+        <Toaster position="top-center" expand={true} richColors />
+        <UpdateNotification />
+      </div>
+    );
+  }
+
+  // 6. Default Main App Layout (/ or /alpha)
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-24 md:pb-6 min-w-0 overflow-x-hidden">
       <header className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-md">
