@@ -6847,6 +6847,24 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // POST /api/loyalty/cliente/:ref/facturas/:id/solicitar — El cliente pide su factura desde la app
+  app.post("/api/loyalty/cliente/:ref/facturas/:id/solicitar", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { data, error } = await supabase.from("loyalty_facturas")
+        .update({ estado: "solicitada", updated_at: new Date().toISOString() })
+        .eq("id", req.params.id)
+        .eq("cliente_id", cli.id)
+        .select()
+        .single();
+      if (error || !data) return res.status(404).json({ error: "Factura no encontrada" });
+      emitDomainEvent("factura:solicitada", { factura_id: data.id, folio: data.folio });
+      res.json({ success: true, folio: data.folio });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // POST /api/loyalty/solicitar-pago — POS → App
   app.post("/api/loyalty/solicitar-pago", async (req, res) => {
     try {
@@ -6931,9 +6949,37 @@ async function startServer() {
         description: "Club de lealtad con monedero electrónico, tarjetas y QR de membresía",
         packageName: "com.inventorio.loyalty",
         apkUrl: "/public/inventorio-loyalty.apk",
-        versionName: "1.0.0"
+        versionName: "1.0.2"
       }
     ];
+
+    // Sync versiones publicadas desde warehouse_settings (fuente única del OTA)
+    try {
+      const supabase = getSupabase();
+      const { data: settings } = await supabase
+        .from("warehouse_settings")
+        .select("clave, valor")
+        .in("clave", ["android_version_loyalty", "android_version_conteo", "android_version_operations", "android_version"]);
+      if (settings) {
+        const map: Record<string, string> = {
+          android_version_loyalty: "loyalty",
+          android_version_conteo: "conteo",
+          android_version_operations: "operations",
+          android_version: "alpha"
+        };
+        for (const s of settings) {
+          const appId = map[s.clave];
+          if (!appId) continue;
+          const app = apps.find(a => a.id === appId);
+          if (!app) continue;
+          const info = s.valor;
+          if (info?.versionName) app.versionName = String(info.versionName);
+          if (info?.versionCode) (app as any).versionCode = Number(info.versionCode);
+          if (info?.apkUrl) app.apkUrl = String(info.apkUrl);
+        }
+      }
+    } catch (_) {}
+
     res.json(apps);
   });
 

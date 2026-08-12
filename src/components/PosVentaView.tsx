@@ -90,10 +90,10 @@ export default function PosVentaView() {
           modelo: data.modelo_grupo || sku,
           color: data.codigo_color || undefined,
           talla: data.talla || undefined,
-          precio: 799,
+          precio: data.precio || 0,
           cantidad: 1,
         }]);
-        toast.success(`Agregado: ${data.modelo_grupo || sku}`);
+        toast.success(`Agregado: ${data.modelo_grupo || sku} — captura el precio`);
       }
     } catch (e: any) {
       toast.error(`Error buscando: ${e.message}`);
@@ -477,7 +477,17 @@ export default function PosVentaView() {
                         {item.sku} {item.talla ? `· Talla ${item.talla}` : ""} {item.color ? `· ${item.color}` : ""}
                       </p>
                     </div>
-                    <p className="font-black text-sm">${item.precio.toFixed(2)}</p>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] font-bold text-neutral-400">$</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={item.precio}
+                        onChange={e => setCart(cart.map(c => c.sku === item.sku ? { ...c, precio: parseFloat(e.target.value) || 0 } : c))}
+                        className="w-20 px-2 py-1 rounded-lg border border-neutral-300 text-sm font-bold text-right outline-none focus:border-purple-500"
+                      />
+                    </div>
                     <div className="flex items-center gap-1">
                       <button onClick={() => setCart(cart.map(c => c.sku === item.sku && c.cantidad > 1 ? { ...c, cantidad: c.cantidad - 1 } : c))} className="w-7 h-7 bg-white border rounded-lg flex items-center justify-center">
                         <Minus size={12} />

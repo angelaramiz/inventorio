@@ -16,6 +16,7 @@ import ImageLightbox from "./components/ImageLightbox";
 import POSView from "./components/POSView";
 import InventoryControlView from "./components/InventoryControlView";
 import PosVentaView from "./components/PosVentaView";
+import ClienteLoyaltyView from "./components/ClienteLoyaltyView";
 import AlphaDashboardView from "./components/AlphaDashboardView";
 import SyncStatusBadge from "./components/SyncStatusBadge";
 import UpdateNotification from "./components/UpdateNotification";
@@ -157,7 +158,18 @@ export default function App() {
     );
   }
 
-  // 6. Default Main App Layout (/ or /alpha)
+  // 6. Dedicated Client Loyalty View (AURA Club)
+  if (pathMatches(["/cliente"])) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white font-sans">
+        <ClienteLoyaltyView />
+        <Toaster position="top-center" expand={true} richColors />
+        <UpdateNotification />
+      </div>
+    );
+  }
+
+  // 7. Default Main App Layout (/ or /alpha)
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans pb-24 md:pb-6 min-w-0 overflow-x-hidden">
       <header className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-md">
