@@ -15,6 +15,24 @@ interface CartItem {
   cantidad: number;
 }
 
+const waitForElement = (id: string, maxAttempts = 10, interval = 100): Promise<HTMLElement> => {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const check = () => {
+      const el = document.getElementById(id);
+      if (el) {
+        resolve(el);
+      } else if (attempts >= maxAttempts) {
+        reject(new Error(`Element with id=${id} not found`));
+      } else {
+        attempts++;
+        setTimeout(check, interval);
+      }
+    };
+    check();
+  });
+};
+
 interface ClienteInfo {
   ref: string;
   nombre: string;
@@ -133,13 +151,19 @@ export default function PosVentaView() {
   };
 
   // ── Escaneo QR del cliente ──
-  const [isClientScannerActive, setIsClientScannerActive] = useState(false);
+  const [clientScanState, setClientScanState] = useState<"idle" | "starting" | "scanning" | "error">("idle");
+  const [clientScanError, setClientScanError] = useState("");
+  const [clientVerifying, setClientVerifying] = useState(false);
   const clientScannerRef = useRef<Html5Qrcode | null>(null);
   const clientRegionId = "pos-client-qr-region";
+  const isClientScannerActive = clientScanState === "scanning" || clientScanState === "starting";
 
   const loadCliente = useCallback(async (ref: string) => {
+    console.log("[POS] Verificando cliente:", ref);
+    setClientVerifying(true);
     try {
       const data = await api(`/api/loyalty/cliente/${encodeURIComponent(ref)}`);
+      console.log("[POS] Cliente encontrado:", data.nombre, "saldo:", data.saldo_monedero);
       setCliente(data);
       setClienteLoaded(true);
       toast.success(`Cliente: ${data.nombre} (saldo: $${data.saldo_monedero})`);
@@ -148,46 +172,93 @@ export default function PosVentaView() {
       const cups = await api(`/api/loyalty/cliente/${encodeURIComponent(ref)}/cupones`);
       setCoupons(cups || []);
     } catch (e: any) {
+      console.error("[POS] Cliente no encontrado:", e.message);
       toast.error(`Cliente no encontrado: ${e.message}`);
+    } finally {
+      setClientVerifying(false);
     }
   }, [api]);
 
-  const startClientScanner = async () => {
-    if (isClientScannerActive) return;
+  const extractRef = (decodedText: string): string | null => {
+    // El QR contiene el ref (FIEL-XXXXXX), un JSON con {ref} o una URL con ?ref=
+    const m = decodedText.match(/FIEL-[A-Z0-9]+/i);
+    if (m) return m[0].toUpperCase();
     try {
-      setIsClientScannerActive(true);
+      const json = JSON.parse(decodedText);
+      if (json.ref) return String(json.ref).toUpperCase();
+    } catch (_) {}
+    const urlMatch = decodedText.match(/[?&]ref=([A-Z0-9-]+)/i);
+    if (urlMatch) return urlMatch[1].toUpperCase();
+    return null;
+  };
+
+  const startClientScanner = async () => {
+    if (clientScanState === "scanning" || clientScanState === "starting") return;
+    console.log("[POS] Iniciando escáner de cliente...");
+    setClientScanState("starting");
+    setClientScanError("");
+    try {
+      // Dejar que el div del visor se monte y sea visible antes de attachar la cámara
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await waitForElement(clientRegionId, 20, 50);
       const scanner = new Html5Qrcode(clientRegionId);
       clientScannerRef.current = scanner;
-      await scanner.start(
+      const startPromise = scanner.start(
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 250, height: 250 } },
-        (decodedText) => {
-          scanner.stop().catch(() => {});
-          clientScannerRef.current?.clear();
-          clientScannerRef.current = null;
-          setIsClientScannerActive(false);
-          // El QR contiene el ref del cliente (o un JSON con ref)
-          const ref = decodedText.includes("FIEL-")
-            ? decodedText.match(/FIEL-[A-Z0-9]+/)?.[0] || decodedText
-            : decodedText;
-          loadCliente(ref);
+        async (decodedText) => {
+          console.log("[POS] QR de cliente detectado:", decodedText);
+          // Detener cámara y limpiar estado ANTES de verificar
+          await stopClientScanner();
+          const ref = extractRef(decodedText);
+          if (!ref) {
+            console.warn("[POS] QR sin ref válida:", decodedText);
+            toast.error("QR inválido: no contiene una ref FIEL válida");
+            return;
+          }
+          toast.info(`QR detectado — verificando ${ref}...`);
+          await loadCliente(ref);
         },
         () => {}
       );
-    } catch (e) {
-      toast.error("No se pudo iniciar escáner de cliente");
-      setIsClientScannerActive(false);
+      const startTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Tiempo agotado al iniciar cámara — ¿permiso denegado?")), 15000)
+      );
+      await Promise.race([startPromise, startTimeout]);
+      setClientScanState("scanning");
+      toast.success("Escáner de cliente activo — apunta al QR de membresía");
+      console.log("[POS] Escáner de cliente activo");
+    } catch (e: any) {
+      console.error("[POS] Error al iniciar escáner de cliente:", e);
+      setClientScanState("error");
+      setClientScanError(e?.message || String(e));
+      toast.error(`No se pudo iniciar el escáner de cliente: ${e?.message || ""}`);
     }
   };
 
   const stopClientScanner = async () => {
     if (clientScannerRef.current) {
       try { await clientScannerRef.current.stop(); } catch (_) {}
-      clientScannerRef.current.clear();
+      try { clientScannerRef.current.clear(); } catch (_) {}
       clientScannerRef.current = null;
     }
-    setIsClientScannerActive(false);
+    setClientScanState("idle");
   };
+
+  // Watchdog: si la cámara murió silenciosamente, volver a idle (evita estado "scanning" sin visor)
+  useEffect(() => {
+    if (clientScanState !== "scanning") return;
+    const id = setInterval(() => {
+      const sc = clientScannerRef.current;
+      if (sc && !sc.isScanning) {
+        console.warn("[POS] Watchdog: cámara de cliente perdió escaneo");
+        clearInterval(id);
+        setClientScanState("idle");
+        toast.warning("La cámara se detuvo — vuelve a iniciar el escáner");
+      }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [clientScanState]);
 
   // ── Aplicar cupón ──
   const applyCoupon = (cuponId: string) => {
@@ -419,14 +490,39 @@ export default function PosVentaView() {
             ) : (
               <div>
                 <div id={clientRegionId} className={isClientScannerActive ? "w-full rounded-xl overflow-hidden" : "hidden"} />
+
+                {clientVerifying && (
+                  <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-xl p-3 mb-2">
+                    <Loader2 size={16} className="animate-spin text-purple-600" />
+                    <p className="text-xs font-bold text-purple-700">Verificando cliente en la base de datos...</p>
+                  </div>
+                )}
+
+                {clientScanState === "error" && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-2">
+                    <p className="text-[11px] font-bold text-red-700">Error al iniciar la cámara</p>
+                    <p className="text-[10px] text-red-500 mt-0.5 break-words">{clientScanError}</p>
+                  </div>
+                )}
+
                 <button
-                  onClick={isClientScannerActive ? stopClientScanner : startClientScanner}
-                  className={`w-full py-3 rounded-xl text-sm font-bold transition-colors ${
-                    isClientScannerActive ? "bg-red-500 text-white hover:bg-red-600" : "bg-neutral-900 text-white hover:bg-neutral-800"
+                  onClick={clientScanState === "scanning" || clientScanState === "starting" ? stopClientScanner : startClientScanner}
+                  disabled={clientScanState === "starting"}
+                  className={`w-full py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-60 ${
+                    clientScanState === "scanning" ? "bg-red-500 text-white hover:bg-red-600"
+                    : clientScanState === "error" ? "bg-red-600 text-white hover:bg-red-700"
+                    : "bg-neutral-900 text-white hover:bg-neutral-800"
                   }`}
                 >
-                  <QrCode size={16} className="inline mr-2" />
-                  {isClientScannerActive ? "Detener" : "Escanear QR del cliente"}
+                  {clientScanState === "starting" ? (
+                    <><Loader2 size={16} className="inline animate-spin mr-2" />Iniciando cámara...</>
+                  ) : clientScanState === "scanning" ? (
+                    <><QrCode size={16} className="inline mr-2" />Detener</>
+                  ) : clientScanState === "error" ? (
+                    <><QrCode size={16} className="inline mr-2" />Reintentar</>
+                  ) : (
+                    <><QrCode size={16} className="inline mr-2" />Escanear QR del cliente</>
+                  )}
                 </button>
                 <p className="text-[11px] text-neutral-400 mt-2 text-center">
                   El cliente muestra su QR de membresía en la app AURA Club
