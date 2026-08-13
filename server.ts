@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import multer from "multer";
 import { EventEmitter } from "events";
 import fs from "fs";
+import bcrypt from "bcryptjs";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 // ─── Groq OCR Service ────────────────────────────────────────────
@@ -6704,17 +6705,50 @@ async function startServer() {
     return r;
   }
 
-  // POST /api/loyalty/clientes
+  // POST /api/loyalty/clientes — Registro con email + contraseña (nombre opcional)
   app.post("/api/loyalty/clientes", async (req, res) => {
     try {
       const supabase = getSupabase();
-      const { nombre, correo, telefono, cumple } = req.body;
-      if (!nombre) return res.status(400).json({ error: "nombre requerido" });
+      const { nombre, correo, telefono, cumple, password } = req.body;
+      if (!correo || !correo.trim()) return res.status(400).json({ error: "correo requerido" });
+      if (password && password.length < 6) return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
+      const correoLower = correo.trim().toLowerCase();
+
+      const { data: existente } = await supabase.from("loyalty_clientes").select("id").eq("correo", correoLower).maybeSingle();
+      if (existente) return res.status(409).json({ error: "Ya existe una cuenta con ese correo" });
+
       const refCode = generateLoyaltyRef();
-      const { data, error } = await supabase.from("loyalty_clientes").insert([{ ref: refCode, nombre, correo, telefono, cumple, saldo_monedero: 0 }]).select().single();
+      const passwordHash = password ? await bcrypt.hash(password, 10) : null;
+      const nombreFinal = (nombre || correoLower.split("@")[0] || "Socio AURA").trim();
+      const { data, error } = await supabase.from("loyalty_clientes").insert([{
+        ref: refCode,
+        nombre: nombreFinal,
+        correo: correoLower,
+        telefono,
+        cumple,
+        saldo_monedero: 0,
+        password_hash: passwordHash
+      }]).select().single();
       if (error) throw error;
+      if (data && "password_hash" in data) delete data.password_hash;
       await supabase.from("loyalty_cupones").insert([{ cliente_id: data.id, codigo: `BIENVENIDA-${refCode}`, descripcion: "$200 en tu primera compra", tipo: "fijo", valor: 200, generado_por: "bienvenida", expira: new Date(Date.now() + 90*86400000).toISOString().split('T')[0] }]);
       res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/loyalty/login — Login con email + contraseña
+  app.post("/api/loyalty/login", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { correo, password } = req.body;
+      if (!correo || !password) return res.status(400).json({ error: "correo y contraseña requeridos" });
+      const { data: cli } = await supabase.from("loyalty_clientes").select("*").eq("correo", correo.trim().toLowerCase()).maybeSingle();
+      if (!cli) return res.status(404).json({ error: "No existe una cuenta con ese correo" });
+      if (!cli.password_hash) return res.status(400).json({ error: "Esta cuenta se creó por ref y no tiene contraseña. Usa tu ref o crea una cuenta nueva." });
+      const ok = await bcrypt.compare(password, cli.password_hash);
+      if (!ok) return res.status(401).json({ error: "Contraseña incorrecta" });
+      if (cli && "password_hash" in cli) delete cli.password_hash;
+      res.json(cli);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -6724,6 +6758,7 @@ async function startServer() {
       const supabase = getSupabase();
       const { data, error } = await supabase.from("loyalty_clientes").select("*").eq("ref", req.params.ref).single();
       if (error) return res.status(404).json({ error: "Cliente no encontrado" });
+      if (data && "password_hash" in data) delete data.password_hash;
       res.json(data);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -6735,6 +6770,7 @@ async function startServer() {
       const { nombre, correo, telefono, cumple } = req.body;
       const { data, error } = await supabase.from("loyalty_clientes").update({ nombre, correo, telefono, cumple, updated_at: new Date().toISOString() }).eq("ref", req.params.ref).select().single();
       if (error) throw error;
+      if (data && "password_hash" in data) delete data.password_hash;
       res.json(data);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
