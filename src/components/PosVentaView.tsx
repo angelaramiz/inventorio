@@ -69,6 +69,7 @@ export default function PosVentaView() {
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scannerRegionId = "pos-barcode-region";
+  const lastLookupRef = useRef<{ query: string; ts: number }>({ query: "", ts: 0 });
 
   // ── Total del carrito ──
   const subtotal = cart.reduce((s, i) => s + i.precio * i.cantidad, 0);
@@ -88,32 +89,46 @@ export default function PosVentaView() {
     return res.json();
   }, [serverUrl]);
 
-  const lookupProduct = useCallback(async (query: string) => {
+  const lookupProduct = useCallback(async (query: string, fromScanner = false) => {
     const clean = query.trim();
     if (!clean) return;
+    // Deduplicación/cooldown: misma query en los últimos 2.5s (evita toasts apilados por frames)
+    const now = Date.now();
+    if (lastLookupRef.current.query === clean && now - lastLookupRef.current.ts < 2500) {
+      console.log("[POS] Búsqueda duplicada ignorada:", clean);
+      return;
+    }
+    lastLookupRef.current = { query: clean, ts: now };
+    console.log("[POS] Buscando producto:", clean);
     try {
       const data = await api(`/api/consultar-producto/${encodeURIComponent(clean)}`);
-      if (!data || (!data.sku && !data.modelo_grupo)) {
+      // El endpoint devuelve { product: {...}, boxes, variantes }
+      const producto = data?.product ?? data;
+      console.log("[POS] Respuesta producto:", producto?.sku || producto?.modelo_grupo || "sin datos");
+      if (!producto || (!producto.sku && !producto.modelo_grupo)) {
+        if (fromScanner) setManualSku(clean);
         toast.error(`Producto no encontrado: ${clean}`);
         return;
       }
-      const sku = data.sku || data.ean_13 || clean;
+      const sku = producto.sku || producto.ean_13 || clean;
       const existing = cart.find(c => c.sku === sku);
       if (existing) {
         setCart(cart.map(c => c.sku === sku ? { ...c, cantidad: c.cantidad + 1 } : c));
-        toast.success(`+1 ${data.modelo_grupo || sku} (${existing.cantidad + 1})`);
+        toast.success(`+1 ${producto.modelo_grupo || sku} (${existing.cantidad + 1})`);
       } else {
         setCart([...cart, {
           sku,
-          modelo: data.modelo_grupo || sku,
-          color: data.codigo_color || undefined,
-          talla: data.talla || undefined,
-          precio: data.precio || 0,
+          modelo: producto.modelo_grupo || sku,
+          color: producto.codigo_color || undefined,
+          talla: producto.talla || undefined,
+          precio: producto.precio || 0,
           cantidad: 1,
         }]);
-        toast.success(`Agregado: ${data.modelo_grupo || sku} — captura el precio`);
+        toast.success(`Agregado: ${producto.modelo_grupo || sku} — captura el precio`);
       }
     } catch (e: any) {
+      console.error("[POS] Error buscando:", clean, "→", e.message);
+      if (fromScanner) setManualSku(clean);
       toast.error(`Error buscando: ${e.message}`);
     }
   }, [api, cart]);
@@ -128,8 +143,9 @@ export default function PosVentaView() {
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 250, height: 100 } },
         (decodedText) => {
+          console.log("[POS] Código de barras detectado:", decodedText);
           scanner.pause(true);
-          lookupProduct(decodedText).then(() => {
+          lookupProduct(decodedText, true).then(() => {
             scanner.resume();
           });
         },

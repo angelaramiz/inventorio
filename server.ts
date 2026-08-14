@@ -2132,12 +2132,23 @@ app.get("/api/consultar-producto/:query", async (req, res) => {
 
     // 3. Stripped (no spaces/dashes) match
     if (!product && cleanQuery !== query) {
-      const { data: strippedMatch } = await supabase
+      // 3a. Exact match con el query limpio (sin espacios/guiones)
+      const { data: exactClean } = await supabase
         .from("productos")
         .select(fields)
-        .or(`sku.ilike.%${cleanQuery}%,ean_13.ilike.%${cleanQuery}%`)
+        .or(`sku.eq.${cleanQuery},ean_13.eq.${cleanQuery}`)
         .maybeSingle();
-      if (strippedMatch) product = strippedMatch;
+      if (exactClean) product = exactClean;
+
+      // 3b. Partial ilike con el query limpio
+      if (!product) {
+        const { data: strippedMatch } = await supabase
+          .from("productos")
+          .select(fields)
+          .or(`sku.ilike.%${cleanQuery}%,ean_13.ilike.%${cleanQuery}%`)
+          .maybeSingle();
+        if (strippedMatch) product = strippedMatch;
+      }
     }
 
     if (!product) {
@@ -6714,8 +6725,20 @@ async function startServer() {
       if (password && password.length < 6) return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
       const correoLower = correo.trim().toLowerCase();
 
-      const { data: existente } = await supabase.from("loyalty_clientes").select("id").eq("correo", correoLower).maybeSingle();
-      if (existente) return res.status(409).json({ error: "Ya existe una cuenta con ese correo" });
+      const { data: existente } = await supabase.from("loyalty_clientes").select("id, password_hash").eq("correo", correoLower).maybeSingle();
+      if (existente) {
+        // Si la cuenta existe pero no tiene contraseña (creada por ref), se vincula la nueva
+        if (password && !existente.password_hash) {
+          const hash = await bcrypt.hash(password, 10);
+          const { data: vinculado, error: vinErr } = await supabase.from("loyalty_clientes")
+            .update({ password_hash: hash, updated_at: new Date().toISOString() })
+            .eq("id", existente.id).select().single();
+          if (vinErr) throw vinErr;
+          if (vinculado && "password_hash" in vinculado) delete vinculado.password_hash;
+          return res.status(200).json(vinculado);
+        }
+        return res.status(409).json({ error: "Ya existe una cuenta con ese correo" });
+      }
 
       const refCode = generateLoyaltyRef();
       const passwordHash = password ? await bcrypt.hash(password, 10) : null;
@@ -6767,8 +6790,16 @@ async function startServer() {
   app.put("/api/loyalty/cliente/:ref", async (req, res) => {
     try {
       const supabase = getSupabase();
-      const { nombre, correo, telefono, cumple } = req.body;
-      const { data, error } = await supabase.from("loyalty_clientes").update({ nombre, correo, telefono, cumple, updated_at: new Date().toISOString() }).eq("ref", req.params.ref).select().single();
+      const { nombre, correo, telefono, cumple, rfc, razon_social, uso_cfdi, direccion_fiscal, codigo_postal, correo_facturacion } = req.body;
+      const updates: any = { nombre, correo, telefono, cumple, updated_at: new Date().toISOString() };
+      // Campos fiscales (solo si vienen definidos)
+      if (rfc !== undefined) updates.rfc = rfc;
+      if (razon_social !== undefined) updates.razon_social = razon_social;
+      if (uso_cfdi !== undefined) updates.uso_cfdi = uso_cfdi;
+      if (direccion_fiscal !== undefined) updates.direccion_fiscal = direccion_fiscal;
+      if (codigo_postal !== undefined) updates.codigo_postal = codigo_postal;
+      if (correo_facturacion !== undefined) updates.correo_facturacion = correo_facturacion;
+      const { data, error } = await supabase.from("loyalty_clientes").update(updates).eq("ref", req.params.ref).select().single();
       if (error) throw error;
       if (data && "password_hash" in data) delete data.password_hash;
       res.json(data);
@@ -6896,6 +6927,29 @@ async function startServer() {
         .select()
         .single();
       if (error || !data) return res.status(404).json({ error: "Factura no encontrada" });
+      emitDomainEvent("factura:solicitada", { factura_id: data.id, folio: data.folio });
+      res.json({ success: true, folio: data.folio });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/loyalty/cliente/:ref/compras/:id/solicitar-factura — Solicitar factura desde el ticket de una compra
+  app.post("/api/loyalty/cliente/:ref/compras/:id/solicitar-factura", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { data: factura } = await supabase.from("loyalty_facturas")
+        .select("*")
+        .eq("compra_id", req.params.id)
+        .eq("cliente_id", cli.id)
+        .maybeSingle();
+      if (!factura) return res.status(404).json({ error: "La compra aún no tiene factura generada" });
+      const { data, error } = await supabase.from("loyalty_facturas")
+        .update({ estado: "solicitada", updated_at: new Date().toISOString() })
+        .eq("id", factura.id)
+        .select()
+        .single();
+      if (error || !data) return res.status(500).json({ error: error?.message || "Error al solicitar factura" });
       emitDomainEvent("factura:solicitada", { factura_id: data.id, folio: data.folio });
       res.json({ success: true, folio: data.folio });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
