@@ -6824,8 +6824,38 @@ async function startServer() {
       const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
       if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
       const { alias, ultimos_digitos, tipo, banco } = req.body;
-      const { data } = await supabase.from("loyalty_tarjetas").insert([{ cliente_id: cli.id, alias, ultimos_digitos, tipo: tipo||"debito", banco }]).select().single();
+      const { data } = await supabase.from("loyalty_tarjetas").insert([{ cliente_id: cli.id, alias, ultimos_digitos: String(ultimos_digitos || "").replace(/[^0-9]/g, "").slice(-4), tipo: tipo||"debito", banco }]).select().single();
       res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/loyalty/cliente/:ref/tarjetas/:id — Editar tarjeta
+  app.put("/api/loyalty/cliente/:ref/tarjetas/:id", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { alias, ultimos_digitos, tipo, banco } = req.body;
+      const updates: any = {};
+      if (alias !== undefined) updates.alias = alias;
+      if (ultimos_digitos !== undefined) updates.ultimos_digitos = String(ultimos_digitos).replace(/[^0-9]/g, "").slice(-4);
+      if (tipo !== undefined) updates.tipo = tipo;
+      if (banco !== undefined) updates.banco = banco;
+      const { data, error } = await supabase.from("loyalty_tarjetas").update(updates).eq("id", req.params.id).eq("cliente_id", cli.id).select().single();
+      if (error || !data) return res.status(404).json({ error: "Tarjeta no encontrada" });
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/loyalty/cliente/:ref/tarjetas/:id — Eliminar tarjeta
+  app.delete("/api/loyalty/cliente/:ref/tarjetas/:id", async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const { error } = await supabase.from("loyalty_tarjetas").delete().eq("id", req.params.id).eq("cliente_id", cli.id);
+      if (error) throw error;
+      res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -6920,8 +6950,9 @@ async function startServer() {
       const supabase = getSupabase();
       const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
       if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      // Nota: loyalty_facturas NO tiene columna updated_at (solo created_at)
       const { data, error } = await supabase.from("loyalty_facturas")
-        .update({ estado: "solicitada", updated_at: new Date().toISOString() })
+        .update({ estado: "solicitada" })
         .eq("id", req.params.id)
         .eq("cliente_id", cli.id)
         .select()
@@ -6944,8 +6975,9 @@ async function startServer() {
         .eq("cliente_id", cli.id)
         .maybeSingle();
       if (!factura) return res.status(404).json({ error: "La compra aún no tiene factura generada" });
+      // Nota: loyalty_facturas NO tiene columna updated_at (solo created_at)
       const { data, error } = await supabase.from("loyalty_facturas")
-        .update({ estado: "solicitada", updated_at: new Date().toISOString() })
+        .update({ estado: "solicitada" })
         .eq("id", factura.id)
         .select()
         .single();
