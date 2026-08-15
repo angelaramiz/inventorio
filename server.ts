@@ -6716,6 +6716,14 @@ async function startServer() {
     return r;
   }
 
+  // Normaliza valores fiscales: null/undefined/""/"NULL" → null (sin datos válidos)
+  function cleanFiscalValue(v: any): string | null {
+    if (v === null || v === undefined) return null;
+    const s = String(v).trim();
+    if (s === "" || s.toUpperCase() === "NULL") return null;
+    return s;
+  }
+
   // POST /api/loyalty/clientes — Registro con email + contraseña (nombre opcional)
   app.post("/api/loyalty/clientes", async (req, res) => {
     try {
@@ -6890,9 +6898,20 @@ async function startServer() {
       const supabase = getSupabase();
       const { cliente_ref, productos, metodo_pago, cambio_monedero, cupon_id } = req.body;
       let cliente_id = null;
+      let datosFiscales: any = {};
       if (cliente_ref) {
-        const { data: cli } = await supabase.from("loyalty_clientes").select("id,saldo_monedero").eq("ref", cliente_ref).single();
-        if (cli) cliente_id = cli.id;
+        const { data: cli } = await supabase.from("loyalty_clientes").select("id,saldo_monedero,rfc,razon_social,uso_cfdi,direccion_fiscal,codigo_postal,correo_facturacion").eq("ref", cliente_ref).single();
+        if (cli) {
+          cliente_id = cli.id;
+          datosFiscales = {
+            rfc: cleanFiscalValue(cli.rfc),
+            razon_social: cleanFiscalValue(cli.razon_social),
+            uso_cfdi: cleanFiscalValue(cli.uso_cfdi),
+            direccion_fiscal: cleanFiscalValue(cli.direccion_fiscal),
+            codigo_postal: cleanFiscalValue(cli.codigo_postal),
+            correo_facturacion: cleanFiscalValue(cli.correo_facturacion)
+          };
+        }
       }
       const total = productos.reduce((s: number, p: any) => s + (p.precio||0)*(p.cantidad||1), 0);
       let descuento = 0;
@@ -6916,7 +6935,7 @@ async function startServer() {
       const { data: compra, error } = await supabase.from("loyalty_compras").insert([{ cliente_id, total: montoFinal, metodo_pago, cambio_monedero: cambio_monedero||0, cupon_id: cupon_id||null, descuento_aplicado: descuento, productos, estado: "completada" }]).select().single();
       if (error) throw error;
       const folio = `FAC-${new Date().getFullYear()}-${String(Math.floor(Math.random()*10000)).padStart(4,'0')}`;
-      await supabase.from("loyalty_facturas").insert([{ compra_id: compra.id, cliente_id, folio, total: montoFinal, subtotal: montoFinal, iva: Math.round(montoFinal*0.16*100)/100 }]);
+      await supabase.from("loyalty_facturas").insert([{ compra_id: compra.id, cliente_id, folio, total: montoFinal, subtotal: montoFinal, iva: Math.round(montoFinal*0.16*100)/100, ...datosFiscales }]);
       emitDomainEvent("compra:created", { compra_id: compra.id, cliente_id });
       res.status(201).json(compra);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -6948,18 +6967,25 @@ async function startServer() {
   app.post("/api/loyalty/cliente/:ref/facturas/:id/solicitar", async (req, res) => {
     try {
       const supabase = getSupabase();
-      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id,rfc,razon_social,uso_cfdi,direccion_fiscal,codigo_postal,correo_facturacion").eq("ref", req.params.ref).single();
       if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const rfcFiscal = cleanFiscalValue(cli.rfc);
+      if (!rfcFiscal) return res.status(400).json({ error: "Completa tus datos fiscales (RFC) en Ajustes antes de solicitar la factura" });
       // Nota: loyalty_facturas NO tiene columna updated_at (solo created_at)
       const { data, error } = await supabase.from("loyalty_facturas")
-        .update({ estado: "solicitada" })
+        .update({
+          estado: "solicitada",
+          rfc: rfcFiscal, razon_social: cleanFiscalValue(cli.razon_social), uso_cfdi: cleanFiscalValue(cli.uso_cfdi),
+          direccion_fiscal: cleanFiscalValue(cli.direccion_fiscal), codigo_postal: cleanFiscalValue(cli.codigo_postal),
+          correo_facturacion: cleanFiscalValue(cli.correo_facturacion)
+        })
         .eq("id", req.params.id)
         .eq("cliente_id", cli.id)
         .select()
         .single();
       if (error || !data) return res.status(404).json({ error: "Factura no encontrada" });
       emitDomainEvent("factura:solicitada", { factura_id: data.id, folio: data.folio });
-      res.json({ success: true, folio: data.folio });
+      res.json({ success: true, folio: data.folio, rfc: data.rfc, correo_facturacion: data.correo_facturacion });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -6967,8 +6993,10 @@ async function startServer() {
   app.post("/api/loyalty/cliente/:ref/compras/:id/solicitar-factura", async (req, res) => {
     try {
       const supabase = getSupabase();
-      const { data: cli } = await supabase.from("loyalty_clientes").select("id").eq("ref", req.params.ref).single();
+      const { data: cli } = await supabase.from("loyalty_clientes").select("id,rfc,razon_social,uso_cfdi,direccion_fiscal,codigo_postal,correo_facturacion").eq("ref", req.params.ref).single();
       if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+      const rfcFiscal = cleanFiscalValue(cli.rfc);
+      if (!rfcFiscal) return res.status(400).json({ error: "Completa tus datos fiscales (RFC) en Ajustes antes de solicitar la factura" });
       const { data: factura } = await supabase.from("loyalty_facturas")
         .select("*")
         .eq("compra_id", req.params.id)
@@ -6977,13 +7005,18 @@ async function startServer() {
       if (!factura) return res.status(404).json({ error: "La compra aún no tiene factura generada" });
       // Nota: loyalty_facturas NO tiene columna updated_at (solo created_at)
       const { data, error } = await supabase.from("loyalty_facturas")
-        .update({ estado: "solicitada" })
+        .update({
+          estado: "solicitada",
+          rfc: rfcFiscal, razon_social: cleanFiscalValue(cli.razon_social), uso_cfdi: cleanFiscalValue(cli.uso_cfdi),
+          direccion_fiscal: cleanFiscalValue(cli.direccion_fiscal), codigo_postal: cleanFiscalValue(cli.codigo_postal),
+          correo_facturacion: cleanFiscalValue(cli.correo_facturacion)
+        })
         .eq("id", factura.id)
         .select()
         .single();
       if (error || !data) return res.status(500).json({ error: error?.message || "Error al solicitar factura" });
       emitDomainEvent("factura:solicitada", { factura_id: data.id, folio: data.folio });
-      res.json({ success: true, folio: data.folio });
+      res.json({ success: true, folio: data.folio, rfc: data.rfc, correo_facturacion: data.correo_facturacion });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
