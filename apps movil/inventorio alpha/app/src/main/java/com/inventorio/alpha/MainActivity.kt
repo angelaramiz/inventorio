@@ -243,14 +243,54 @@ fun MainAppScreen() {
         checkForUpdate(false)
     }
 
+    // Load Cajas logic
+    val loadCajas: () -> Unit = {
+        loadingCajas = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                val url = "${serverUrl.trimEnd('/')}/api/cajas"
+                val request = Request.Builder().url(url).build()
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val bodyText = response.body?.string() ?: "[]"
+                        val typeToken = object : TypeToken<List<Caja>>() {}.type
+                        val list: List<Caja> = Gson().fromJson(bodyText, typeToken)
+                        withContext(Dispatchers.Main) {
+                            cajasList = list
+
+                            // Re-bind activeCaja if it was selected and still exists
+                            val savedActiveId = activeCaja?.id_caja
+                            if (savedActiveId != null) {
+                                activeCaja = list.find { it.id_caja == savedActiveId }
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Error al cargar contenedores (HTTP ${response.code})", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Error de contenedores: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    loadingCajas = false
+                }
+            }
+        }
+    }
+
     // SSE real-time sync: reconectar cuando cambia el serverUrl
     LaunchedEffect(serverUrl) {
         SseClient.disconnect()
         SseClient.addListener { event ->
-            // When products or boxes change, refresh relevant views
+            // When products or boxes change, refresh relevant views (sincronización en tiempo real)
             when (event.type) {
                 "producto:batch-registered", "caja:updated", "caja:deleted", "producto:deleted" -> {
-                    Log.i("MainActivity", "SSE event: ${event.type} → refreshing data")
+                    Log.i("MainActivity", "SSE event: ${event.type} → refrescando contenedores")
+                    loadCajas()
                 }
             }
         }
@@ -285,41 +325,6 @@ fun MainAppScreen() {
             } finally {
                 withContext(Dispatchers.Main) {
                     loadingStats = false
-                }
-            }
-        }
-    }
-
-    // Load Cajas logic
-    val loadCajas: () -> Unit = {
-        loadingCajas = true
-        scope.launch(Dispatchers.IO) {
-            try {
-                val url = "${serverUrl.trimEnd('/')}/api/cajas"
-                val request = Request.Builder().url(url).build()
-                client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val bodyText = response.body?.string() ?: "[]"
-                        val typeToken = object : TypeToken<List<Caja>>() {}.type
-                        val list: List<Caja> = Gson().fromJson(bodyText, typeToken)
-                        withContext(Dispatchers.Main) {
-                            cajasList = list
-                            
-                            // Re-bind activeCaja if it was selected and still exists
-                            val savedActiveId = activeCaja?.id_caja
-                            if (savedActiveId != null) {
-                                activeCaja = list.find { it.id_caja == savedActiveId }
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Error de contenedores: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            } finally {
-                withContext(Dispatchers.Main) {
-                    loadingCajas = false
                 }
             }
         }

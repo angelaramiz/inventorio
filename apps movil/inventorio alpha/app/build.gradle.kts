@@ -11,8 +11,8 @@ android {
     applicationId = "com.inventorio.alpha"
     minSdk = 24
     targetSdk = 36
-    versionCode = 96
-    versionName = "2.0.82"
+    versionCode = 97
+    versionName = "2.0.83"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     ndk {
@@ -48,13 +48,6 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
-  }
-
-  externalNativeBuild {
-    cmake {
-      path = file("src/main/cpp/CMakeLists.txt")
-      version = "3.22.1"
-    }
   }
 
   packaging {
