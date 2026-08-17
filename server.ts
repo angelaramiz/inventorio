@@ -3255,6 +3255,44 @@ const emitDomainEvent = (type: string, payload: object = {}) => {
   domainEvents.emit("event", { type, ts: Date.now(), ...payload });
 };
 
+// ── SUPABASE REALTIME → SSE BRIDGE ─────────────────────────────────────────
+// El backend se suscribe a cambios de Postgres (hechos por CUALQUIER cliente:
+// apps móviles, SQL editor, otros servicios) y los re-emite por el bus SSE
+// a las apps conectadas. Así los cambios externos se reflejan sin reabrir apps.
+try {
+  const realtimeChannel = getSupabase().channel("db-to-sse-bridge");
+
+  const REALTIME_MAP: Record<string, { insert?: string; update?: string; delete?: string }> = {
+    cajas: { insert: "caja:updated", update: "caja:updated", delete: "caja:deleted" },
+    caja_productos: { insert: "caja:updated", update: "caja:updated", delete: "caja:updated" },
+    productos: { insert: "producto:batch-registered", update: "producto:updated", delete: "producto:deleted" },
+    loyalty_solicitudes_pago: { insert: "pago:solicitado", update: "pago:aprobado" },
+    loyalty_facturas: { update: "factura:solicitada" },
+    loyalty_compras: { insert: "compra:created" }
+  };
+
+  realtimeChannel
+    .on("postgres_changes", { event: "*", schema: "public", table: "*" }, (payload: any) => {
+      try {
+        const table = payload?.table as string;
+        const eventType = (payload?.eventType || "").toLowerCase() as "insert" | "update" | "delete";
+        const mapping = REALTIME_MAP[table];
+        const type = mapping?.[eventType];
+        if (!type) return;
+        const data = payload.new || payload.old || {};
+        emitDomainEvent(type, { ...data, _table: table, _origin: "supabase-realtime" });
+        console.log(`[Realtime→SSE] ${table}:${eventType} → ${type}`);
+      } catch (e) {
+        console.error("[Realtime→SSE] error:", e);
+      }
+    })
+    .subscribe((status: string) => {
+      console.log(`[Realtime→SSE] suscripción: ${status}`);
+    });
+} catch (e) {
+  console.error("[Realtime→SSE] no se pudo iniciar:", e);
+}
+
 
 // --- FASE 2: GESTIÓN DE CAJAS CJ-X Y POS ---
 
