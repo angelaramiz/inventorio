@@ -3268,7 +3268,9 @@ try {
     productos: { insert: "producto:batch-registered", update: "producto:updated", delete: "producto:deleted" },
     loyalty_solicitudes_pago: { insert: "pago:solicitado", update: "pago:aprobado" },
     loyalty_facturas: { update: "factura:solicitada" },
-    loyalty_compras: { insert: "compra:created" }
+    loyalty_compras: { insert: "compra:created" },
+    inventory_events: { insert: "inventory:evento", update: "inventory:updated", delete: "inventory:updated" },
+    count_requests: { insert: "inventory:updated", update: "inventory:approved", delete: "inventory:updated" }
   };
 
   realtimeChannel
@@ -3832,6 +3834,7 @@ app.post("/api/inventory/events", async (req, res) => {
     if (error) throw error;
     
     const ev = data[0];
+    emitDomainEvent("inventory:evento", { id: ev.id, estado: ev.estado });
     res.json({ ...ev, descripcion: descripcion || "", almacenes_ids: almacenes_ids || [] });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -4384,6 +4387,9 @@ app.post("/api/inventory/approvals", async (req, res) => {
       .eq("id", request_id)
       .select()
       .single();
+
+    // 3. Avisar por SSE al operario (aprobación/rechazo en tiempo real)
+    emitDomainEvent("inventory:approved", { request_id, estado: status, zone_id: request?.zone_id, event_id: request?.event_id });
       
     if (status === "aprobado" && request) {
       const cantidades = request.cantidades || {};
@@ -4534,6 +4540,7 @@ app.post("/api/inventory/events/:id/finalizar", async (req, res) => {
       timestamp: new Date().toISOString()
     };
     stockEvents.emit("manager-notification", newNotification);
+    emitDomainEvent("inventory:finalizado", { id: eventId, estado: "completado" });
     
     res.json(data[0] || { success: true });
   } catch (error: any) {
