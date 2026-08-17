@@ -11,8 +11,8 @@ android {
     applicationId = "com.inventorio.conteo"
     minSdk = 24
     targetSdk = 36
-    versionCode = 32
-    versionName = "1.0.31"
+    versionCode = 33
+    versionName = "1.0.32"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
