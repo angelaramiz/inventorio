@@ -292,6 +292,14 @@ export default function PosVentaView() {
   };
 
   // ── Finalizar venta ──
+  const refrescarCliente = async (ref: string) => {
+    try {
+      const data = await api(`/api/loyalty/cliente/${encodeURIComponent(ref)}`);
+      setCliente(data);
+      console.log("[POS] Saldo actualizado del cliente:", data.saldo_monedero);
+    } catch (_) {}
+  };
+
   const checkout = async () => {
     if (cart.length === 0) { toast.error("Carrito vacío"); return; }
     setIsProcessing(true);
@@ -328,6 +336,7 @@ export default function PosVentaView() {
               setDiscount(0);
               setSelectedCoupon("");
               toast.success("Venta completada");
+              if (cliente) refrescarCliente(cliente.ref);
               stopPolling(clearInterval, pollInterval);
             }
           } catch (_) {}
@@ -380,6 +389,7 @@ export default function PosVentaView() {
       setDiscount(0);
       setSelectedCoupon("");
       toast.success("Venta completada");
+      if (cliente) refrescarCliente(cliente.ref);
     } catch (e: any) {
       toast.error(`Error: ${e.message}`);
     } finally {
