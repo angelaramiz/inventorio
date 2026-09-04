@@ -53,7 +53,7 @@ class OcrSample:
     image_original: str
     image_preprocessed: str
     mlkit_result: Dict
-    groq_truth: Optional[Dict]
+    user_truth: Optional[Dict]
     barcode: Optional[str]
     modelo_grupo: str
     categoria: str
@@ -225,20 +225,20 @@ class DatasetManager:
                     continue
 
                 modelo = row.get('modelo_grupo', '') or \
-                         (row.get('groq_truth', {}) or {}).get('modelo_grupo', '') or \
+                         (row.get('user_truth', {}) or {}).get('modelo_grupo', '') or \
                          (row.get('mlkit_result', {}) or {}).get('modelo_grupo', '')
 
                 # Ground truth:
-                #  - Verificado (corrección usuario) → usa groq_truth (VERDAD ABSOLUTA)
-                #  - No verificado (sin corrección) → usa mlkit_result (ML Kit confiable)
-                truth = row.get('groq_truth') if row.get('is_verified') else row.get('mlkit_result', {})
+                #  - Verificado (confirmación/corrección usuario) → usa user_truth (VERDAD ABSOLUTA)
+                #  - No verificado (sin corrección) → usa mlkit_result (ML Kit directo)
+                truth = row.get('user_truth') if row.get('is_verified') else row.get('mlkit_result', {})
 
                 sample = OcrSample(
                     id=row['id'],
                     image_original=row.get('image_original', ''),
                     image_preprocessed=row.get('image_preprocessed', ''),
                     mlkit_result=row.get('mlkit_result', {}),
-                    groq_truth=truth,
+                    user_truth=truth,
                     barcode=barcode,
                     modelo_grupo=modelo,
                     categoria=row.get('categoria', '') or categorize_label(modelo)
@@ -282,7 +282,7 @@ class DatasetManager:
                         image_original=data.get('image_original', ''),
                         image_preprocessed=img_b64,
                         mlkit_result=data.get('mlkit_result', {}),
-                        groq_truth=data.get('groq_truth'),
+                        user_truth=data.get('user_truth'),
                         barcode=data.get('barcode'),
                         modelo_grupo=data.get('modelo_grupo', ''),
                         categoria=data.get('categoria', '') or categorize_label(data.get('modelo_grupo', ''))
@@ -318,7 +318,7 @@ class DatasetManager:
         cat_dir.mkdir(parents=True, exist_ok=True)
 
         for sample in samples:
-            truth = sample.groq_truth or sample.mlkit_result
+            truth = sample.user_truth or sample.mlkit_result
             text_parts = []
             if truth.get('modelo_grupo'):
                 text_parts.append(truth['modelo_grupo'])
@@ -589,7 +589,7 @@ def run_pipeline(config: TrainingConfig):
     by_cat = mgr.get_by_category()
     logger.info(f"\n📊 Dataset: {len(mgr.samples)} samples en {len(by_cat)} categorías:")
     for cat, samps in sorted(by_cat.items(), key=lambda x: -len(x[1])):
-        verified = sum(1 for s in samps if s.groq_truth)
+        verified = sum(1 for s in samps if s.user_truth)
         label = cat.replace('_', ' ').title()
         logger.info(f"  {label:20s}: {len(samps):4d} samples, {verified:4d} verificados")
 
