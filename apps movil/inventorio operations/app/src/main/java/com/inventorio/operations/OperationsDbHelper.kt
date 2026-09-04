@@ -10,7 +10,7 @@ class OperationsDbHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, 
 
     companion object {
         private const val DB_NAME = "inventorio_operations.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -89,15 +89,52 @@ class OperationsDbHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, 
                 session_id TEXT NOT NULL
             )
         """)
+
+        createManifiestoTables(db)
+    }
+
+    // Tablas de Manifiesto (mini-DB offline, aisladas del flujo CSV).
+    // Se crean en onCreate y en la migración v1→v2 sin tocar las 5 tablas del CSV.
+    private fun createManifiestoTables(db: SQLiteDatabase) {
+        // Manifiestos (cabeceras)
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS manifiestos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT NOT NULL,
+                categoria TEXT,
+                fecha TEXT,
+                estado TEXT NOT NULL DEFAULT 'abierto'
+            )
+        """)
+
+        // Ítems del manifiesto (origen 'ocr' o 'manual', verificado por el usuario)
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS manifiesto_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                manifiesto_id INTEGER NOT NULL,
+                barcode TEXT,
+                modelo TEXT,
+                nombre TEXT,
+                categoria TEXT,
+                cantidad INTEGER NOT NULL DEFAULT 1,
+                foto_path TEXT,
+                mlkit_raw TEXT,
+                origen TEXT,
+                verificado INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT
+            )
+        """)
+
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_items_manifiesto ON manifiesto_items(manifiesto_id)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS csv_products")
-        db.execSQL("DROP TABLE IF EXISTS cloud_locations")
-        db.execSQL("DROP TABLE IF EXISTS second_chance")
-        db.execSQL("DROP TABLE IF EXISTS pending_upload")
-        db.execSQL("DROP TABLE IF EXISTS not_found")
-        onCreate(db)
+        // Migración no destructiva: v1 → v2 solo agrega tablas de manifiesto.
+        // Las 5 tablas del flujo CSV (csv_products, cloud_locations, second_chance,
+        // pending_upload, not_found) NO se tocan ni se borran.
+        if (oldVersion < 2) {
+            createManifiestoTables(db)
+        }
     }
 
     fun getLastSessionId(): String? {
@@ -362,6 +399,118 @@ class OperationsDbHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, 
         cantidadEncontrada = c.getInt(c.getColumnIndexOrThrow("cantidad_encontrada")),
         estado = c.getString(c.getColumnIndexOrThrow("estado")) ?: "rojo"
     )
+
+    // ── Manifiestos (mini-DB offline, aislada del flujo CSV) ──
+
+    private fun nowIso(): String =
+        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+
+    fun createManifiesto(nombre: String, categoria: String): Long {
+        val cv = ContentValues().apply {
+            put("nombre", nombre.trim())
+            put("categoria", categoria.trim())
+            put("fecha", nowIso().substring(0, 10))
+            put("estado", "abierto")
+        }
+        return writableDatabase.insert("manifiestos", null, cv)
+    }
+
+    fun getManifiestos(): List<ManifiestoRow> {
+        val list = mutableListOf<ManifiestoRow>()
+        val c = readableDatabase.rawQuery("SELECT * FROM manifiestos ORDER BY id DESC", null)
+        while (c.moveToNext()) {
+            list.add(ManifiestoRow(
+                id = c.getLong(c.getColumnIndexOrThrow("id")),
+                nombre = c.getString(c.getColumnIndexOrThrow("nombre")) ?: "",
+                categoria = c.getString(c.getColumnIndexOrThrow("categoria")) ?: "",
+                fecha = c.getString(c.getColumnIndexOrThrow("fecha")) ?: "",
+                estado = c.getString(c.getColumnIndexOrThrow("estado")) ?: "abierto"
+            ))
+        }
+        c.close()
+        return list
+    }
+
+    fun setManifiestoEstado(id: Long, estado: String) {
+        val cv = ContentValues().apply { put("estado", estado) }
+        writableDatabase.update("manifiestos", cv, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun deleteManifiesto(id: Long) {
+        writableDatabase.delete("manifiesto_items", "manifiesto_id = ?", arrayOf(id.toString()))
+        writableDatabase.delete("manifiestos", "id = ?", arrayOf(id.toString()))
+    }
+
+    fun insertManifiestoItem(
+        manifiestoId: Long, barcode: String, modelo: String, nombre: String,
+        categoria: String, cantidad: Int, fotoPath: String, mlkitRaw: String, origen: String
+    ): Long {
+        val cv = ContentValues().apply {
+            put("manifiesto_id", manifiestoId)
+            put("barcode", barcode.trim())
+            put("modelo", modelo.trim().uppercase())
+            put("nombre", nombre.trim())
+            put("categoria", categoria.trim())
+            put("cantidad", if (cantidad < 1) 1 else cantidad)
+            put("foto_path", fotoPath)
+            put("mlkit_raw", mlkitRaw)
+            put("origen", origen)
+            put("verificado", 1)
+            put("updated_at", nowIso())
+        }
+        return writableDatabase.insert("manifiesto_items", null, cv)
+    }
+
+    fun getManifiestoItems(manifiestoId: Long): List<ManifiestoItemRow> {
+        val list = mutableListOf<ManifiestoItemRow>()
+        val c = readableDatabase.rawQuery(
+            "SELECT * FROM manifiesto_items WHERE manifiesto_id = ? ORDER BY id DESC",
+            arrayOf(manifiestoId.toString())
+        )
+        while (c.moveToNext()) {
+            list.add(ManifiestoItemRow(
+                id = c.getLong(c.getColumnIndexOrThrow("id")),
+                manifiestoId = c.getLong(c.getColumnIndexOrThrow("manifiesto_id")),
+                barcode = c.getString(c.getColumnIndexOrThrow("barcode")) ?: "",
+                modelo = c.getString(c.getColumnIndexOrThrow("modelo")) ?: "",
+                nombre = c.getString(c.getColumnIndexOrThrow("nombre")) ?: "",
+                categoria = c.getString(c.getColumnIndexOrThrow("categoria")) ?: "",
+                cantidad = c.getInt(c.getColumnIndexOrThrow("cantidad")),
+                fotoPath = c.getString(c.getColumnIndexOrThrow("foto_path")) ?: "",
+                mlkitRaw = c.getString(c.getColumnIndexOrThrow("mlkit_raw")) ?: "",
+                origen = c.getString(c.getColumnIndexOrThrow("origen")) ?: "",
+                verificado = c.getInt(c.getColumnIndexOrThrow("verificado")),
+                updatedAt = c.getString(c.getColumnIndexOrThrow("updated_at")) ?: ""
+            ))
+        }
+        c.close()
+        return list
+    }
+
+    fun updateManifiestoItem(id: Long, nombre: String, categoria: String, cantidad: Int, modelo: String) {
+        val cv = ContentValues().apply {
+            put("nombre", nombre.trim())
+            put("categoria", categoria.trim())
+            put("cantidad", if (cantidad < 1) 1 else cantidad)
+            put("modelo", modelo.trim().uppercase())
+            put("updated_at", nowIso())
+        }
+        writableDatabase.update("manifiesto_items", cv, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun deleteManifiestoItem(id: Long) {
+        writableDatabase.delete("manifiesto_items", "id = ?", arrayOf(id.toString()))
+    }
+
+    fun countManifiestoItems(manifiestoId: Long): Int {
+        val c = readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM manifiesto_items WHERE manifiesto_id = ?",
+            arrayOf(manifiestoId.toString())
+        )
+        val n = if (c.moveToFirst()) c.getInt(0) else 0
+        c.close()
+        return n
+    }
 }
 
 // Row data classes
@@ -406,4 +555,17 @@ data class FoundLocation(
     val idProducto: Int, val sku: String, val ubicacion: String,
     val cantidadEnUbicacion: Int, val nivelNombre: String?,
     val cajaNombre: String?, val almacenNombre: String?
+)
+
+// Manifiesto rows (mini-DB offline, aislada del flujo CSV)
+data class ManifiestoRow(
+    val id: Long, val nombre: String, val categoria: String,
+    val fecha: String, val estado: String
+)
+
+data class ManifiestoItemRow(
+    val id: Long, val manifiestoId: Long, val barcode: String,
+    val modelo: String, val nombre: String, val categoria: String,
+    val cantidad: Int, val fotoPath: String, val mlkitRaw: String,
+    val origen: String, val verificado: Int, val updatedAt: String
 )

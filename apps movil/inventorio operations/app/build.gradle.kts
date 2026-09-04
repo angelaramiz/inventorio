@@ -74,4 +74,8 @@ dependencies {
 
   // ML Kit Barcode Scanning
   implementation("com.google.mlkit:barcode-scanning:17.3.0")
+
+  // ML Kit Text Recognition (bundled Latin model, on-device, offline)
+  // Para Manifiesto: OCR de etiquetas sin IA externa
+  implementation("com.google.mlkit:text-recognition:16.0.0")
 }
