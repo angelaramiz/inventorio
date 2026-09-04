@@ -4733,6 +4733,8 @@ function categorizeLabel(modelo: string): string {
 // POST /api/ocr/save-correction - Guardar corrección del usuario como ground truth
 // El dato confirmado/corregido por el usuario es VERDAD ABSOLUTA para entrenar PaddleOCR.
 // Sin IA externa en este flujo.
+// Actualiza la fila del escaneo (una fila por scan: mlkit_result + user_truth),
+// en vez de insertar una fila sin imagen (image_original es NOT NULL).
 app.post("/api/ocr/save-correction", async (req, res) => {
   try {
     // Service role: el servidor es el único escritor (bypassa RLS de anon)
@@ -4746,38 +4748,51 @@ app.post("/api/ocr/save-correction", async (req, res) => {
     // Categorizar por prefijo de modelo
     const modelo = modelo_grupo || corrected_result.modelo_grupo || "";
     const categoria = categorizeLabel(modelo);
+    const mlkit = mlkit_result || {};
+    // Si el usuario confirmó sin cambios, ML Kit estaba en lo correcto
+    const matchesMlkit = (
+      (mlkit.modelo_grupo || "").toUpperCase() === (corrected_result.modelo_grupo || "").toUpperCase() &&
+      (mlkit.talla || "").toUpperCase() === (corrected_result.talla || "").toUpperCase()
+    );
 
-    const baseRow: any = {
-      image_original: null, // Already saved in previous sample
-      image_preprocessed: null,
-      mlkit_result: mlkit_result || {},
+    const truthPatch: any = {
       user_truth: corrected_result, // verdad absoluta del usuario
       verified_by: "usuario",
       is_verified: true,
       verified_at: new Date().toISOString(),
-      matches_mlkit: false, // User corrected = ML Kit was wrong
-      barcode: barcode,
+      matches_mlkit: matchesMlkit,
       modelo_grupo: modelo,
       categoria: categoria,
       device_info: "user-correction"
     };
 
-    let { error } = await supabase.from('ocr_training_data').insert(baseRow);
+    // 1. Buscar la fila del escaneo aún sin verificar (la más reciente de ese barcode)
+    const { data: existing } = await supabase
+      .from('ocr_training_data')
+      .select('id')
+      .eq('barcode', barcode)
+      .eq('is_verified', false)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    // Fallback: si la migración 20260818 aún no se aplicó, reintentar sin columnas nuevas
-    if (error && /user_truth|verified_by/.test(error.message || "")) {
-      delete baseRow.user_truth;
-      delete baseRow.verified_by;
-      const retry = await supabase.from('ocr_training_data').insert(baseRow);
-      error = retry.error;
+    if (existing) {
+      const { error } = await supabase
+        .from('ocr_training_data')
+        .update(truthPatch)
+        .eq('id', existing.id);
+      if (error) {
+        console.error("Error actualizando corrección:", error.message);
+        return res.status(200).json({ saved: false, reason: error.message });
+      }
+      return res.status(200).json({ saved: true, categoria, updated: true });
     }
 
-    if (error) {
-      console.error("Error guardando corrección:", error.message);
-      return res.status(200).json({ saved: false, reason: error.message });
-    }
-
-    res.status(200).json({ saved: true, categoria });
+    // 2. Sin fila previa: insertar (requiere imagen; sin ella la fila es inútil para entrenar)
+    return res.status(200).json({
+      saved: false,
+      reason: "No hay sample sin verificar para ese barcode. Escanea primero la etiqueta."
+    });
   } catch (error: any) {
     console.error("Error en save-correction:", error.message?.slice(0, 200));
     res.status(500).json({ error: error.message });
