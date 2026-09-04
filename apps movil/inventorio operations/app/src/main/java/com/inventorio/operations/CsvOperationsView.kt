@@ -50,7 +50,7 @@ fun String.urlEncode(): String = URLEncoder.encode(this, "UTF-8")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CsvOperationsView(client: OkHttpClient, serverUrl: String, onLogsUpdate: (List<String>) -> Unit = {}) {
+fun CsvOperationsView(client: OkHttpClient, serverUrl: String, onLogsUpdate: (List<String>) -> Unit = {}, onSendToManifiesto: ((String) -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val gson = remember { Gson() }
@@ -76,6 +76,7 @@ fun CsvOperationsView(client: OkHttpClient, serverUrl: String, onLogsUpdate: (Li
     var searchLog by remember { mutableStateOf<List<String>>(emptyList()) }
     var scannerLogs by remember { mutableStateOf<List<String>>(emptyList()) }
     var lastScanResult by remember { mutableStateOf("") }
+    var lastScannedCode by remember { mutableStateOf("") }
     var isScanProcessing by remember { mutableStateOf(false) }
 
     val totalSolicitado = csvProducts.sumOf { it.cantidadSolicitada }
@@ -252,6 +253,7 @@ fun CsvOperationsView(client: OkHttpClient, serverUrl: String, onLogsUpdate: (Li
         logs.add("[$timestamp] 📷 Escaneado: $code")
         isScanProcessing = true
         lastScanResult = "⏳ Procesando $code..."
+        lastScannedCode = code
 
         val sc = secondChanceList.firstOrNull { skuMatch(it.sku) || it.modeloGrupo.contains(code) }
         if (sc != null) {
@@ -555,7 +557,7 @@ fun CsvOperationsView(client: OkHttpClient, serverUrl: String, onLogsUpdate: (Li
                     "dashboard" -> DashboardTab(csvProducts)
                     "results" -> ResultsTab(csvProducts, cloudLocations, secondChanceList, searchCompleted, searchLog)
                     "cart" -> CartTab(csvProducts)
-                    "segunda" -> SecondChanceTab(secondChanceList, pendingUploads, notFoundList, csvProducts, secondChanceSubTab, isScannerActive, isLoading, lifecycleOwner, { secondChanceSubTab = it }, { isScannerActive = it }, handleSecondChanceScan, registerPendingProducts, { isScannerActive = false }, lastScanResult, isScanProcessing, discardSecondChance)
+                    "segunda" -> SecondChanceTab(secondChanceList, pendingUploads, notFoundList, csvProducts, secondChanceSubTab, isScannerActive, isLoading, lifecycleOwner, { secondChanceSubTab = it }, { isScannerActive = it }, handleSecondChanceScan, registerPendingProducts, { isScannerActive = false }, lastScanResult, isScanProcessing, discardSecondChance, lastScannedCode, onSendToManifiesto)
                 }
             }
         }
@@ -705,7 +707,8 @@ fun SecondChanceTab(
     onSubTabChange: (String) -> Unit, onScannerToggle: (Boolean) -> Unit,
     onBarcodeScanned: (String) -> Unit, onRegisterPending: () -> Unit, onCloseScanner: () -> Unit,
     lastScanResult: String = "", isScanProcessing: Boolean = false,
-    onDiscard: (SecondChanceRow) -> Unit = {}
+    onDiscard: (SecondChanceRow) -> Unit = {},
+    lastScannedCode: String = "", onSendToManifiesto: ((String) -> Unit)? = null
 ) {
     Column(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
         Row(Modifier.background(Color(0xFFF1F5F9), RoundedCornerShape(8.dp)).padding(2.dp)) {
@@ -737,7 +740,7 @@ fun SecondChanceTab(
                     IconButton(onClick = onCloseScanner, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(36.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))) { Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(18.dp)) }
                     Text("Centra el código en el marco", color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp))
                 }
-            } else { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) { Icon(Icons.Default.QrCodeScanner, null, Modifier.size(64.dp), tint = Color.LightGray); Text("Escanear productos pendientes", fontSize = 12.sp, color = Color.Gray); if (isScanProcessing) { CircularProgressIndicator(Modifier.size(28.dp), color = Color(0xFFF59E0B), strokeWidth = 3.dp) }; if (lastScanResult.isNotBlank()) { Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7)), shape = RoundedCornerShape(8.dp)) { Text(lastScanResult, Modifier.padding(10.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A), textAlign = TextAlign.Center) } }; Button(onClick = { if (hasCamPerm) onScannerToggle(true) else camPermLauncher.launch(Manifest.permission.CAMERA) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.CameraAlt, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Activar Escáner", fontWeight = FontWeight.Bold) } } } }
+            } else { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) { Icon(Icons.Default.QrCodeScanner, null, Modifier.size(64.dp), tint = Color.LightGray); Text("Escanear productos pendientes", fontSize = 12.sp, color = Color.Gray); if (isScanProcessing) { CircularProgressIndicator(Modifier.size(28.dp), color = Color(0xFFF59E0B), strokeWidth = 3.dp) }; if (lastScanResult.isNotBlank()) { Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7)), shape = RoundedCornerShape(8.dp)) { Text(lastScanResult, Modifier.padding(10.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A), textAlign = TextAlign.Center) } }; if (onSendToManifiesto != null && lastScannedCode.isNotBlank() && (lastScanResult.contains("No Existentes") || lastScanResult.contains("no está en pendientes") || lastScanResult.contains("no existe"))) { OutlinedButton(onClick = { onSendToManifiesto(lastScannedCode) }, shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF7C3AED))) { Icon(Icons.Default.DocumentScanner, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("OCR → Manifiesto", fontWeight = FontWeight.Bold, fontSize = 11.sp) } }; Button(onClick = { if (hasCamPerm) onScannerToggle(true) else camPermLauncher.launch(Manifest.permission.CAMERA) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.CameraAlt, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Activar Escáner", fontWeight = FontWeight.Bold) } } } }
             }
 
             "upload" -> {
