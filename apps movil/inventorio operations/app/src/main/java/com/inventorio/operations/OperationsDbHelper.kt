@@ -443,7 +443,8 @@ class OperationsDbHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, 
 
     fun insertManifiestoItem(
         manifiestoId: Long, barcode: String, modelo: String, nombre: String,
-        categoria: String, cantidad: Int, fotoPath: String, mlkitRaw: String, origen: String
+        categoria: String, cantidad: Int, fotoPath: String, mlkitRaw: String, origen: String,
+        verificado: Int = 1
     ): Long {
         val cv = ContentValues().apply {
             put("manifiesto_id", manifiestoId)
@@ -455,7 +456,8 @@ class OperationsDbHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, 
             put("foto_path", fotoPath)
             put("mlkit_raw", mlkitRaw)
             put("origen", origen)
-            put("verificado", 1)
+            // verificado=0 si no hay barcode (sin llave única, requiere revisión posterior)
+            put("verificado", verificado)
             put("updated_at", nowIso())
         }
         return writableDatabase.insert("manifiesto_items", null, cv)

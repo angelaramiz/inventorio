@@ -231,7 +231,11 @@ object LabelTextParser {
         // 1. Buscar modelo compuesto con color: "W5BP39KACM2-G1H3"
         val compoundMatch = COMPOUND_MODEL_REGEX.find(text)
         if (compoundMatch != null) {
-            return Pair(compoundMatch.groupValues[1], true)
+            val candidate = compoundMatch.groupValues[1]
+            // Endurecido: el compuesto también debe ser plausible (descarta "OCCURRENCES-THE")
+            if (isPlausibleModelo(candidate)) {
+                return Pair(candidate, true)
+            }
         }
 
         // 2. Buscar SKU (que a menudo ES el modelo)
@@ -246,13 +250,13 @@ object LabelTextParser {
             if (line.contains("MODELO") || line.contains("MODEL") || line.contains("REF") || line.contains("REFERENCIA")) {
                 // Extraer valor después del keyword
                 val afterKeyword = line.replace(Regex(".*(?:MODELO|MODEL|REF|REFERENCIA)[:\\s]*"), "").trim()
-                if (afterKeyword.isNotEmpty() && afterKeyword.length in 3..20) {
+                if (afterKeyword.isNotEmpty() && afterKeyword.length in 3..20 && isPlausibleModelo(afterKeyword)) {
                     return Pair(afterKeyword, true)
                 }
                 // Buscar en la siguiente línea
                 if (i + 1 < lines.size) {
                     val nextLine = lines[i + 1].trim()
-                    if (nextLine.length in 3..20 && nextLine.matches(Regex("[A-Z0-9\\-]+"))) {
+                    if (nextLine.length in 3..20 && nextLine.matches(Regex("[A-Z0-9\\-]+")) && isPlausibleModelo(nextLine)) {
                         return Pair(nextLine, true)
                     }
                 }
@@ -263,8 +267,8 @@ object LabelTextParser {
         val modeloMatch = MODELO_REGEX.find(text)
         if (modeloMatch != null) {
             val candidate = modeloMatch.groupValues[1]
-            // Filtrar falsos positivos (palabras comunes)
-            if (!isCommonWord(candidate)) {
+            // Filtrar falsos positivos (palabras comunes) + exigir modelo plausible
+            if (!isCommonWord(candidate) && isPlausibleModelo(candidate)) {
                 return Pair(candidate, false)
             }
         }
@@ -277,7 +281,8 @@ object LabelTextParser {
         val compoundMatch = COMPOUND_MODEL_REGEX.find(text)
         if (compoundMatch != null) {
             val color = compoundMatch.groupValues[2]
-            if (color.length in 3..6) {
+            // Endurecido: largo 3-6 y nunca palabra de ruido ("THE" mide 3 y pasaba)
+            if (color.length in 3..6 && !isNoiseWord(color)) {
                 return Pair(color, true)
             }
         }
@@ -292,7 +297,11 @@ object LabelTextParser {
         // 3. Buscar después de "COLOR" o "COLOUR"
         val colorLabelMatch = Regex("""(?:COLOR|COLOUR)[:\s]+([A-Z0-9]{2,10})""", RegexOption.IGNORE_CASE).find(text)
         if (colorLabelMatch != null) {
-            return Pair(colorLabelMatch.groupValues[1], true)
+            val candidate = colorLabelMatch.groupValues[1].uppercase()
+            // Endurecido: largo 3-6 y sin palabras de ruido
+            if (candidate.length in 3..6 && !isNoiseWord(candidate)) {
+                return Pair(candidate, true)
+            }
         }
 
         // 4. Si hay modelo encontrado, buscar código de color de 3-6 chars al final del modelo concatenado
@@ -304,8 +313,8 @@ object LabelTextParser {
                 val colorMatch = Regex("""^([A-Z0-9]{3,6})\b""").find(afterModel)
                 if (colorMatch != null) {
                     val candidate = colorMatch.groupValues[1]
-                    // No confundir con talla u otros códigos
-                    if (candidate !in VALID_TALLAS && candidate.length >= 3) {
+                    // No confundir con talla u otros códigos; end.: sin ruido
+                    if (candidate !in VALID_TALLAS && candidate.length >= 3 && !isNoiseWord(candidate)) {
                         return Pair(candidate, true)
                     }
                 }
@@ -458,5 +467,27 @@ object LabelTextParser {
             "SUCH", "TAKE", "THAN", "THEM", "THEN", "WHAT", "WHEN"
         )
         return word.length < 5 || word in commons
+    }
+
+    // ─── Endurecido Operations (NO existe en Alpha) ──────────────
+    // ML Kit lee el fondo (monitores, cajas): palabras inglesas que nunca
+    // son modelo/color reales. Caso real: "URRENCES" (cola de OCCURRENCES)
+    // + "THE" propuestos como modelo URRENCES-THE con 81%.
+
+    private val ENGLISH_NOISE = setOf(
+        "THE", "AND", "FOR", "FORMAT", "FUNCTION", "FUNCTIONS",
+        "OCCURRENCE", "OCCURRENCES", "URRENCES",
+        "WITH", "FROM", "YOUR", "SCREEN", "DISPLAY"
+    )
+
+    private fun isNoiseWord(word: String): Boolean =
+        isCommonWord(word) || word.uppercase() in ENGLISH_NOISE
+
+    // Un modelo real mide 6+ chars y mezcla letras con dígitos
+    // (M6BB53W4176 sí; URRENCES, THE, AND no).
+    private fun isPlausibleModelo(s: String): Boolean {
+        val t = s.trim().uppercase()
+        return t.length >= 6 && t.any { it.isDigit() } &&
+                t.all { it.isLetterOrDigit() || it == '-' } && !isNoiseWord(t)
     }
 }
