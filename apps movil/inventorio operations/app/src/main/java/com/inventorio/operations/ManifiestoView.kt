@@ -9,6 +9,12 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,10 +30,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -340,63 +350,62 @@ fun ManifiestoOcrTab(
     var isProcessing by remember { mutableStateOf(false) }
     var propuesta by remember { mutableStateOf<OcrPropuesta?>(null) }
     var lastBarcode by remember { mutableStateOf(barcodeSugerido ?: "") }
+    // Visor CameraX in-app (nunca cámara nativa del sistema)
+    var showCamera by remember { mutableStateOf(false) }
     // Bitmaps para training (se reciclan al guardar/descartar)
     var trainCrop by remember { mutableStateOf<Bitmap?>(null) }
     var trainPreB64 by remember { mutableStateOf<String?>(null) }
 
-    val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        val file = photoFile
-        if (success && file != null && file.exists()) {
-            feedbackCaptura(context)
-            isProcessing = true
-            scope.launch(Dispatchers.IO) {
-                try {
-                    val uri = FileProvider.getUriForFile(context, "com.inventorio.operations.fileprovider", file)
-                    val full: Bitmap? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
-                    } else {
-                        @Suppress("DEPRECATION")
-                        android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
-                    }
-                    if (full == null) {
-                        withContext(Dispatchers.Main) {
-                            isProcessing = false
-                            Toast.makeText(context, "No se pudo decodificar la foto", Toast.LENGTH_LONG).show()
-                        }
-                        return@launch
-                    }
-                    // Encuadre: crop central 70% ANTES del OCR (descarta monitor/fondo)
-                    val crop = cropCenter70(full)
-                    try { full.recycle() } catch (_: Exception) {}
-
-                    // Doble motor en paralelo: barcode EAN + texto (orig+preproc) + pre para training
-                    val eanDeferred = async { scanBarcodeEan(crop) }
-                    val preDeferred = async {
-                        try { ImagePreprocessor.preprocessLight(crop).bitmap } catch (_: Exception) { null }
-                    }
-                    val prop = ManifiestoOcrEngine.analyze(crop, barcode = lastBarcode.ifBlank { null })
-                    val ean = eanDeferred.await()
-                    val preBmp = preDeferred.await()
-                    val cropB64 = bitmapToBase64q60(crop)
-                    val preB64 = preBmp?.let { bitmapToBase64q60(it) }
-                    try { preBmp?.recycle() } catch (_: Exception) {}
-
+    // Procesa un archivo ya capturado con CameraX: decode → crop 70% → doble motor
+    val procesarFoto: (File) -> Unit = { file ->
+        feedbackCaptura(context)
+        isProcessing = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                val uri = FileProvider.getUriForFile(context, "com.inventorio.operations.fileprovider", file)
+                val full: Bitmap? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
+                } else {
+                    @Suppress("DEPRECATION")
+                    android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+                }
+                if (full == null) {
                     withContext(Dispatchers.Main) {
                         isProcessing = false
-                        trainCrop?.recycle()
-                        trainCrop = crop
-                        trainPreB64 = preB64
-                        if (!ean.isNullOrBlank()) lastBarcode = ean
-                        propuesta = prop
-                        if (!prop.hasAnyData) {
-                            Toast.makeText(context, "ML Kit no extrajo datos — captúralos manualmente", Toast.LENGTH_LONG).show()
-                        }
+                        Toast.makeText(context, "No se pudo decodificar la foto", Toast.LENGTH_LONG).show()
                     }
-                } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        isProcessing = false
-                        Toast.makeText(context, "Error OCR: ${e.message}", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                // Encuadre: crop central 70% ANTES del OCR (descarta monitor/fondo)
+                val crop = cropCenter70(full)
+                try { full.recycle() } catch (_: Exception) {}
+
+                // Doble motor en paralelo: barcode EAN + texto (orig+preproc) + pre para training
+                val eanDeferred = async { scanBarcodeEan(crop) }
+                val preDeferred = async {
+                    try { ImagePreprocessor.preprocessLight(crop).bitmap } catch (_: Exception) { null }
+                }
+                val prop = ManifiestoOcrEngine.analyze(crop, barcode = lastBarcode.ifBlank { null })
+                val ean = eanDeferred.await()
+                val preBmp = preDeferred.await()
+                val preB64 = preBmp?.let { bitmapToBase64q60(it) }
+                try { preBmp?.recycle() } catch (_: Exception) {}
+
+                withContext(Dispatchers.Main) {
+                    isProcessing = false
+                    trainCrop?.recycle()
+                    trainCrop = crop
+                    trainPreB64 = preB64
+                    if (!ean.isNullOrBlank()) lastBarcode = ean
+                    propuesta = prop
+                    if (!prop.hasAnyData) {
+                        Toast.makeText(context, "ML Kit no extrajo datos — captúralos manualmente", Toast.LENGTH_LONG).show()
                     }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isProcessing = false
+                    Toast.makeText(context, "Error OCR: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -427,10 +436,7 @@ fun ManifiestoOcrTab(
         Button(
             onClick = {
                 if (!hasCamPerm) { camPermLauncher.launch(Manifest.permission.CAMERA); return@Button }
-                val dir = File(File(context.filesDir, "manifiestos"), manifiestoId.toString()).apply { mkdirs() }
-                val file = File(dir, "IMG_${System.currentTimeMillis()}.jpg")
-                photoFile = file
-                takePictureLauncher.launch(FileProvider.getUriForFile(context, "com.inventorio.operations.fileprovider", file))
+                showCamera = true
             },
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
@@ -443,6 +449,28 @@ fun ManifiestoOcrTab(
                 CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
                 Spacer(Modifier.width(8.dp)); Text("Analizando con ML Kit...", fontSize = 11.sp, color = Color.Gray)
             }
+        }
+    }
+
+    // Visor CameraX in-app con marco 70% (nunca cámara nativa)
+    if (showCamera) {
+        Dialog(
+            onDismissRequest = { if (!isProcessing) showCamera = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            ManifiestoCameraCapture(
+                manifiestoId = manifiestoId,
+                onCaptured = { file ->
+                    showCamera = false
+                    photoFile = file
+                    procesarFoto(file)
+                },
+                onClose = { showCamera = false },
+                onError = { msg ->
+                    showCamera = false
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                }
+            )
         }
     }
 
@@ -537,6 +565,109 @@ suspend fun postManifiestoTraining(
             .build()
         client.newCall(req).execute().close()
     } catch (_: Exception) { /* offline: el ítem local ya quedó guardado */ }
+}
+
+/**
+ * Visor de captura CameraX in-app para Manifiesto (nunca cámara nativa del sistema).
+ * Muestra preview en vivo con marco 70% + botón de captura.
+ * La foto se guarda en getFilesDir()/manifiestos/<id>/ y el OCR recorta el 70% central.
+ */
+@Composable
+fun ManifiestoCameraCapture(
+    manifiestoId: Long,
+    onCaptured: (File) -> Unit,
+    onClose: () -> Unit,
+    onError: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+    var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var isCapturing by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose { try { cameraProvider?.unbindAll() } catch (_: Exception) {} }
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        AndroidView(
+            factory = { ctx ->
+                val pv = PreviewView(ctx).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
+                val ic = ImageCapture.Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .build()
+                imageCapture = ic
+                ProcessCameraProvider.getInstance(ctx).addListener({
+                    try {
+                        val cp = ProcessCameraProvider.getInstance(ctx).get()
+                        cameraProvider = cp
+                        val preview = Preview.Builder().build().also { it.setSurfaceProvider(pv.surfaceProvider) }
+                        cp.unbindAll()
+                        cp.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, ic)
+                    } catch (e: Exception) {
+                        onError("No se pudo iniciar la cámara: ${e.message}")
+                    }
+                }, ContextCompat.getMainExecutor(ctx))
+                pv
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Marco 70%: el OCR analiza el centro (descarta monitor/fondo)
+        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.fillMaxWidth(0.85f).aspectRatio(4f / 3f)
+                    .border(3.dp, Color(0xFFF59E0B), RoundedCornerShape(8.dp))
+            )
+        }
+        Text(
+            "Encuadra SOLO la etiqueta",
+            color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 20.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        )
+        IconButton(
+            onClick = onClose,
+            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).size(40.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+        ) { Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(20.dp)) }
+
+        // Botón captura
+        Button(
+            onClick = {
+                val ic = imageCapture ?: return@Button
+                if (isCapturing) return@Button
+                isCapturing = true
+                try {
+                    val dir = File(File(context.filesDir, "manifiestos"), manifiestoId.toString()).apply { mkdirs() }
+                    val file = File(dir, "IMG_${System.currentTimeMillis()}.jpg")
+                    val output = ImageCapture.OutputFileOptions.Builder(file).build()
+                    ic.takePicture(output, ContextCompat.getMainExecutor(context),
+                        object : ImageCapture.OnImageSavedCallback {
+                            override fun onImageSaved(o: ImageCapture.OutputFileResults) {
+                                isCapturing = false
+                                onCaptured(file)
+                            }
+                            override fun onError(e: ImageCaptureException) {
+                                isCapturing = false
+                                onError("Error al capturar: ${e.message}")
+                            }
+                        })
+                } catch (e: Exception) {
+                    isCapturing = false
+                    onError("Error al capturar: ${e.message}")
+                }
+            },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp).size(72.dp),
+            shape = RoundedCornerShape(36.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+            contentPadding = PaddingValues(0.dp)
+        ) {
+            if (isCapturing) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+            else Box(Modifier.size(58.dp).background(Color(0xFFF59E0B), RoundedCornerShape(29.dp)))
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
