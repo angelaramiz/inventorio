@@ -4514,10 +4514,12 @@ app.delete("/api/inventory/reports", async (req, res) => {
 
 // POST /api/ocr/save-training - Guardar sample de entrenamiento OCR
 // Recibe imagen original + preprocesada en base64, resultado ML Kit, y metadata.
+// Si incluye user_truth (dato confirmado por el usuario), se guarda ya verificado.
 // Almacena en Supabase para entrenamiento futuro de PaddleOCR.
 app.post("/api/ocr/save-training", async (req, res) => {
   try {
-    const supabase = getSupabase();
+    // Service role: el servidor es el único escritor (bypassa RLS de anon)
+    const supabase = getSupabaseService();
     const {
       image_original,
       image_preprocessed,
@@ -4526,7 +4528,8 @@ app.post("/api/ocr/save-training", async (req, res) => {
       image_width,
       image_height,
       preprocessing_time_ms,
-      device_info
+      device_info,
+      user_truth
     } = req.body;
 
     if (!image_original || !mlkit_result) {
@@ -4536,25 +4539,41 @@ app.post("/api/ocr/save-training", async (req, res) => {
     // Guardar en tabla ocr_training_data
     const modelo = mlkit_result?.modelo_grupo || "";
     const categoria = categorizeLabel(modelo);
+    const confirmed = user_truth && typeof user_truth === 'object' ? user_truth : null;
 
-    const { data, error } = await supabase
+    const baseRow: any = {
+      image_original: image_original,
+      image_preprocessed: image_preprocessed || null,
+      mlkit_result: mlkit_result,
+      barcode: barcode || null,
+      modelo_grupo: modelo || null,
+      categoria: categoria,
+      image_width: image_width || null,
+      image_height: image_height || null,
+      preprocessing_time_ms: preprocessing_time_ms || null,
+      device_info: device_info || null,
+      // Verdad absoluta del usuario cuando viene confirmada en el mismo guardado
+      user_truth: confirmed,
+      verified_by: confirmed ? 'usuario' : null,
+      is_verified: !!confirmed,
+      verified_at: confirmed ? new Date().toISOString() : null,
+      created_at: new Date().toISOString()
+    };
+
+    let { data, error } = await supabase
       .from('ocr_training_data')
-      .insert({
-        image_original: image_original,
-        image_preprocessed: image_preprocessed || null,
-        mlkit_result: mlkit_result,
-        barcode: barcode || null,
-        modelo_grupo: modelo || null,
-        categoria: categoria,
-        image_width: image_width || null,
-        image_height: image_height || null,
-        preprocessing_time_ms: preprocessing_time_ms || null,
-        device_info: device_info || null,
-        is_verified: false,
-        created_at: new Date().toISOString()
-      })
+      .insert(baseRow)
       .select('id')
       .single();
+
+    // Fallback pre-migración 20260818: reintentar sin columnas nuevas
+    if (error && /user_truth|verified_by/.test(error.message || "")) {
+      delete baseRow.user_truth;
+      delete baseRow.verified_by;
+      const retry = await supabase.from('ocr_training_data').insert(baseRow).select('id').single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       console.error("Error guardando training sample:", error.message);
@@ -4576,7 +4595,8 @@ app.post("/api/ocr/save-training", async (req, res) => {
 // ready_for_training = verificados con ground truth del usuario (user_truth)
 app.get("/api/ocr/training-stats", async (req, res) => {
   try {
-    const supabase = getSupabase();
+    // Service role: lectura interna del dataset (RLS de anon lo bloquea)
+    const supabase = getSupabaseService();
 
     let data: any[] | null = null;
     try {
@@ -4618,6 +4638,23 @@ app.get("/api/ocr/training-stats", async (req, res) => {
     // Ground truth usable para entrenar: solo user_truth (verdad absoluta del usuario)
     const readyForTraining = data?.filter(r => r.is_verified && r.user_truth != null).length || 0;
     const userVerified = data?.filter(r => r.is_verified && r.verified_by === 'usuario').length || 0;
+    // Fallback de solo lectura: filas legacy con groq_truth sin migrar a user_truth.
+    // No cuentan para entrenar. Se eliminan con la migración DROP pendiente.
+    let legacyGroqRows = 0;
+    try {
+      const lg = await supabase
+        .from('ocr_training_data')
+        .select('id')
+        .not('groq_truth', 'is', null)
+        .is('user_truth', null)
+        .limit(5000);
+      if (!lg.error && lg.data) {
+        legacyGroqRows = lg.data.length;
+        if (legacyGroqRows > 0) {
+          console.warn(`[OCR] ${legacyGroqRows} samples legacy con groq_truth sin user_truth (aplicar migración DROP cuando se validen)`);
+        }
+      }
+    } catch { /* columna groq_truth ya dropeada: nada que advertir */ }
     const uniqueBarcodes = new Set(data?.filter(r => r.barcode).map(r => r.barcode)).size;
     const dates = data?.map(r => r.created_at).filter(Boolean).sort();
 
@@ -4642,6 +4679,7 @@ app.get("/api/ocr/training-stats", async (req, res) => {
       mlkit_accuracy_pct: accuracy,
       ready_for_training: readyForTraining,
       user_verified: userVerified,
+      legacy_groq_rows: legacyGroqRows,
       training_job: ocrTrainingJob.status,
       unique_barcodes: uniqueBarcodes,
       first_sample: dates?.[0] || null,
@@ -4694,10 +4732,11 @@ function categorizeLabel(modelo: string): string {
 
 // POST /api/ocr/save-correction - Guardar corrección del usuario como ground truth
 // El dato confirmado/corregido por el usuario es VERDAD ABSOLUTA para entrenar PaddleOCR.
-// Ya no se usa IA externa (Groq/Gemini) en este flujo.
+// Sin IA externa en este flujo.
 app.post("/api/ocr/save-correction", async (req, res) => {
   try {
-    const supabase = getSupabase();
+    // Service role: el servidor es el único escritor (bypassa RLS de anon)
+    const supabase = getSupabaseService();
     const { barcode, mlkit_result, corrected_result, modelo_grupo } = req.body;
 
     if (!barcode || !corrected_result) {

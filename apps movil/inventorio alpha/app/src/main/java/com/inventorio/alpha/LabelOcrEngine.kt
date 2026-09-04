@@ -6,7 +6,7 @@ import android.graphics.Bitmap
 /**
  * Motor de OCR para etiquetas de ropa — solo on-device.
  *
- * Sin IA externa (ni Groq ni Gemini):
+ * Sin IA externa de ningún proveedor:
  *  1. ML Kit Text Recognition (local, on-device, ~100ms, $0)
  *     - Extrae texto crudo con ML Kit
  *     - LabelTextParser analiza con heurísticas + regex
