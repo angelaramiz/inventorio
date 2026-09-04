@@ -40,6 +40,16 @@ private const val PREFS_MANIFIESTO = "manifiesto_prefs"
 private const val KEY_CATEGORIAS = "categorias_cache"
 private val CATEGORIAS_FALLBACK = listOf("pantalon", "accesorio", "camisa", "calzado", "chaqueta", "otro")
 
+/**
+ * Normaliza categoría para comparar sin importar acentos/mayúsculas.
+ * Riesgo conocido (QA): si la central trae "joyería" y el fallback "joyeria",
+ * son vocabularios distintos. Esta función evita duplicados visuales y mejora
+ * la sugerencia automática, pero los ítems guardados conservan su string exacto.
+ */
+fun normCat(s: String): String =
+    java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+        .replace("\\p{Mn}+".toRegex(), "")
+
 /** Modelo compuesto obligatorio: base + "-" + color (solo base si no hay color). */
 fun composeModelo(base: String, color: String): String {
     val b = base.trim().uppercase()
@@ -376,7 +386,7 @@ fun OcrConfirmDialog(
     var base by remember { mutableStateOf(propuesta.modeloGrupo ?: "") }
     var color by remember { mutableStateOf(propuesta.codigoColor ?: "") }
     var nombre by remember { mutableStateOf("") }
-    var categoria by remember { mutableStateOf(propuesta.marca?.let { m -> categorias.firstOrNull { it.equals(m, ignoreCase = true) } } ?: categorias.firstOrNull() ?: "otro") }
+    var categoria by remember { mutableStateOf(propuesta.marca?.let { m -> categorias.firstOrNull { normCat(it) == normCat(m) } } ?: categorias.firstOrNull() ?: "otro") }
     var cantidadTxt by remember { mutableStateOf("1") }
     var expanded by remember { mutableStateOf(false) }
 
