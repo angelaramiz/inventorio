@@ -50,6 +50,8 @@ import androidx.lifecycle.lifecycleScope
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.*
@@ -1157,10 +1159,14 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
 
     var stats by remember { mutableStateOf<Map<String, Any>?>(null) }
     var isLoadingStats by remember { mutableStateOf(false) }
-    var isVerifying by remember { mutableStateOf(false) }
     var isTraining by remember { mutableStateOf(false) }
-    var lastVerifyResult by remember { mutableStateOf<String?>(null) }
     var lastTrainResult by remember { mutableStateOf<String?>(null) }
+    var trainingLog by remember { mutableStateOf("") }
+    // Job del polling cancelable: si el dashboard sale de composición, se cancela
+    val pollJob = remember { mutableStateOf<Job?>(null) }
+    DisposableEffect(serverUrl) {
+        onDispose { pollJob.value?.cancel() }
+    }
 
     // Load stats
     val loadStats = {
@@ -1191,34 +1197,52 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
 
     LaunchedEffect(serverUrl) { loadStats() }
 
-    // Verify batch
-    val verifyBatch = {
-        isVerifying = true
-        lastVerifyResult = null
-        scope.launch(Dispatchers.IO) {
-            try {
-                val body = Gson().toJson(mapOf("limit" to 3))
-                val req = Request.Builder()
-                    .url("${serverUrl.trimEnd('/')}/api/ocr/verify-batch")
-                    .post(body.toRequestBody("application/json".toMediaType()))
-                    .build()
-                client.newCall(req).execute().use { res ->
-                    val result = res.body?.string() ?: "{}"
-                    withContext(Dispatchers.Main) {
-                        lastVerifyResult = if (res.isSuccessful) {
-                            val jsonObj = org.json.JSONObject(result)
-                            "Verificados: ${jsonObj.optInt("verified", 0)}/${jsonObj.optInt("total", 0)}"
-                        } else {
-                            "Error: ${res.code}"
+    // Poll del estado del entrenamiento (el servidor lo ejecuta en background)
+    val pollTrainingStatus = {
+        pollJob.value?.cancel()
+        pollJob.value = scope.launch(Dispatchers.IO) {
+            var guard = 0
+            var finished = false
+            while (!finished && guard < 720) { // ~60 min máximo, cada 5 s
+                delay(5000)
+                guard++
+                try {
+                    val req = Request.Builder()
+                        .url("${serverUrl.trimEnd('/')}/api/ocr/training-status")
+                        .build()
+                    client.newCall(req).execute().use { res ->
+                        if (!res.isSuccessful) return@use
+                        val st = org.json.JSONObject(res.body?.string() ?: "{}")
+                        val status = st.optString("status", "idle")
+                        val message = st.optString("message", "")
+                        val tail = st.optJSONArray("log_tail")
+                        // Tail cortado por salto de línea, nunca a mitad de línea
+                        val full = if (tail != null) {
+                            (0 until tail.length()).joinToString("\n") { tail.optString(it) }
+                        } else ""
+                        val tailText = if (full.length > 2000) full.takeLast(2000).substringAfter("\n") else full
+                        withContext(Dispatchers.Main) {
+                            trainingLog = tailText
+                            lastTrainResult = when (status) {
+                                "running" -> "⏳ $message"
+                                "done" -> "✅ $message"
+                                "error" -> "❌ $message"
+                                else -> message.ifBlank { null }
+                            }
+                            if (status == "done" || status == "error") {
+                                finished = true
+                                isTraining = false
+                                loadStats()
+                            }
                         }
-                        isVerifying = false
-                        loadStats()
                     }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    lastVerifyResult = "Error: ${e.message}"
-                    isVerifying = false
+                } catch (_: Exception) { /* reintentar en el siguiente ciclo */ }
+            }
+            withContext(Dispatchers.Main) {
+                if (!finished) {
+                    isTraining = false
+                    lastTrainResult = "⏳ Sigue en curso (límite de seguimiento alcanzado). Reabre para ver el estado."
+                    loadStats()
                 }
             }
         }
@@ -1228,6 +1252,7 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
     val triggerTraining = {
         isTraining = true
         lastTrainResult = null
+        trainingLog = ""
         scope.launch(Dispatchers.IO) {
             try {
                 val req = Request.Builder()
@@ -1237,13 +1262,19 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
                 client.newCall(req).execute().use { res ->
                     val result = res.body?.string() ?: "{}"
                     withContext(Dispatchers.Main) {
-                        lastTrainResult = if (res.isSuccessful) {
+                        if (res.isSuccessful) {
                             val jsonObj = org.json.JSONObject(result)
-                            "Training iniciado: ${jsonObj.optString("message", "OK")}"
+                            if (jsonObj.optBoolean("started", false)) {
+                                lastTrainResult = "⏳ ${jsonObj.optString("message", "Iniciado")}"
+                                pollTrainingStatus()
+                            } else {
+                                lastTrainResult = "⚠️ ${jsonObj.optString("message", "No iniciado")}"
+                                isTraining = false
+                            }
                         } else {
-                            "Error: ${res.code}"
+                            lastTrainResult = "Error: ${res.code}"
+                            isTraining = false
                         }
-                        isTraining = false
                     }
                 }
             } catch (e: Exception) {
@@ -1296,6 +1327,8 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
                 val mlkitCorrect = (stats!!["mlkit_correct"] as? Number)?.toInt() ?: 0
                 val mlkitIncorrect = (stats!!["mlkit_incorrect"] as? Number)?.toInt() ?: 0
                 val accuracy = (stats!!["mlkit_accuracy_pct"] as? Number)?.toDouble() ?: 0.0
+                val ready = (stats!!["ready_for_training"] as? Number)?.toInt() ?: verified
+                val userVerified = (stats!!["user_verified"] as? Number)?.toInt() ?: 0
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OcrStatCard("Total", "$total", Color(0xFF7C3AED), Modifier.weight(1f))
@@ -1303,9 +1336,9 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
                     OcrStatCard("Pendientes", "$pending", Color(0xFFF59E0B), Modifier.weight(1f))
                 }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OcrStatCard("ML Kit OK", "$mlkitCorrect", Color(0xFF10B981), Modifier.weight(1f))
-                    OcrStatCard("ML Kit Falló", "$mlkitIncorrect", Color(0xFFEF4444), Modifier.weight(1f))
-                    OcrStatCard("Accuracy", "%.1f%%".format(accuracy), Color(0xFF2563EB), Modifier.weight(1f))
+                    OcrStatCard("Listos p/entrenar", "$ready", Color(0xFF2563EB), Modifier.weight(1f))
+                    OcrStatCard("Ground truth usuario", "$userVerified", Color(0xFF10B981), Modifier.weight(1f))
+                    OcrStatCard("ML Kit OK (hist.)", "$mlkitCorrect", Color(0xFF64748B), Modifier.weight(1f))
                 }
 
                 // Category breakdown
@@ -1338,10 +1371,10 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
                     }
                 }
 
-                // Accuracy bar
+                // Accuracy bar (histórico vs IA externa — solo referencia, ya no se usa para verificar)
                 if (verified > 0) {
                     Column {
-                        Text("Precisión ML Kit vs Groq", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+                        Text("Precisión ML Kit (histórico vs IA externa)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
                         Spacer(Modifier.height(4.dp))
                         Box(modifier = Modifier.fillMaxWidth().height(8.dp).background(Color(0xFFF1F5F9), RoundedCornerShape(4.dp))) {
                             Box(modifier = Modifier
@@ -1368,16 +1401,16 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
             // Action buttons
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { verifyBatch() },
+                    onClick = { loadStats() },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
                     shape = RoundedCornerShape(10.dp),
-                    enabled = !isVerifying && !isTraining
+                    enabled = !isTraining && !isLoadingStats
                 ) {
-                    if (isVerifying) {
+                    if (isLoadingStats) {
                         CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
                     } else {
-                        Text("Verificar con Groq", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("Actualizar datos", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 Button(
@@ -1385,7 +1418,7 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
                     shape = RoundedCornerShape(10.dp),
-                    enabled = !isTraining && !isVerifying
+                    enabled = !isTraining
                 ) {
                     if (isTraining) {
                         CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
@@ -1396,16 +1429,20 @@ fun OcrTrainingDashboard(serverUrl: String, client: OkHttpClient) {
             }
 
             // Result messages
-            lastVerifyResult?.let {
-                Text(it, fontSize = 10.sp, color = if (it.startsWith("Verificados")) Color(0xFF059669) else Color(0xFFEF4444))
-            }
             lastTrainResult?.let {
-                Text(it, fontSize = 10.sp, color = if (it.startsWith("Training")) Color(0xFF2563EB) else Color(0xFFEF4444))
+                Text(it, fontSize = 10.sp, color = when {
+                    it.startsWith("✅") -> Color(0xFF059669)
+                    it.startsWith("⏳") || it.startsWith("⚠️") -> Color(0xFF2563EB)
+                    else -> Color(0xFFEF4444)
+                })
+            }
+            if (trainingLog.isNotBlank()) {
+                Text(trainingLog, fontSize = 8.sp, color = Color(0xFF64748B), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, maxLines = 6)
             }
 
             // Info
             Text(
-                text = "Los datos se recopilan automáticamente al escanear etiquetas. Verificar con Groq crea el ground truth para entrenar.",
+                text = "Escanea etiquetas en Lote: ML Kit detecta y tú confirmas o corriges. Eso crea el ground truth (verdad absoluta) para entrenar PaddleOCR. Mínimo 50 verificados.",
                 fontSize = 9.sp,
                 color = Color(0xFF94A3B8)
             )
