@@ -262,6 +262,73 @@ function getSupabase() {
   return supabaseClient;
 }
 
+// Supabase con service_role (bypassa RLS) para conteos internos.
+// Requiere SUPABASE_SERVICE_ROLE_KEY en entorno; si falta, usa anon + advierte.
+let supabaseServiceClient: any = null;
+
+function getSupabaseService() {
+  if (!supabaseServiceClient) {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+    if (!url || !key) {
+      throw new Error("Missing SUPABASE_URL or key environment variables");
+    }
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.warn("[WARN] SUPABASE_SERVICE_ROLE_KEY no configurado — usando anon key (RLS puede bloquear conteos internos)");
+    }
+    supabaseServiceClient = createClient(url, key);
+  }
+  return supabaseServiceClient;
+}
+
+// ─── OCR training job state (top-of-file, antes de rutas) ────────────
+type JobState = {
+  status: "idle" | "running" | "done" | "error";
+  started_at: string | null;
+  finished_at: string | null;
+  exit_code: number | null;
+  verified_count: number;
+  log_file: string | null;
+  message: string | null;
+};
+
+const ocrTrainingJob: JobState = {
+  status: "idle",
+  started_at: null,
+  finished_at: null,
+  exit_code: null,
+  verified_count: 0,
+  log_file: null,
+  message: null
+};
+
+// ─── Auth: requiere rol gerente/admin (JWT de Supabase) ───────────────
+// BLOQUEANTE para deploy: ningún endpoint de training es público.
+// El token Bearer se valida con Supabase Auth; el rol sale de
+// app_metadata.rol (o user_metadata.rol) y debe ser gerente o admin.
+async function requireManager(req: any, res: any, next: any) {
+  try {
+    const header: string = req.headers.authorization || "";
+    const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    if (!token) {
+      return res.status(401).json({ error: "No autorizado: falta token Bearer" });
+    }
+    const supabase = getSupabase();
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) {
+      return res.status(401).json({ error: "Token inválido o expirado" });
+    }
+    const rol = String(data.user.app_metadata?.rol || data.user.user_metadata?.rol || "").toLowerCase();
+    if (rol !== "gerente" && rol !== "admin") {
+      return res.status(403).json({ error: "Requiere rol gerente o admin" });
+    }
+    req.manager = { id: data.user.id, rol };
+    next();
+  } catch {
+    return res.status(401).json({ error: "Fallo de autenticación" });
+  }
+}
+
 let hasModeloGrupoColumn = false;
 let hasFechaTemporadaColumn = false;
 let hasCodigoColorColumn = false;
@@ -4774,30 +4841,40 @@ app.post("/api/ocr/verify-batch", async (req, res) => {
 });
 
 // GET /api/ocr/training-stats - Estadísticas del dataset de entrenamiento
+// ready_for_training = verificados con ground truth (usuario primero, legacy Groq después)
 app.get("/api/ocr/training-stats", async (req, res) => {
   try {
     const supabase = getSupabase();
 
-    const { data, error } = await supabase
-      .from('ocr_training_data')
-      .select('id, is_verified, matches_mlkit, barcode, created_at');
-
-    if (error) {
-      // Si la tabla no existe, devolver stats vacías
-      if (error.message?.includes('relation') || error.message?.includes('does not exist')) {
-        return res.status(200).json({
-          total_samples: 0,
-          verified_samples: 0,
-          pending_verification: 0,
-          mlkit_correct: 0,
-          mlkit_incorrect: 0,
-          mlkit_accuracy_pct: 0,
-          unique_barcodes: 0,
-          first_sample: null,
-          last_sample: null
-        });
+    let data: any[] | null = null;
+    try {
+      const r = await supabase
+        .from('ocr_training_data')
+        .select('id, is_verified, matches_mlkit, barcode, created_at, user_truth, groq_truth, verified_by');
+      if (r.error) throw r.error;
+      data = r.data;
+    } catch {
+      // Fallback pre-migración 20260818
+      const r = await supabase
+        .from('ocr_training_data')
+        .select('id, is_verified, matches_mlkit, barcode, created_at');
+      if (r.error) {
+        if (r.error.message?.includes('relation') || r.error.message?.includes('does not exist')) {
+          return res.status(200).json({
+            total_samples: 0,
+            verified_samples: 0,
+            pending_verification: 0,
+            mlkit_correct: 0,
+            mlkit_incorrect: 0,
+            mlkit_accuracy_pct: 0,
+            unique_barcodes: 0,
+            first_sample: null,
+            last_sample: null
+          });
+        }
+        return res.status(500).json({ error: r.error.message });
       }
-      return res.status(500).json({ error: error.message });
+      data = (r.data || []).map((x: any) => ({ ...x, user_truth: null, verified_by: 'groq' }));
     }
 
     const total = data?.length || 0;
@@ -4806,6 +4883,9 @@ app.get("/api/ocr/training-stats", async (req, res) => {
     const mlkitCorrect = data?.filter(r => r.matches_mlkit === true).length || 0;
     const mlkitIncorrect = data?.filter(r => r.matches_mlkit === false).length || 0;
     const accuracy = verified > 0 ? Math.round(100.0 * mlkitCorrect / verified * 10) / 10 : 0;
+    // Ground truth usable para entrenar: user_truth primero, groq_truth legacy
+    const readyForTraining = data?.filter(r => r.is_verified && (r.user_truth != null || r.groq_truth != null)).length || 0;
+    const userVerified = data?.filter(r => r.is_verified && r.verified_by === 'usuario').length || 0;
     const uniqueBarcodes = new Set(data?.filter(r => r.barcode).map(r => r.barcode)).size;
     const dates = data?.map(r => r.created_at).filter(Boolean).sort();
 
@@ -4828,6 +4908,9 @@ app.get("/api/ocr/training-stats", async (req, res) => {
       mlkit_correct: mlkitCorrect,
       mlkit_incorrect: mlkitIncorrect,
       mlkit_accuracy_pct: accuracy,
+      ready_for_training: readyForTraining,
+      user_verified: userVerified,
+      training_job: ocrTrainingJob.status,
       unique_barcodes: uniqueBarcodes,
       first_sample: dates?.[0] || null,
       last_sample: dates?.[dates.length - 1] || null,
@@ -4878,6 +4961,8 @@ function categorizeLabel(modelo: string): string {
 }
 
 // POST /api/ocr/save-correction - Guardar corrección del usuario como ground truth
+// El dato confirmado/corregido por el usuario es VERDAD ABSOLUTA para entrenar PaddleOCR.
+// Ya no se usa IA externa (Groq/Gemini) en este flujo.
 app.post("/api/ocr/save-correction", async (req, res) => {
   try {
     const supabase = getSupabase();
@@ -4891,21 +4976,31 @@ app.post("/api/ocr/save-correction", async (req, res) => {
     const modelo = modelo_grupo || corrected_result.modelo_grupo || "";
     const categoria = categorizeLabel(modelo);
 
-    const { error } = await supabase
-      .from('ocr_training_data')
-      .insert({
-        image_original: null, // Already saved in previous sample
-        image_preprocessed: null,
-        mlkit_result: mlkit_result || {},
-        groq_truth: corrected_result,
-        is_verified: true,
-        verified_at: new Date().toISOString(),
-        matches_mlkit: false, // User corrected = ML Kit was wrong
-        barcode: barcode,
-        modelo_grupo: modelo,
-        categoria: categoria,
-        device_info: "user-correction"
-      });
+    const baseRow: any = {
+      image_original: null, // Already saved in previous sample
+      image_preprocessed: null,
+      mlkit_result: mlkit_result || {},
+      groq_truth: corrected_result, // compat legacy
+      user_truth: corrected_result, // verdad absoluta del usuario
+      verified_by: "usuario",
+      is_verified: true,
+      verified_at: new Date().toISOString(),
+      matches_mlkit: false, // User corrected = ML Kit was wrong
+      barcode: barcode,
+      modelo_grupo: modelo,
+      categoria: categoria,
+      device_info: "user-correction"
+    };
+
+    let { error } = await supabase.from('ocr_training_data').insert(baseRow);
+
+    // Fallback: si la migración 20260818 aún no se aplicó, reintentar sin columnas nuevas
+    if (error && /user_truth|verified_by/.test(error.message || "")) {
+      delete baseRow.user_truth;
+      delete baseRow.verified_by;
+      const retry = await supabase.from('ocr_training_data').insert(baseRow);
+      error = retry.error;
+    }
 
     if (error) {
       console.error("Error guardando corrección:", error.message);
@@ -4918,63 +5013,157 @@ app.post("/api/ocr/save-correction", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-// Ejecuta el script Python de training en el servidor.
-app.post("/api/ocr/start-training", async (req, res) => {
+// Estado del job de entrenamiento PaddleOCR (ver declaración top-of-file: ocrTrainingJob).
+// start-training lo actualiza; la app lo consulta con polling.
+// GET /api/ocr/training-status - Progreso del entrenamiento en curso o último ejecutado
+app.get("/api/ocr/training-status", requireManager, async (req, res) => {
   try {
-    const supabase = getSupabase();
-
-    // 1. Verificar que hay suficientes datos
-    const { count, error: countError } = await supabase
-      .from('ocr_training_data')
-      .select('id', { count: 'exact', head: true })
-      .eq('is_verified', true)
-      .not('groq_truth', 'is', null);
-
-    if (countError) {
-      return res.status(500).json({ error: countError.message });
+    const fsp = require('fs/promises');
+    const TAIL_BYTES = 40 * 1024; // lee solo los últimos 40KB, nunca el archivo completo
+    let log_tail: string[] = [];
+    const logFile: string | null = ocrTrainingJob.log_file;
+    if (logFile) {
+      try {
+        const fh = await fsp.open(logFile, 'r');
+        try {
+          const stat = await fh.stat();
+          const start = Math.max(0, stat.size - TAIL_BYTES);
+          const len = Math.min(stat.size, TAIL_BYTES);
+          const buf = Buffer.alloc(len);
+          if (len > 0) await fh.read(buf, 0, len, start);
+          const lines = buf.toString("utf-8").split("\n");
+          // Si se truncó, la primera línea puede estar cortada → se descarta
+          const usable = start > 0 ? lines.slice(1) : lines;
+          log_tail = usable.filter((l: string) => l.trim().length > 0).slice(-40);
+        } finally {
+          await fh.close();
+        }
+      } catch { /* log aún no existe o sin permiso: tail vacío */ }
     }
-
-    if (!count || count < 50) {
+    res.status(200).json({ ...ocrTrainingJob, log_tail });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+// Ejecuta el script Python de training en el servidor.
+// El dataset es el ground truth del usuario (user_truth); legacy: groq_truth.
+// Progreso visible vía GET /api/ocr/training-status (state + cola del log).
+app.post("/api/ocr/start-training", requireManager, async (req, res) => {
+  try {
+    if (ocrTrainingJob.status === "running") {
       return res.status(200).json({
         started: false,
-        message: `Insuficientes datos verificados (${count || 0}/50 mínimo). Sigue recopilando.`,
-        verified_count: count || 0
+        message: "Ya hay un entrenamiento en curso. Consulta /api/ocr/training-status.",
       });
     }
 
-    // 2. Ejecutar training script (async, fire and forget)
-    // En producción, esto sería un job de Render o un cron job
-    const { exec } = require('child_process');
+    // 0. Verificar script ANTES de cambiar el estado a running
     const scriptPath = './scripts/train_paddle_ocr.py';
-
-    // Verificar que el script existe
     const fs = require('fs');
     if (!fs.existsSync(scriptPath)) {
       return res.status(200).json({
         started: false,
         message: "Script de training no encontrado. Verifica scripts/train_paddle_ocr.py",
+        verified_count: 0
+      });
+    }
+
+    // Conteo interno con service_role (bypassa RLS); la anon key puede no ver las filas
+    const supabase = getSupabaseService();
+
+    // 1. Verificar que hay suficientes datos con ground truth (usuario primero, legacy después)
+    let verifiedRows: any[] | null = null;
+    try {
+      const r = await supabase
+        .from('ocr_training_data')
+        .select('id, user_truth, groq_truth')
+        .eq('is_verified', true)
+        .limit(5000);
+      if (r.error) throw r.error;
+      verifiedRows = r.data;
+    } catch {
+      const r = await supabase
+        .from('ocr_training_data')
+        .select('id, groq_truth')
+        .eq('is_verified', true)
+        .limit(5000);
+      if (r.error) {
+        return res.status(500).json({ error: r.error.message });
+      }
+      verifiedRows = (r.data || []).map((x: any) => ({ ...x, user_truth: null }));
+    }
+    const count = (verifiedRows || []).filter((x: any) => x.user_truth != null || x.groq_truth != null).length;
+
+    if (count < 50) {
+      return res.status(200).json({
+        started: false,
+        message: `Insuficientes datos verificados (${count}/50 mínimo). Confirma o corrige detecciones en Lote para crear ground truth.`,
         verified_count: count
       });
     }
 
-    // Ejecutar en background
-    const envVars = `SUPABASE_URL=${process.env.SUPABASE_URL || ''} SUPABASE_KEY=${process.env.SUPABASE_ANON_KEY || ''}`;
-    const command = `${envVars} python ${scriptPath} --supabase-url "${process.env.SUPABASE_URL || ''}" --supabase-key "${process.env.SUPABASE_ANON_KEY || ''}" --output-dir ./training_output`;
+    // 2. Ejecutar training script en background con log a disco
+    const { spawn } = require('child_process');
+    const PYTHON_BIN = process.env.PYTHON_BIN || 'python3';
 
-    exec(command, { timeout: 3600000 }, (error: any, stdout: string, stderr: string) => {
-      if (error) {
-        console.error("Training error:", error.message);
-        console.error("STDERR:", stderr);
-      } else {
-        console.log("Training completado:", stdout.slice(-500));
+    if (!fs.existsSync('./training_output')) {
+      fs.mkdirSync('./training_output', { recursive: true });
+    }
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const logFile = `./training_output/train_${ts}.log`;
+    const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+    logStream.write(`[${new Date().toISOString()}] Training iniciado con ${count} samples (ground truth usuario)\n`);
+
+    ocrTrainingJob.status = "running";
+    ocrTrainingJob.started_at = new Date().toISOString();
+    ocrTrainingJob.finished_at = null;
+    ocrTrainingJob.exit_code = null;
+    ocrTrainingJob.verified_count = count;
+    ocrTrainingJob.log_file = logFile;
+    ocrTrainingJob.message = `Training en curso con ${count} samples verificados`;
+
+    const child = spawn(PYTHON_BIN, [
+      scriptPath,
+      '--supabase-url', process.env.SUPABASE_URL || '',
+      '--supabase-key', process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '',
+      '--output-dir', './training_output'
+    ], {
+      env: {
+        ...process.env,
+        SUPABASE_URL: process.env.SUPABASE_URL || '',
+        SUPABASE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || ''
       }
+    });
+    child.stdout.on('data', (d: any) => logStream.write(d));
+    child.stderr.on('data', (d: any) => logStream.write(`[STDERR] ${d}`));
+    child.on('error', (err: any) => {
+      logStream.write(`[SPAWN ERROR] ${err.message}\n`);
+      logStream.end();
+      ocrTrainingJob.status = "error";
+      ocrTrainingJob.finished_at = new Date().toISOString();
+      ocrTrainingJob.exit_code = -1;
+      ocrTrainingJob.message = `No se pudo ejecutar python: ${err.message}`;
+      console.error("Training spawn error:", err.message);
+    });
+    child.on('close', (code: number) => {
+      logStream.write(`[${new Date().toISOString()}] Proceso terminado con código ${code}\n`);
+      logStream.end();
+      ocrTrainingJob.status = code === 0 ? "done" : "error";
+      ocrTrainingJob.finished_at = new Date().toISOString();
+      ocrTrainingJob.exit_code = code;
+      ocrTrainingJob.message = code === 0
+        ? "Training completado. Modelo en ./training_output"
+        : `Training falló con código ${code}. Revisa el log.`;
+      console.log(`Training ${code === 0 ? "completado" : "falló"} (código ${code}), log: ${logFile}`);
     });
 
     res.status(200).json({
       started: true,
       message: `Training iniciado con ${count} samples verificados`,
       verified_count: count,
-      estimated_time: "10-30 minutos"
+      estimated_time: "10-30 minutos",
+      status_url: "/api/ocr/training-status"
     });
   } catch (error: any) {
     console.error("Error en start-training:", error.message?.slice(0, 200));
