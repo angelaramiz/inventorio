@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from "react";
-import { QrCode, List, Package, Download, Plus, Trash2, Camera, ImagePlus, History, Check, Edit3, Eye, Truck, ChevronRight, X, Save, RotateCcw, ArrowLeft, Store, Search } from "lucide-react";
+import { useState, useEffect } from "react";
+import { QrCode, List, Package, Download, Plus, Trash2, Camera, History, Check, Edit3, Eye, Truck, ChevronRight, X, Save, RotateCcw, ArrowLeft, Store, Search } from "lucide-react";
 import { toast } from "sonner";
 
 enum TransferStatus {
@@ -117,17 +117,6 @@ export default function TransferFormatView() {
   const [items, setItems] = useState<TransferItem[]>([]);
   const [containers, setContainers] = useState<TransferContainer[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>("scanner");
-  const [isScanning, setIsScanning] = useState(false);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const serverUrl = localStorage.getItem("serverUrl") || "";
-
-  const api = useCallback(async (path: string, init?: RequestInit) => {
-    const base = serverUrl || window.location.origin;
-    const res = await fetch(`${base}${path}`, { headers: { ...init?.headers }, ...init });
-    if (!res.ok) { const err = await res.json().catch(() => ({ error: res.statusText })); throw new Error(err.error || `Error ${res.status}`); }
-    return res.json();
-  }, [serverUrl]);
 
   const persist = (dests: TransferDestination[], hist: TransferDestination[], stores: TransferStore[]) => {
     saveDestinations(dests); saveHistory(hist); saveSavedStores(stores);
@@ -168,38 +157,6 @@ export default function TransferFormatView() {
     persist(newDests, history, savedStores);
     setSelectedDest(updated);
     toast.success("Transferencia guardada");
-  };
-
-  const processImage = async (file: File) => {
-    const formData = new FormData();
-    formData.append("foto", file, file.name || "label.jpg");
-    try {
-      const result = await api("/api/ocr/extract-label", { method: "POST", body: formData });
-      setItems(prev => [...prev, {
-        id: crypto.randomUUID(),
-        modelo_grupo: result.modelo_grupo,
-        codigo_color: result.codigo_color,
-        talla: result.talla,
-        marca: result.marca,
-        sku: result.sku,
-        tipo_producto: result.tipo_producto || "ropa",
-        cantidad: 1,
-      }]);
-      return true;
-    } catch { return false; }
-  };
-
-  const addImages = async (files: FileList) => {
-    setIsScanning(true);
-    let ok = 0;
-    const arr = Array.from(files).filter(f => f.type.startsWith("image/"));
-    for (let i = 0; i < arr.length; i++) {
-      toast.loading(`Procesando ${i + 1}/${arr.length}...`, { id: "batch-ocr" });
-      if (await processImage(arr[i])) ok++;
-    }
-    toast.dismiss("batch-ocr");
-    toast.success(`${ok} producto(s) agregado(s)`);
-    setIsScanning(false);
   };
 
   const addManualItem = (item: TransferItem) => {
@@ -408,34 +365,17 @@ export default function TransferFormatView() {
         {activeTab === "scanner" && (
           <div>
             <div className="flex gap-3 mb-4">
-              <button onClick={() => fileInputRef.current?.click()} disabled={isScanning}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-neutral-900 text-white rounded-xl text-sm font-bold hover:bg-neutral-800 disabled:opacity-50">
-                <Camera size={16} /> Cámara
-              </button>
-              <button onClick={() => fileInputRef.current?.click()} disabled={isScanning}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-neutral-600 text-white rounded-xl text-sm font-bold hover:bg-neutral-500 disabled:opacity-50">
-                <ImagePlus size={16} /> Galería
-              </button>
               <button onClick={() => setShowManualEntry(true)}
-                className="flex items-center justify-center gap-2 px-4 py-3 bg-orange-600 text-white rounded-xl text-sm font-bold hover:bg-orange-700">
-                <Plus size={16} /> Manual
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-orange-600 text-white rounded-xl text-sm font-bold hover:bg-orange-700">
+                <Plus size={16} /> Agregar Manual
               </button>
             </div>
-            <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden"
-              onChange={e => e.target.files && addImages(e.target.files)} />
-
-            {isScanning && (
-              <div className="flex items-center gap-3 p-4 bg-purple-50 rounded-xl mb-4">
-                <div className="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                <span className="text-sm text-purple-700 font-bold">Analizando...</span>
-              </div>
-            )}
 
             {items.length === 0 ? (
               <div className="text-center py-20 text-neutral-400">
                 <Camera size={48} className="mx-auto mb-3" />
-                <p className="font-bold">Escanea etiquetas para agregar</p>
-                <p className="text-sm">Usa cámara, galería o registro manual</p>
+                <p className="font-bold">Agrega productos manualmente</p>
+                <p className="text-sm">Usa el botón Manual para capturar cada producto</p>
               </div>
             ) : (
               <div className="space-y-2">

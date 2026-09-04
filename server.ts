@@ -8,152 +8,6 @@ import multer from "multer";
 import { EventEmitter } from "events";
 import fs from "fs";
 import bcrypt from "bcryptjs";
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-
-// ─── Groq OCR Service ────────────────────────────────────────────
-
-const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.2-90b-vision-preview";
-
-const OCR_SYSTEM_PROMPT = `Analiza la foto de esta etiqueta de ropa. Extrae SOLO estos campos en JSON válido sin texto adicional:
-
-Reglas CRÍTICAS:
-- Si ves un código como "ND5DJD5615-JBLK", "W6YK53Z1031-F1PV" o "M6PG34K3200-FBDB", el modelo_grupo es el código ANTES del ÚLTIMO guion, y codigo_color es lo que está DESPUÉS.
-- Ejemplo: "ND5DJD5615-JBLK" → modelo_grupo="ND5DJD5615", codigo_color="JBLK"
-- Si NO hay guion, devuelve modelo_grupo como el código completo y codigo_color como null.
-- Las tallas pueden ser letras (S, M, L, XL), números (32, 34) o combinaciones (6 M, 9 W).
-
-Responde ÚNICAMENTE con:
-{
-  "marca": "nombre de marca o null",
-  "talla": "talla (S/M/L/XL/número) o null",
-  "sku": "código numérico de barras o null",
-  "modelo_grupo": "código base ANTES del último guion o null",
-  "codigo_color": "código DESPUÉS del último guion o null",
-  "fecha_temporada": "fecha/temporada o null",
-  "tipo_producto": "tipo de prenda (Playera, Jeans, Calzado, etc.) o null"
-}`;
-
-interface OcrFields {
-  marca: string | null;
-  talla: string | null;
-  sku: string | null;
-  modelo_grupo: string | null;
-  codigo_color: string | null;
-  fecha_temporada: string | null;
-  tipo_producto?: string | null;
-}
-
-async function groqOcr(imageBase64: string, mimeType: string): Promise<OcrFields> {
-  // Truncar imagen si es muy grande (Groq limit: ~4MB total request)
-  // Base64 200KB ≈ 150KB imagen real
-  const maxBase64Len = 200000;
-  const truncatedImage = imageBase64.length > maxBase64Len
-    ? imageBase64.slice(0, maxBase64Len)
-    : imageBase64;
-
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${GROQ_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "text", text: OCR_SYSTEM_PROMPT },
-          { type: "image_url", image_url: { url: `data:${mimeType};base64,${truncatedImage}` } }
-        ]
-      }],
-      temperature: 0.1,
-      max_tokens: 512,
-    })
-  });
-
-  if (!response.ok) {
-    const errBody = await response.text().catch(() => "");
-    throw new Error(`Groq ${response.status}: ${errBody.slice(0, 200)}`);
-  }
-
-  const data = await response.json() as any;
-  const content = data?.choices?.[0]?.message?.content || "";
-  
-  // Parse JSON from response (may have markdown wrapping)
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Groq response has no JSON: " + content.slice(0, 100));
-  
-  return JSON.parse(jsonMatch[0]);
-}
-
-function parseModelColor(result: OcrFields): OcrFields {
-  const raw = result.modelo_grupo || "";
-  let modelo = raw;
-  let color = result.codigo_color || "";
-  if (raw.includes("-")) {
-    const lastDash = raw.lastIndexOf("-");
-    if (lastDash > 0) {
-      modelo = raw.substring(0, lastDash).trim();
-      if (!color) color = raw.substring(lastDash + 1).trim();
-    }
-  }
-  return { ...result, modelo_grupo: modelo || null, codigo_color: color || null };
-}
-
-async function runOcrWithFallback(imageBase64: string, mimeType: string): Promise<OcrFields> {
-  // Gemini tiene soporte de imagen/vision. Groq NO tiene modelos vision.
-  // Intentar Gemini primero.
-
-  // 1. Try Gemini (vision support)
-  const geminiKey = process.env.GEMINI_API_KEY || "";
-  if (geminiKey) {
-    try {
-      console.log("[OCR] Trying Gemini...");
-      const ai = new GoogleGenerativeAI(geminiKey);
-      const model = ai.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: SchemaType.OBJECT,
-            properties: {
-              modelo_grupo: { type: SchemaType.STRING },
-              codigo_color: { type: SchemaType.STRING },
-              fecha_temporada: { type: SchemaType.STRING },
-              sku: { type: SchemaType.STRING },
-              marca: { type: SchemaType.STRING },
-              talla: { type: SchemaType.STRING },
-            },
-            required: ["modelo_grupo"]
-          }
-        }
-      });
-
-      const imagePart = { inlineData: { data: imageBase64, mimeType } };
-      const result = await model.generateContent([OCR_SYSTEM_PROMPT, imagePart]);
-      const text = result.response.text();
-      console.log("[OCR] Gemini success:", text.slice(0, 120));
-      return parseModelColor(JSON.parse(text));
-    } catch (e: any) {
-      console.warn("[OCR] Gemini failed:", e.message?.slice(0, 120));
-    }
-  }
-
-  // 2. Try Groq (por si agregan vision en el futuro)
-  if (GROQ_API_KEY) {
-    try {
-      console.log("[OCR] Trying Groq...");
-      const result = await groqOcr(imageBase64, mimeType);
-      console.log("[OCR] Groq success:", JSON.stringify(result).slice(0, 120));
-      return parseModelColor(result);
-    } catch (e: any) {
-      console.warn("[OCR] Groq failed:", e.message?.slice(0, 120));
-    }
-  }
-
-  throw new Error("No OCR API keys configured or all providers failed");
-}
 
 // In-memory event emitter for real-time stock updates
 const stockEvents = new EventEmitter();
@@ -4658,52 +4512,6 @@ app.delete("/api/inventory/reports", async (req, res) => {
   }
 });
 
-// Specific rate limiter for AI OCR to prevent abuse
-const ocrIpLimits = new Map<string, { count: number, resetTime: number }>();
-const OCR_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const OCR_MAX_REQUESTS = 10; // Max 10 OCR scans per minute per IP
-
-function ocrRateLimiter(req: any, res: any, next: any) {
-  const ip = (req.headers['x-forwarded-for'] as string || req.ip || req.socket.remoteAddress || "unknown").split(',')[0].trim();
-  const now = Date.now();
-  const record = ocrIpLimits.get(ip);
-
-  if (!record || now > record.resetTime) {
-    ocrIpLimits.set(ip, { count: 1, resetTime: now + OCR_LIMIT_WINDOW });
-    return next();
-  }
-
-  record.count++;
-  if (record.count > OCR_MAX_REQUESTS) {
-    return res.status(429).json({ 
-      error: "Has excedido el límite de escaneos permitidos por minuto (máximo 10). Por favor, espera un momento." 
-    });
-  }
-
-  next();
-}
-
-// POST /api/ocr/extract-label - Multi-provider OCR (Groq → Gemini fallback)
-app.post("/api/ocr/extract-label", ocrRateLimiter, upload.single("foto"), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No se recibió ninguna imagen" });
-    }
-
-    const allowedMimeTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"];
-    if (!allowedMimeTypes.includes(req.file.mimetype.toLowerCase())) {
-      return res.status(400).json({ error: "Solo se permiten imágenes (JPEG, PNG, WEBP, GIF)" });
-    }
-
-    const imageBase64 = req.file.buffer.toString("base64");
-    const extractedData = await runOcrWithFallback(imageBase64, req.file.mimetype);
-    res.json(extractedData);
-  } catch (error: any) {
-    console.error("Error en OCR:", error.message?.slice(0, 200));
-    res.status(500).json({ error: error.message || "Error al analizar la etiqueta" });
-  }
-});
-
 // POST /api/ocr/save-training - Guardar sample de entrenamiento OCR
 // Recibe imagen original + preprocesada en base64, resultado ML Kit, y metadata.
 // Almacena en Supabase para entrenamiento futuro de PaddleOCR.
@@ -4764,84 +4572,8 @@ app.post("/api/ocr/save-training", async (req, res) => {
   }
 });
 
-// POST /api/ocr/verify-batch - Verificar batch de training samples con Gemini
-// Procesa samples de UNO en UNO con delay para respetar rate limits de Gemini gratis.
-app.post("/api/ocr/verify-batch", async (req, res) => {
-  try {
-    const supabase = getSupabase();
-    const { limit = 3 } = req.body;  // Default 3 para rate limits
-
-    // 1. Obtener samples no verificados
-    const { data: unverified, error: fetchError } = await supabase
-      .from('ocr_training_data')
-      .select('id, image_original, mlkit_result')
-      .eq('is_verified', false)
-      .order('created_at', { ascending: true })
-      .limit(limit);
-
-    if (fetchError || !unverified || unverified.length === 0) {
-      return res.status(200).json({ verified: 0, message: "No hay samples pendientes" });
-    }
-
-    // 2. Verificar cada sample secuencialmente con delay (rate limit Gemini)
-    let verifiedCount = 0;
-    const results: any[] = [];
-    const DELAY_MS = 2000;  // 2 segundos entre cada request
-
-    for (let i = 0; i < unverified.length; i++) {
-      const sample = unverified[i];
-      try {
-        const imageBase64 = sample.image_original;
-        if (!imageBase64) continue;
-
-        // Truncar imagen si es muy grande
-        const truncatedImage = imageBase64.length > 200000
-          ? imageBase64.slice(0, 200000)
-          : imageBase64;
-
-        const groqResult = await runOcrWithFallback(truncatedImage, 'image/jpeg');
-
-        // Comparar campos clave (case-insensitive)
-        const mlkit = sample.mlkit_result || {};
-        const matches = (
-          (mlkit.modelo_grupo || "").toUpperCase() === (groqResult.modelo_grupo || "").toUpperCase() &&
-          (mlkit.talla || "").toUpperCase() === (groqResult.talla || "").toUpperCase()
-        );
-
-        await supabase
-          .from('ocr_training_data')
-          .update({
-            groq_truth: groqResult,
-            is_verified: true,
-            verified_at: new Date().toISOString(),
-            matches_mlkit: matches
-          })
-          .eq('id', sample.id);
-
-        verifiedCount++;
-        results.push({ id: sample.id, matches });
-
-        console.log(`[VERIFY] ${i + 1}/${unverified.length}: sample ${sample.id} → ${matches ? "MATCH" : "MISMATCH"}`);
-      } catch (e: any) {
-        console.error(`[VERIFY] Error sample ${sample.id}:`, e.message?.slice(0, 100));
-        results.push({ id: sample.id, error: e.message?.slice(0, 100) });
-      }
-
-      // Delay entre requests (excepto el último)
-      if (i < unverified.length - 1) {
-        await new Promise(r => setTimeout(r, DELAY_MS));
-      }
-    }
-
-    res.status(200).json({ verified: verifiedCount, total: unverified.length, results });
-  } catch (error: any) {
-    console.error("Error en verify-batch:", error.message?.slice(0, 200));
-    res.status(500).json({ error: error.message || "Error en verificación batch" });
-  }
-});
-
 // GET /api/ocr/training-stats - Estadísticas del dataset de entrenamiento
-// ready_for_training = verificados con ground truth (usuario primero, legacy Groq después)
+// ready_for_training = verificados con ground truth del usuario (user_truth)
 app.get("/api/ocr/training-stats", async (req, res) => {
   try {
     const supabase = getSupabase();
@@ -4850,7 +4582,7 @@ app.get("/api/ocr/training-stats", async (req, res) => {
     try {
       const r = await supabase
         .from('ocr_training_data')
-        .select('id, is_verified, matches_mlkit, barcode, created_at, user_truth, groq_truth, verified_by');
+        .select('id, is_verified, matches_mlkit, barcode, created_at, user_truth, verified_by');
       if (r.error) throw r.error;
       data = r.data;
     } catch {
@@ -4874,7 +4606,7 @@ app.get("/api/ocr/training-stats", async (req, res) => {
         }
         return res.status(500).json({ error: r.error.message });
       }
-      data = (r.data || []).map((x: any) => ({ ...x, user_truth: null, verified_by: 'groq' }));
+      data = (r.data || []).map((x: any) => ({ ...x, user_truth: null, verified_by: null }));
     }
 
     const total = data?.length || 0;
@@ -4883,8 +4615,8 @@ app.get("/api/ocr/training-stats", async (req, res) => {
     const mlkitCorrect = data?.filter(r => r.matches_mlkit === true).length || 0;
     const mlkitIncorrect = data?.filter(r => r.matches_mlkit === false).length || 0;
     const accuracy = verified > 0 ? Math.round(100.0 * mlkitCorrect / verified * 10) / 10 : 0;
-    // Ground truth usable para entrenar: user_truth primero, groq_truth legacy
-    const readyForTraining = data?.filter(r => r.is_verified && (r.user_truth != null || r.groq_truth != null)).length || 0;
+    // Ground truth usable para entrenar: solo user_truth (verdad absoluta del usuario)
+    const readyForTraining = data?.filter(r => r.is_verified && r.user_truth != null).length || 0;
     const userVerified = data?.filter(r => r.is_verified && r.verified_by === 'usuario').length || 0;
     const uniqueBarcodes = new Set(data?.filter(r => r.barcode).map(r => r.barcode)).size;
     const dates = data?.map(r => r.created_at).filter(Boolean).sort();
@@ -4980,7 +4712,6 @@ app.post("/api/ocr/save-correction", async (req, res) => {
       image_original: null, // Already saved in previous sample
       image_preprocessed: null,
       mlkit_result: mlkit_result || {},
-      groq_truth: corrected_result, // compat legacy
       user_truth: corrected_result, // verdad absoluta del usuario
       verified_by: "usuario",
       is_verified: true,
@@ -5046,7 +4777,7 @@ app.get("/api/ocr/training-status", requireManager, async (req, res) => {
   }
 });
 // Ejecuta el script Python de training en el servidor.
-// El dataset es el ground truth del usuario (user_truth); legacy: groq_truth.
+// El dataset es el ground truth del usuario (user_truth): ML Kit + confirmación/corrección.
 // Progreso visible vía GET /api/ocr/training-status (state + cola del log).
 app.post("/api/ocr/start-training", requireManager, async (req, res) => {
   try {
@@ -5071,28 +4802,20 @@ app.post("/api/ocr/start-training", requireManager, async (req, res) => {
     // Conteo interno con service_role (bypassa RLS); la anon key puede no ver las filas
     const supabase = getSupabaseService();
 
-    // 1. Verificar que hay suficientes datos con ground truth (usuario primero, legacy después)
+    // 1. Verificar que hay suficientes datos con ground truth del usuario
     let verifiedRows: any[] | null = null;
     try {
       const r = await supabase
         .from('ocr_training_data')
-        .select('id, user_truth, groq_truth')
+        .select('id, user_truth')
         .eq('is_verified', true)
         .limit(5000);
       if (r.error) throw r.error;
       verifiedRows = r.data;
-    } catch {
-      const r = await supabase
-        .from('ocr_training_data')
-        .select('id, groq_truth')
-        .eq('is_verified', true)
-        .limit(5000);
-      if (r.error) {
-        return res.status(500).json({ error: r.error.message });
-      }
-      verifiedRows = (r.data || []).map((x: any) => ({ ...x, user_truth: null }));
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Error al contar datos verificados" });
     }
-    const count = (verifiedRows || []).filter((x: any) => x.user_truth != null || x.groq_truth != null).length;
+    const count = (verifiedRows || []).filter((x: any) => x.user_truth != null).length;
 
     if (count < 50) {
       return res.status(200).json({
@@ -5471,189 +5194,6 @@ app.post("/api/productos/search-web-image", async (req, res) => {
     
     processWebSearch();
     res.json({ success: true, taskId });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// POST /api/productos/batch-ocr - Batch OCR (Groq → Gemini fallback)
-app.post("/api/productos/batch-ocr", upload.array("fotos", 50), async (req, res) => {
-  try {
-    const files = req.files as Express.Multer.File[];
-    if (!files || files.length === 0) {
-      return res.status(400).json({ error: "No se recibieron imágenes" });
-    }
-    
-    const supabase = getSupabase();
-    const parsedProducts: any[] = [];
-    
-    for (const file of files) {
-      try {
-        const imageBase64 = file.buffer.toString("base64");
-        const rawData = await runOcrWithFallback(imageBase64, file.mimetype);
-        
-        let modelo = rawData.modelo_grupo || "";
-        let colorCode = rawData.codigo_color || "";
-        
-        // Lógica inteligente de género
-        let genero = "unisex";
-        if (modelo.length > 0) {
-          const firstChar = modelo.charAt(0).toUpperCase();
-          const secondChar = modelo.length > 1 ? modelo.charAt(1).toUpperCase() : "";
-          
-          const isCalzado = rawData.tipo_producto?.toLowerCase().includes("calzado") || 
-                            rawData.tipo_producto?.toLowerCase().includes("tenis") ||
-                            rawData.tipo_producto?.toLowerCase().includes("zapato") ||
-                            firstChar === "G";
-                            
-          if (isCalzado && secondChar) {
-            if (secondChar === "W") genero = "mujer";
-            else if (secondChar === "M") genero = "hombre";
-          } else {
-            if (firstChar === "W") genero = "mujer";
-            else if (firstChar === "M") genero = "hombre";
-          }
-        }
-        
-        // Registrar o actualizar producto en base de datos
-        const cleanSku = sanitizeIdentifier(rawData.sku || modelo, 100);
-        if (cleanSku) {
-          const fields = getProductFields();
-          const { data: existing } = await supabase
-            .from("productos")
-            .select(fields)
-            .eq("sku", cleanSku)
-            .maybeSingle();
-
-          let productRecord = existing;
-
-          if (!productRecord) {
-            const insertData: any = {
-              sku: cleanSku,
-              ean_13: cleanSku,
-              talla: sanitizeIdentifier(rawData.talla || "SinTalla", 50),
-              temporada: "todouso",
-              tipo: (sanitizeIdentifier(rawData.tipo_producto || "otro", 100) || "otro").toLowerCase(),
-              marca_sub: sanitizeIdentifier(rawData.marca || "Guess", 100)
-            };
-            if (hasModeloGrupoColumn) {
-              insertData.modelo_grupo = modelo || "sin modelo";
-            }
-            if (hasCodigoColorColumn && colorCode) {
-              insertData.codigo_color = colorCode;
-            }
-            if (hasFechaTemporadaColumn && rawData.fecha_temporada) {
-              insertData.fecha_temporada = sanitizeIdentifier(rawData.fecha_temporada, 50);
-            }
-            if (file) {
-              insertData.foto = '\\x' + file.buffer.toString('hex');
-            }
-            const { data: newProd, error: pErr } = await supabase
-              .from("productos")
-              .insert([insertData])
-              .select(fields);
-            
-            if (pErr) throw pErr;
-            if (newProd && newProd[0]) {
-              productRecord = newProd[0];
-            }
-          }
-
-          if (productRecord) {
-            parsedProducts.push({
-              modelo_grupo: modelo,
-              codigo_color: colorCode,
-              sku: productRecord.sku,
-              marca: productRecord.marca_sub,
-              talla: productRecord.talla,
-              tipo_producto: productRecord.tipo,
-              genero,
-              existeModelo: true,
-              id_producto: productRecord.id_producto
-            });
-          }
-        }
-      } catch (err: any) {
-        console.error("Error parseando etiqueta en lote:", err);
-      }
-    }
-
-    // Resolver asociación de contenedor
-    let { id_caja, id_zona_nivel } = req.body;
-    let targetCajaId = id_caja ? parseInt(id_caja) : null;
-    
-    if (!targetCajaId && id_zona_nivel) {
-      const lvlId = parseInt(id_zona_nivel);
-      if (!isNaN(lvlId)) {
-        const { data: lvlObj } = await supabase.from("zonas_nivel").select("nombre, id_zona_seccion").eq("id_zona_nivel", lvlId).maybeSingle();
-        if (lvlObj) {
-          const nameToMatch = `NIVEL: ${lvlObj.nombre.toUpperCase()}`;
-          const { data: existingCaja } = await supabase
-            .from("cajas")
-            .select("id_caja")
-            .eq("id_zona_nivel", lvlId)
-            .eq("numero_caja", nameToMatch)
-            .maybeSingle();
-            
-          if (existingCaja) {
-            targetCajaId = existingCaja.id_caja;
-          } else {
-            const { data: newCaja } = await supabase
-              .from("cajas")
-              .insert([{
-                numero_caja: nameToMatch,
-                id_zona_nivel: lvlId,
-                id_zona_seccion: lvlObj.id_zona_seccion,
-                estado: 'vacia',
-                tags: { tipo_producto: "ropa", genero: "todos", marca: "Guess" }
-              }])
-              .select();
-            if (newCaja && newCaja[0]) {
-              targetCajaId = newCaja[0].id_caja;
-            }
-          }
-        }
-      }
-    }
-
-    if (targetCajaId && parsedProducts.length > 0) {
-      const { data: currentAssoc } = await supabase
-        .from("caja_productos")
-        .select("id_producto, cantidad")
-        .eq("id_caja", targetCajaId);
-
-      const assocMap = new Map<number, number>();
-      if (currentAssoc) {
-        currentAssoc.forEach((a: any) => assocMap.set(a.id_producto, a.cantidad));
-      }
-
-      const scanCounts = new Map<number, number>();
-      parsedProducts.forEach(p => {
-        if (p.id_producto) {
-          scanCounts.set(p.id_producto, (scanCounts.get(p.id_producto) || 0) + 1);
-        }
-      });
-
-      const associations = Array.from(scanCounts.entries()).map(([prodId, count]) => {
-        const currentQty = assocMap.get(prodId) || 0;
-        return {
-          id_caja: targetCajaId,
-          id_producto: prodId,
-          cantidad: currentQty + count
-        };
-      });
-
-      if (associations.length > 0) {
-        const { error: assocErr } = await supabase
-          .from("caja_productos")
-          .upsert(associations, { onConflict: "id_caja,id_producto" });
-          
-        if (assocErr) throw assocErr;
-        await supabase.from("cajas").update({ estado: 'activa' }).eq("id_caja", targetCajaId).eq("estado", "vacia");
-      }
-    }
-    
-    res.json({ parsedProducts });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

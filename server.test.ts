@@ -19,7 +19,8 @@ import request from "supertest";
 // - Extraer `app` de server.ts (agregar `export { app }`)
 // - Agregar tests para rutas críticas:
 //   - GET /api/productos
-//   - POST /api/ocr/extract-label
+//   - POST /api/ocr/save-correction (ground truth usuario)
+//   - GET /api/ocr/training-stats
 //   - GET /api/cajas
 //   - CRUD jerarquía (/api/hierarchy)
 
