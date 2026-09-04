@@ -173,7 +173,7 @@ fun ScannerView(
     var ocrSource by remember { mutableStateOf<String?>(null) }  // "local" | "servidor" | null
     var showModelDownloadDialog by remember { mutableStateOf(false) }
 
-    // Camera launcher for OCR — usa LabelOcrEngine (local + fallback servidor)
+    // Camera launcher for OCR — solo ML Kit on-device (sin IA externa)
     val ocrCameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success: Boolean ->
@@ -194,8 +194,8 @@ fun ScannerView(
                     val result = if (ocrEngine != null) {
                         ocrEngine.analyze(bitmap)
                     } else {
-                        // Fallback directo al servidor si no hay engine
-                        LabelOcrEngine(context, client, serverUrl).analyzeRemote(bitmap)
+                        // Sin engine: ML Kit directo
+                        MlKitLabelOcrEngine.analyze(bitmap)
                     }
 
                     withContext(Dispatchers.Main) {
@@ -206,8 +206,7 @@ fun ScannerView(
                             result.talla?.let { qrTalla = it }
                             result.modeloGrupo?.let { qrModelGroup = it }
                             ocrSource = result.source
-                            val sourceLabel = if (result.source.contains("mlkit")) "ML Kit (on-device) ⚡" else "Servidor ☁️"
-                            Toast.makeText(context, "Datos extraídos via $sourceLabel", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Datos extraídos via ML Kit (on-device) ⚡", Toast.LENGTH_SHORT).show()
                         } else {
                             ocrSource = result.source
                             Toast.makeText(context, "No se detectaron datos en la etiqueta", Toast.LENGTH_SHORT).show()

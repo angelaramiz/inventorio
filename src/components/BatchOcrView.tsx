@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { Upload, X, Play, Check, AlertCircle, Loader2, Save, Pencil, Trash2, Package, ImagePlus, RefreshCw, Camera, Hash, Scan } from "lucide-react";
+import { Upload, X, Play, Check, AlertCircle, Loader2, Save, Pencil, Trash2, Package, ImagePlus, Camera, Hash, Scan } from "lucide-react";
 import { toast } from "sonner";
 
 interface OcrItem {
@@ -34,7 +34,6 @@ export default function BatchOcrView() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<OcrResult> & { cantidad?: number }>({});
-  const [rpmLimit, setRpmLimit] = useState(5);
   const [groupPhotos, setGroupPhotos] = useState<GroupPhoto[]>([]);
   const [showGroupPhotos, setShowGroupPhotos] = useState(false);
   const [groupPhotoTarget, setGroupPhotoTarget] = useState<string | null>(null);
@@ -77,28 +76,22 @@ export default function BatchOcrView() {
     setItems(prev => prev.filter(i => i.id !== id));
   };
 
-  // Dedup + auto-increment: find success items by barcode and increment quantity instead of re-processing
+  // Dedup por barcode capturado manualmente (el lápiz): si el barcode coincide
+  // con otro item success, se auto-incrementa cantidad en startProcessing
   const findResolvedSibling = (barcode: string): OcrItem | undefined => {
+    if (!barcode) return undefined;
     return items.find(i => i.barcode === barcode && i.status === "success");
   };
 
-  const processSingleItem = async (item: OcrItem, signal: AbortSignal): Promise<Partial<OcrItem>> => {
-    try {
-      const formData = new FormData();
-      formData.append("foto", item.file, item.file.name || "label.jpg");
-
-      const result = await api("/api/ocr/extract-label", {
-        method: "POST",
-        body: formData,
-        signal,
-      });
-
-      const extractedBarcode = result.sku || "";
-      return { status: "success", result, barcode: extractedBarcode, cantidad: 1 };
-    } catch (e: any) {
-      if (e.name === "AbortError") throw e;
-      return { status: item.retryCount < 2 ? "pending" as const : "error" as const, error: e.message, retryCount: item.retryCount + 1 };
-    }
+  // Sin IA externa: la foto queda como referencia visual y el usuario captura
+  // los datos manualmente con el lápiz. Esa captura es el ground truth.
+  const processSingleItem = async (_item: OcrItem): Promise<Partial<OcrItem>> => {
+    return {
+      status: "success",
+      result: { marca: null, talla: null, sku: null, modelo_grupo: null, codigo_color: null, fecha_temporada: null },
+      barcode: "",
+      cantidad: 1,
+    };
   };
 
   const startProcessing = async () => {
@@ -107,7 +100,6 @@ export default function BatchOcrView() {
 
     setIsProcessing(true);
     setGroupPhotos([]);
-    const delayMs = Math.round(60_000 / Math.max(1, Math.min(15, rpmLimit)));
 
     // Mark all pending as processing
     setItems(prev => prev.map(i =>
@@ -115,82 +107,37 @@ export default function BatchOcrView() {
     ));
 
     for (const item of pending) {
-      // Pre-check: dedup via barcode - if the barcode matches an existing success item, auto-increment quantity
-      if (item.barcode) {
-        const sibling = findResolvedSibling(item.barcode);
-        if (sibling && sibling.result) {
-          // Instead of creating a new item, increment the existing sibling's quantity
+      const result = await processSingleItem(item);
+
+      // Dedup: si el barcode ya existe en otro item success, auto-incrementar
+      const resultBarcode = result.barcode || "";
+      if (resultBarcode) {
+        const existing = items.filter(i =>
+          i.id !== item.id &&
+          i.barcode === resultBarcode &&
+          i.status === "success"
+        );
+        if (existing.length > 0) {
           setItems(prev => prev.map(i =>
-            i.id === sibling.id ? { ...i, cantidad: i.cantidad + 1 } : i
+            i.id === existing[0].id ? { ...i, cantidad: i.cantidad + 1 } : i
           ));
-          // Remove this duplicate pending item
           removeItem(item.id);
           continue;
         }
       }
 
-      const startTime = Date.now();
-
-      // Retry loop up to 3 attempts
-      let currentItem = { ...item, status: "processing" as const };
-      for (let attempt = 0; attempt < 3; attempt++) {
-        updateItem(currentItem.id, { status: "processing", retryCount: attempt });
-
-        const result = await processSingleItem(currentItem, new AbortController().signal);
-
-        if (result.status === "success") {
-          // After processing, check if this barcode matches another success item (auto-increment)
-          const resultBarcode = result.barcode || result.result?.sku || "";
-          if (resultBarcode) {
-            const existing = items.filter(i =>
-              i.id !== currentItem.id &&
-              i.barcode === resultBarcode &&
-              i.status === "success"
-            );
-            if (existing.length > 0) {
-              // Auto-increment the existing item's cantidad and remove this duplicate
-              setItems(prev => prev.map(i =>
-                i.id === existing[0].id ? { ...i, cantidad: i.cantidad + 1 } : i
-              ));
-              removeItem(currentItem.id);
-              break;
-            }
-          }
-
-          updateItem(currentItem.id, {
-            status: "success",
-            result: result.result,
-            barcode: resultBarcode,
-            error: undefined,
-          });
-          break;
-        }
-
-        if (result.status !== "pending") {
-          updateItem(currentItem.id, { status: "error", error: result.error, retryCount: attempt + 1 });
-          break;
-        }
-
-        // Exponential backoff
-        const backoff = 2000 * Math.pow(2, attempt);
-        await new Promise(r => setTimeout(r, backoff));
-        currentItem = { ...currentItem, retryCount: attempt + 1 };
-      }
-
-      // RPM throttle
-      const elapsed = Date.now() - startTime;
-      const remaining = delayMs - elapsed;
-      if (remaining > 0) {
-        await new Promise(r => setTimeout(r, remaining));
-      }
+      updateItem(item.id, {
+        status: "success",
+        result: result.result,
+        barcode: resultBarcode,
+        error: undefined,
+      });
     }
 
     setIsProcessing(false);
-    toast.success("Procesamiento completado");
+    toast.success("Listo: captura los datos de cada etiqueta con el lápiz");
 
     // Setup group photos
-    const successItems = items.filter(i => i.status === "success" || i.status === "pending");
-    // Wait a tick for state to settle, then set group photos
     setTimeout(() => {
       setItems(current => {
         const models = new Map<string, GroupPhoto>();
@@ -215,10 +162,6 @@ export default function BatchOcrView() {
         groupPhotoInputRef.current.click();
       }
     }, 50);
-  };
-
-  const retryItem = (id: string) => {
-    updateItem(id, { status: "pending", error: undefined, retryCount: 0, cantidad: 1 });
   };
 
   const startEditing = (id: string) => {
@@ -300,7 +243,7 @@ export default function BatchOcrView() {
             Escaneo por Lote
           </h1>
           <p className="text-sm text-neutral-500 mt-1">
-            Procesa múltiples etiquetas usando IA (Groq + Gemini fallback)
+            Procesa múltiples etiquetas con captura manual (sin IA externa)
           </p>
         </div>
         <div className="flex gap-2">
@@ -339,26 +282,6 @@ export default function BatchOcrView() {
         className="hidden"
         onChange={e => e.target.files && addImages(e.target.files)}
       />
-
-      {/* Config bar */}
-      <div className="flex flex-wrap items-center gap-4 mb-4 p-4 bg-neutral-50 rounded-2xl border border-neutral-200">
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-bold text-neutral-600 uppercase">RPM</label>
-          <input
-            type="range"
-            min={1}
-            max={15}
-            value={rpmLimit}
-            onChange={e => setRpmLimit(Number(e.target.value))}
-            className="w-24"
-            disabled={isProcessing}
-          />
-          <span className="text-sm font-bold text-purple-700 min-w-[2ch]">{rpmLimit}</span>
-        </div>
-        <div className="text-xs text-neutral-400">
-          ~{rpmLimit} requests/min · ~{Math.round(60 / rpmLimit)}s entre imágenes
-        </div>
-      </div>
 
       {/* Stats bar */}
       {items.length > 0 && (
@@ -461,19 +384,13 @@ export default function BatchOcrView() {
             <div className="p-3">
               {item.status === "processing" && (
                 <p className="text-sm text-purple-600 animate-pulse">
-                  {item.retryCount > 0 ? `Reintento ${item.retryCount}/3...` : "Analizando..."}
+                  Preparando...
                 </p>
               )}
               {item.status === "error" && (
                 <div>
                   <p className="text-sm text-red-600 font-bold">Error</p>
                   <p className="text-xs text-red-500 truncate">{item.error}</p>
-                  <button
-                    onClick={() => retryItem(item.id)}
-                    className="mt-2 flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-lg text-xs font-bold hover:bg-red-200"
-                  >
-                    <RefreshCw size={12} /> Reintentar
-                  </button>
                 </div>
               )}
               {item.status === "success" && item.result && (

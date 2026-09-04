@@ -48,7 +48,6 @@ export default function ProductQuickRegister({
   defaultAlmacenId
 }: Props) {
   const [loading, setLoading] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
   const [cantidad, setCantidad] = useState<number | "">(defaultQty);
@@ -80,108 +79,6 @@ export default function ProductQuickRegister({
 
   const [existingSkus, setExistingSkus] = useState<Record<string, boolean>>({});
   const [existingModel, setExistingModel] = useState<boolean>(false);
-
-  const handleOcrFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setAnalyzing(true);
-    toast.info("Enviando foto a Inteligencia Artificial...");
-
-    const fd = new FormData();
-    fd.append("foto", file);
-
-    try {
-      const resp = await fetch("/api/ocr/extract-label", {
-        method: "POST",
-        body: fd
-      });
-
-      if (resp.ok) {
-        const data = await resp.json();
-        toast.success("Etiqueta analizada con éxito");
-
-        // 1. Rellenar Modelo de Grupo
-        if (data.modelo_grupo) {
-          const cleanModel = data.modelo_grupo.trim().toUpperCase();
-          setFormData(prev => ({ ...prev, modelo_grupo: cleanModel }));
-          checkModelExists(cleanModel);
-        }
-
-        // 2. Rellenar SKU / Código de barras (si se detectó uno en la etiqueta)
-        if (data.sku) {
-          const cleanSku = data.sku.trim().toUpperCase();
-          if (isGroup) {
-            // En modo grupal, rellenamos el SKU de la primera variación
-            setVariaciones(prev => {
-              const updated = [...prev];
-              if (updated[0]) {
-                updated[0].sku = cleanSku;
-              }
-              return updated;
-            });
-            checkSkuExists(cleanSku);
-          } else {
-            // En modo individual, rellenamos el SKU y EAN-13 principal
-            setFormData(prev => ({ ...prev, sku: cleanSku, ean_13: cleanSku }));
-            checkSkuExists(cleanSku);
-          }
-        }
-
-        // 2. Rellenar Marca
-        if (data.marca) {
-          const matchMarca = marcas.find(m => m.toLowerCase().includes(data.marca.toLowerCase()) || data.marca.toLowerCase().includes(m.toLowerCase()));
-          if (matchMarca) {
-            setFormData(prev => ({ ...prev, marca_sub: matchMarca }));
-          }
-        }
-
-        // 3. Rellenar Tipo (prenda)
-        if (data.tipo_producto) {
-          const cleanTipo = data.tipo_producto.toLowerCase().trim();
-          const matchTipo = tipos.find(t => t.toLowerCase() === cleanTipo || t.toLowerCase().includes(cleanTipo) || cleanTipo.includes(t.toLowerCase()));
-          if (matchTipo) {
-            setFormData(prev => ({ ...prev, tipo: matchTipo as any }));
-          }
-        }
-
-        // 4. Rellenar Talla
-        if (data.talla) {
-          const cleanTalla = data.talla.trim().toUpperCase();
-          const isNum = /^[0-9]+(?:\.[0-9]+)?$/.test(cleanTalla);
-          if (isNum) {
-            setTallaTipo("numero");
-            setTallaValue(cleanTalla);
-          } else {
-            setTallaTipo("letra");
-            const matchTalla = TALLAS_LETRA.find(t => t.toUpperCase() === cleanTalla);
-            if (matchTalla) {
-              setTallaValue(matchTalla);
-            } else {
-              setTallaValue(cleanTalla);
-            }
-          }
-        }
-
-        // 5. Cargar previsualización de la foto capturada
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setPhoto(reader.result as string);
-        };
-        reader.readAsDataURL(file);
-
-      } else {
-        const err = await resp.json();
-        toast.error(err.error || "No se pudo extraer información clara");
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("Error al conectar con el servidor OCR");
-    } finally {
-      setAnalyzing(false);
-      e.target.value = "";
-    }
-  };
 
   const checkSkuExists = async (sku: string) => {
     if (!sku || !sku.trim()) return;
@@ -709,31 +606,6 @@ export default function ProductQuickRegister({
             </div>
 
             <div className="flex flex-col items-center gap-1.5 mt-1">
-              <input 
-                type="file" 
-                accept="image/*" 
-                capture="environment"
-                onChange={handleOcrFileChange} 
-                className="hidden" 
-                id="ocr-file-input" 
-              />
-              <Button
-                type="button"
-                variant="outline"
-                disabled={analyzing}
-                onClick={() => document.getElementById("ocr-file-input")?.click()}
-                className="h-8 rounded-xl text-xs bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold border-none px-4 flex items-center gap-1.5"
-              >
-                {analyzing ? (
-                  <>
-                    <Loader2 size={12} className="animate-spin" /> Analizando etiqueta...
-                  </>
-                ) : (
-                  <>
-                    <Scan size={12} /> Escanear Etiqueta con IA
-                  </>
-                )}
-              </Button>
               <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">
                 {isGroup ? "Foto compartida para todo el grupo" : "Foto del producto"}
               </span>

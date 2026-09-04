@@ -3,12 +3,8 @@ package com.inventorio.alpha
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
-import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -46,7 +42,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import androidx.lifecycle.lifecycleScope
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
@@ -57,10 +52,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.IOException
-import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -90,16 +82,6 @@ data class RecentExit(
     val detalles: List<ExitDetail>
 )
 data class ExitDetail(val sku: String, val cantidad: Int)
-
-data class OcrResult(
-    val modelo_grupo: String?,
-    val codigo_color: String? = null,
-    val fecha_temporada: String? = null,
-    val sku: String?,
-    val marca: String?,
-    val talla: String?,
-    val tipo_producto: String?
-)
 
 data class Producto(
     val id_producto: Int,
@@ -182,7 +164,7 @@ fun MainAppScreen() {
 
     // OCR Engine — ML Kit Text Recognition (on-device, always ready)
     val ocrEngine = remember {
-        LabelOcrEngine(context, client, serverUrl)
+        LabelOcrEngine(context)
     }
 
     // ML Kit siempre está listo — no necesita inicialización
@@ -757,7 +739,7 @@ fun MainAppScreen() {
                         Text("Motor principal: ML Kit Text Recognition (on-device)")
                         Text("Preprocesamiento: ImagePreprocessor (grayscale + CLAHE + Otsu)")
                         Text("Parser: LabelTextParser (40+ marcas, regex)")
-                        Text("Fallback: Groq → Gemini (servidor)")
+                        Text("Sin IA externa: el usuario confirma o corrige (ground truth)")
                         Spacer(Modifier.height(4.dp))
                         Text(
                             "ML Kit siempre está disponible. No necesita descarga de modelos.",
@@ -1460,80 +1442,5 @@ fun OcrStatCard(label: String, value: String, color: Color, modifier: Modifier =
     ) {
         Text(value, fontWeight = FontWeight.Black, fontSize = 16.sp, color = color)
         Text(label, fontSize = 8.sp, color = color.copy(alpha = 0.7f), fontWeight = FontWeight.Medium)
-    }
-}
-
-// Function to handle image file upload for Gemini OCR
-fun uploadImageForOcr(
-    context: Context,
-    client: OkHttpClient,
-    serverUrl: String,
-    imageUri: Uri,
-    setLoading: (Boolean) -> Unit,
-    onResult: (OcrResult?) -> Unit
-) {
-    setLoading(true)
-    val scope = (context as MainActivity).lifecycleScope
-
-    scope.launch(Dispatchers.IO) {
-        try {
-            val inputStream: InputStream? = context.contentResolver.openInputStream(imageUri)
-            val bitmap = BitmapFactory.decodeStream(inputStream)
-            inputStream?.close()
-
-            if (bitmap == null) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "No se pudo decodificar la imagen", Toast.LENGTH_SHORT).show()
-                    setLoading(false)
-                }
-                return@launch
-            }
-
-            // Compress to JPEG for upload
-            val outputStream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
-            val byteArray = outputStream.toByteArray()
-
-            val requestBody = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart(
-                    "foto",
-                    "captura.jpg",
-                    RequestBody.create("image/jpeg".toMediaType(), byteArray)
-                )
-                .build()
-
-            val url = "${serverUrl.trimEnd('/')}/api/ocr/extract-label"
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val bodyText = response.body?.string() ?: ""
-                    Log.d("OcrUpload", "Response: $bodyText")
-                    val result = Gson().fromJson(bodyText, OcrResult::class.java)
-                    withContext(Dispatchers.Main) {
-                        onResult(result)
-                        Toast.makeText(context, "Etiqueta analizada con éxito", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    val errorText = response.body?.string() ?: "Error desconocido"
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Error OCR: $errorText", Toast.LENGTH_LONG).show()
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("OcrUpload", "Error uploading", e)
-            withContext(Dispatchers.Main) {
-                Toast.makeText(context, "Error de red: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-        } finally {
-            withContext(Dispatchers.Main) {
-                setLoading(false)
-            }
-        }
     }
 }
