@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -29,12 +30,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.common.InputImage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.ByteArrayOutputStream
 import java.io.File
+import kotlin.coroutines.resume
 
 private const val PREFS_MANIFIESTO = "manifiesto_prefs"
 private const val KEY_CATEGORIAS = "categorias_cache"
@@ -59,6 +68,57 @@ fun composeModelo(base: String, color: String): String {
 }
 
 fun csvCell(v: String): String = "\"" + v.replace("\"", "\"\"") + "\""
+
+/** Recorte central al 70%: descarta fondo/monitor antes del OCR. */
+fun cropCenter70(bmp: Bitmap): Bitmap {
+    val w = (bmp.width * 0.7f).toInt().coerceAtLeast(1)
+    val h = (bmp.height * 0.7f).toInt().coerceAtLeast(1)
+    val x = ((bmp.width - w) / 2).coerceAtLeast(0)
+    val y = ((bmp.height - h) / 2).coerceAtLeast(0)
+    return Bitmap.createBitmap(bmp, x, y, w, h)
+}
+
+/** Lee EAN/código de barras con ML Kit BarcodeScanning (el OCR de texto no lee barras). */
+suspend fun scanBarcodeEan(bmp: Bitmap): String? = suspendCancellableCoroutine { cont ->
+    try {
+        BarcodeScanning.getClient().process(InputImage.fromBitmap(bmp, 0))
+            .addOnSuccessListener { barcodes ->
+                val ean = barcodes.firstOrNull()?.rawValue?.filter { it.isDigit() }?.takeIf { it.length in 8..14 }
+                cont.resume(ean)
+            }
+            .addOnFailureListener { cont.resume(null) }
+    } catch (_: Exception) { cont.resume(null) }
+}
+
+/** JPEG q60, máx 1200px, para training (liviano para el POST). */
+fun bitmapToBase64q60(bmp: Bitmap): String {
+    val maxDim = 1200
+    val scale = minOf(1f, maxDim / maxOf(bmp.width, bmp.height).toFloat())
+    val small = if (scale < 1f) {
+        Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true)
+    } else bmp
+    val out = ByteArrayOutputStream()
+    small.compress(Bitmap.CompressFormat.JPEG, 60, out)
+    if (small !== bmp) small.recycle()
+    return android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+}
+
+/** Vibración + beep al capturar (feedback de piso). */
+fun feedbackCaptura(context: Context) {
+    try {
+        val vib = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+        }
+        if (vib.hasVibrator()) vib.vibrate(android.os.VibrationEffect.createOneShot(80, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+    } catch (_: Exception) {}
+    try {
+        val tone = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 80)
+        tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP)
+        tone.release()
+    } catch (_: Exception) {}
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -202,6 +262,8 @@ fun ManifiestoView(
                 manifiestoId = selected.id,
                 barcodeSugerido = barcodeInicial,
                 db = db,
+                client = client,
+                serverUrl = serverUrl,
                 categorias = categorias.ifEmpty { CATEGORIAS_FALLBACK },
                 onSaved = { refresh() }
             )
@@ -264,6 +326,8 @@ fun ManifiestoOcrTab(
     manifiestoId: Long,
     barcodeSugerido: String?,
     db: OperationsDbHelper,
+    client: OkHttpClient,
+    serverUrl: String,
     categorias: List<String>,
     onSaved: () -> Unit
 ) {
@@ -276,28 +340,55 @@ fun ManifiestoOcrTab(
     var isProcessing by remember { mutableStateOf(false) }
     var propuesta by remember { mutableStateOf<OcrPropuesta?>(null) }
     var lastBarcode by remember { mutableStateOf(barcodeSugerido ?: "") }
+    // Bitmaps para training (se reciclan al guardar/descartar)
+    var trainCrop by remember { mutableStateOf<Bitmap?>(null) }
+    var trainPreB64 by remember { mutableStateOf<String?>(null) }
 
     val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         val file = photoFile
         if (success && file != null && file.exists()) {
+            feedbackCaptura(context)
             isProcessing = true
             scope.launch(Dispatchers.IO) {
                 try {
-                    val bitmap: Bitmap? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                        android.graphics.ImageDecoder.decodeBitmap(
-                            android.graphics.ImageDecoder.createSource(context.contentResolver, FileProvider.getUriForFile(context, "com.inventorio.operations.fileprovider", file))
-                        )
+                    val uri = FileProvider.getUriForFile(context, "com.inventorio.operations.fileprovider", file)
+                    val full: Bitmap? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
                     } else {
                         @Suppress("DEPRECATION")
-                        android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, FileProvider.getUriForFile(context, "com.inventorio.operations.fileprovider", file))
+                        android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
                     }
-                    val prop = if (bitmap != null) ManifiestoOcrEngine.analyze(bitmap) else OcrPropuesta.empty("error")
+                    if (full == null) {
+                        withContext(Dispatchers.Main) {
+                            isProcessing = false
+                            Toast.makeText(context, "No se pudo decodificar la foto", Toast.LENGTH_LONG).show()
+                        }
+                        return@launch
+                    }
+                    // Encuadre: crop central 70% ANTES del OCR (descarta monitor/fondo)
+                    val crop = cropCenter70(full)
+                    try { full.recycle() } catch (_: Exception) {}
+
+                    // Doble motor en paralelo: barcode EAN + texto (orig+preproc) + pre para training
+                    val eanDeferred = async { scanBarcodeEan(crop) }
+                    val preDeferred = async {
+                        try { ImagePreprocessor.preprocessLight(crop).bitmap } catch (_: Exception) { null }
+                    }
+                    val prop = ManifiestoOcrEngine.analyze(crop, barcode = lastBarcode.ifBlank { null })
+                    val ean = eanDeferred.await()
+                    val preBmp = preDeferred.await()
+                    val cropB64 = bitmapToBase64q60(crop)
+                    val preB64 = preBmp?.let { bitmapToBase64q60(it) }
+                    try { preBmp?.recycle() } catch (_: Exception) {}
+
                     withContext(Dispatchers.Main) {
                         isProcessing = false
-                        if (prop.hasAnyData) {
-                            propuesta = prop
-                        } else {
-                            propuesta = prop // se muestra igual para captura guiada
+                        trainCrop?.recycle()
+                        trainCrop = crop
+                        trainPreB64 = preB64
+                        if (!ean.isNullOrBlank()) lastBarcode = ean
+                        propuesta = prop
+                        if (!prop.hasAnyData) {
                             Toast.makeText(context, "ML Kit no extrajo datos — captúralos manualmente", Toast.LENGTH_LONG).show()
                         }
                     }
@@ -317,6 +408,20 @@ fun ManifiestoOcrTab(
         if (!lastBarcode.isBlank()) {
             Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF)), shape = RoundedCornerShape(8.dp)) {
                 Text("Barcode vinculado: $lastBarcode", Modifier.padding(10.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1D4ED8))
+            }
+        }
+        // Guía de encuadre: el OCR analiza el 70% central (marco)
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)), shape = RoundedCornerShape(12.dp)) {
+            Row(Modifier.padding(12.dp).fillMaxWidth(), Arrangement.spacedBy(10.dp), Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(56.dp).background(Color.Transparent, RoundedCornerShape(6.dp))
+                        .border(3.dp, Color(0xFFF59E0B), RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center
+                ) { Text("70%", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color(0xFFB45309)) }
+                Text(
+                    "Encuadra SOLO la etiqueta dentro del marco. Evita monitores, cajas y manos detrás. Si sale torcida o con brillo, enderézala y repite.",
+                    fontSize = 10.sp, color = Color(0xFF92400E), modifier = Modifier.weight(1f)
+                )
             }
         }
         Button(
@@ -347,8 +452,13 @@ fun ManifiestoOcrTab(
             propuesta = prop,
             barcodeInicial = lastBarcode,
             categorias = categorias,
-            onDismiss = { propuesta = null },
-            onConfirm = { barcode, base, color, nombre, categoria, cantidad ->
+            onDismiss = {
+                propuesta = null
+                try { trainCrop?.recycle() } catch (_: Exception) {}
+                trainCrop = null
+                trainPreB64 = null
+            },
+            onConfirm = { barcode, base, color, nombre, categoria, cantidad, verificado ->
                 val modelo = composeModelo(base, color)
                 if (modelo.isBlank()) {
                     Toast.makeText(context, "El modelo base es obligatorio", Toast.LENGTH_SHORT).show()
@@ -363,14 +473,70 @@ fun ManifiestoOcrTab(
                     cantidad = cantidad,
                     fotoPath = photoFile?.absolutePath ?: "",
                     mlkitRaw = prop.rawText,
-                    origen = "ocr"
+                    origen = "ocr",
+                    verificado = verificado
                 )
+                // Training para futuro PaddleOCR (fire-and-forget, offline-first: si falla, el ítem local queda)
+                val cropBmp = trainCrop
+                val preB64 = trainPreB64
+                if (cropBmp != null) {
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            postManifiestoTraining(
+                                client, serverUrl,
+                                cropB64 = bitmapToBase64q60(cropBmp),
+                                preB64 = preB64,
+                                prop = prop,
+                                barcode = barcode.ifBlank { lastBarcode },
+                                compuesto = modelo
+                            )
+                        } catch (_: Exception) {}
+                        try { cropBmp.recycle() } catch (_: Exception) {}
+                    }
+                    trainCrop = null
+                    trainPreB64 = null
+                }
                 propuesta = null
                 onSaved()
                 Toast.makeText(context, "Ítem guardado ($modelo)", Toast.LENGTH_SHORT).show()
             }
         )
     }
+}
+
+/** Envía el par (foto + preprocesada + ML Kit + verdad confirmada) al dataset de entrenamiento. */
+suspend fun postManifiestoTraining(
+    client: OkHttpClient,
+    serverUrl: String,
+    cropB64: String,
+    preB64: String?,
+    prop: OcrPropuesta,
+    barcode: String,
+    compuesto: String
+) {
+    try {
+        val mlkitJson = org.json.JSONObject().apply {
+            put("modelo_grupo", prop.modeloGrupo); put("codigo_color", prop.codigoColor)
+            put("talla", prop.talla); put("sku", prop.sku); put("marca", prop.marca)
+        }
+        val truthJson = org.json.JSONObject().apply {
+            put("modelo_grupo", compuesto)
+            put("talla", prop.talla); put("sku", barcode.ifBlank { prop.sku })
+        }
+        val body = org.json.JSONObject().apply {
+            put("image_original", cropB64)
+            if (preB64 != null) put("image_preprocessed", preB64)
+            put("mlkit_result", mlkitJson)
+            put("barcode", barcode)
+            put("user_truth", truthJson)
+            put("device_info", "operations-manifiesto")
+        }
+        val req = Request.Builder()
+            .url("${serverUrl.trimEnd('/')}/api/ocr/save-training")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        client.newCall(req).execute().close()
+    } catch (_: Exception) { /* offline: el ítem local ya quedó guardado */ }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -380,7 +546,7 @@ fun OcrConfirmDialog(
     barcodeInicial: String,
     categorias: List<String>,
     onDismiss: () -> Unit,
-    onConfirm: (barcode: String, base: String, color: String, nombre: String, categoria: String, cantidad: Int) -> Unit
+    onConfirm: (barcode: String, base: String, color: String, nombre: String, categoria: String, cantidad: Int, verificado: Int) -> Unit
 ) {
     var barcode by remember { mutableStateOf(barcodeInicial) }
     var base by remember { mutableStateOf(propuesta.modeloGrupo ?: "") }
@@ -390,11 +556,33 @@ fun OcrConfirmDialog(
     var cantidadTxt by remember { mutableStateOf("1") }
     var expanded by remember { mutableStateOf(false) }
 
+    // Snapshot inicial: con confianza baja hay que editar al menos un campo
+    val initBase = remember { propuesta.modeloGrupo ?: "" }
+    val initColor = remember { propuesta.codigoColor ?: "" }
+    val initBarcode = remember { barcodeInicial }
+    val initCategoria = remember { categoria }
+    val lowConf = propuesta.confidence < 60
+    val edited = base != initBase || color != initColor || barcode != initBarcode ||
+            nombre.isNotBlank() || categoria != initCategoria || cantidadTxt != "1"
+    val puedeGuardar = !lowConf || edited
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Confirmar ítem (conf. ${propuesta.confidence}%)", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
+        title = { Text("Confirmar ítem (conf. ${propuesta.confidence}%)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = if (lowConf) Color(0xFFDC2626) else Color(0xFF0F172A)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), Arrangement.spacedBy(6.dp)) {
+                if (lowConf) {
+                    Text(
+                        "⚠️ Confianza baja: edita al menos un campo para guardar. Si la etiqueta sale torcida o con brillo, enderézala y repite la foto.",
+                        fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626)
+                    )
+                }
+                if (barcode.isBlank()) {
+                    Text(
+                        "Sin barcode: verifica el código manualmente (se guarda con verificado=0).",
+                        fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706)
+                    )
+                }
                 OutlinedTextField(value = barcode, onValueChange = { barcode = it }, label = { Text("Barcode", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = base, onValueChange = { base = it }, label = { Text("Modelo base *", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = color, onValueChange = { color = it }, label = { Text("Código color", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -415,9 +603,10 @@ fun OcrConfirmDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(barcode, base, color, nombre, categoria, cantidadTxt.toIntOrNull() ?: 1) },
+                onClick = { onConfirm(barcode, base, color, nombre, categoria, cantidadTxt.toIntOrNull() ?: 1, if (barcode.isBlank()) 0 else 1) },
+                enabled = puedeGuardar,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
-            ) { Text("Guardar") }
+            ) { Text(if (puedeGuardar) "Guardar" else "Edita un campo") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Descartar") } }
     )

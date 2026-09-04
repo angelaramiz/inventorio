@@ -45,16 +45,36 @@ object ManifiestoOcrEngine {
 
     /**
      * Analiza un bitmap y extrae campos de la etiqueta.
-     * @param bitmap Imagen original de la cámara
+     * Doble inferencia: ML Kit sobre imagen original Y sobre preprocesada
+     * (grayscale + CLAHE + nitidez); se queda con la de mayor confianza.
+     * @param bitmap Imagen (idealmente ya recortada al 70% central)
      * @param barcode Código de barras asociado (si se escaneó)
+     * @param usePreprocess Si false, solo imagen original
      * @return OcrPropuesta con los campos extraídos y confidence score
      */
-    suspend fun analyze(bitmap: Bitmap, barcode: String? = null): OcrPropuesta {
+    suspend fun analyze(bitmap: Bitmap, barcode: String? = null, usePreprocess: Boolean = true): OcrPropuesta {
+        val best = parseBitmap(bitmap, barcode, "mlkit")
+
+        if (!usePreprocess) return best
+
+        // Segunda vía: preprocesada (ayuda con luz azul, brillo y bajo contraste)
+        return try {
+            val pre = ImagePreprocessor.preprocessLight(bitmap)
+            val candidate = parseBitmap(pre.bitmap, barcode, "mlkit-pre")
+            try { pre.bitmap.recycle() } catch (_: Exception) {}
+            if (candidate.confidence > best.confidence) candidate else best
+        } catch (e: Exception) {
+            Log.e(TAG, "Preproceso falló, usando original: ${e.message}")
+            best
+        }
+    }
+
+    private suspend fun parseBitmap(bitmap: Bitmap, barcode: String?, tag: String): OcrPropuesta {
         // ML Kit está optimizado para imágenes crudas de cámara.
         val rawText = extractTextFromBitmap(bitmap)
-        if (rawText.isBlank()) return OcrPropuesta.empty(source = "mlkit-empty")
+        if (rawText.isBlank()) return OcrPropuesta.empty(source = "$tag-empty")
         val parsed = LabelTextParser.parse(rawText, barcode)
-        Log.i(TAG, "Texto extraído: ${rawText.take(80)}..., conf=${parsed.confidence}")
+        Log.i(tag, "Texto extraído: ${rawText.take(80)}..., conf=${parsed.confidence}")
         return OcrPropuesta(
             marca = parsed.marca,
             talla = parsed.talla,
@@ -64,7 +84,7 @@ object ManifiestoOcrEngine {
             fechaTemporada = parsed.fechaTemporada,
             confidence = parsed.confidence,
             rawText = rawText,
-            source = "mlkit-${parsed.confidence}"
+            source = "$tag-${parsed.confidence}"
         )
     }
 
